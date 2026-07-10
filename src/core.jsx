@@ -1,0 +1,374 @@
+/* Rhythm core - pure logic: i18n, dates, prayer math, sky, blocks, model. */
+const APP_VERSION = '2.1';
+
+/* ------------------------------------------------------------------ */
+/*  i18n — lightweight, module-level translator (same pattern as the   */
+/*  time-format flag). LANG is set once per render from settings so    */
+/*  every component below can call t() without prop-threading. Arabic  */
+/*  drives RTL layout via dir="rtl" on the root.                       */
+/* ------------------------------------------------------------------ */
+let LANG = 'en';
+const setLang = (v) => { LANG = v === 'ar' ? 'ar' : 'en'; };
+const isRTL = () => LANG === 'ar';
+// tx('English text', 'النص العربي') — falls back to English if no Arabic given.
+const tx = (en, ar) => (LANG === 'ar' && ar != null ? ar : en);
+const LANGS = [{ id: 'en', label: 'English', native: 'English' }, { id: 'ar', label: 'Arabic', native: 'العربية' }];
+
+const uid = () => (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2) + Date.now().toString(36));
+/*  Escapes all HTML first, then applies a small inline/block subset:  */
+/*  # headings, - / 1. lists, **bold**, *italic*, `code`, [text](url). */
+/*  Never injects raw HTML from note content — only our own tags.      */
+/* ------------------------------------------------------------------ */
+function mdInline(text, keyBase) {
+  // text is already HTML-escaped. Tokenize inline spans into React nodes.
+  const nodes = [];
+  let rest = text; let k = 0;
+  const push = (n) => nodes.push(typeof n === 'string' ? n : React.cloneElement(n, { key: `${keyBase}-${k++}` }));
+  const re = /(\*\*([^*]+)\*\*)|(\*([^*]+)\*)|(`([^`]+)`)|(\[([^\]]+)\]\((https?:\/\/[^\s)]+)\))/;
+  let m;
+  while ((m = re.exec(rest))) {
+    if (m.index > 0) push(rest.slice(0, m.index));
+    if (m[1]) push(<strong>{m[2]}</strong>);
+    else if (m[3]) push(<em>{m[4]}</em>);
+    else if (m[5]) push(<code className="md-code">{m[6]}</code>);
+    else if (m[7]) push(<a href={m[9]} target="_blank" rel="noreferrer">{m[8]}</a>);
+    rest = rest.slice(m.index + m[0].length);
+  }
+  if (rest) push(rest);
+  return nodes;
+}
+function renderMarkdown(src) {
+  const esc = String(src || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const lines = esc.split('\n');
+  const out = []; let list = null; let li = 0;
+  const flush = () => { if (list) { out.push(React.createElement(list.tag, { key: `l${out.length}`, className: 'md-list' }, list.items)); list = null; } };
+  lines.forEach((line, i) => {
+    const h = line.match(/^(#{1,3})\s+(.*)$/);
+    const ul = line.match(/^\s*[-*]\s+(.*)$/);
+    const ol = line.match(/^\s*\d+\.\s+(.*)$/);
+    if (h) { flush(); const lvl = h[1].length; out.push(React.createElement(`h${lvl + 3}`, { key: `h${i}`, className: 'md-h' }, mdInline(h[2], `h${i}`))); }
+    else if (ul || ol) {
+      const tag = ul ? 'ul' : 'ol'; const content = (ul || ol)[1];
+      if (!list || list.tag !== tag) { flush(); list = { tag, items: [] }; }
+      list.items.push(<li key={`li${li++}`}>{mdInline(content, `li${li}`)}</li>);
+    }
+    else if (line.trim() === '') { flush(); }
+    else { flush(); out.push(<p key={`p${i}`} className="md-p">{mdInline(line, `p${i}`)}</p>); }
+  });
+  flush();
+  return out;
+}
+function firstJsonObject(s) {
+  if (!s) return null;
+  const i = s.indexOf('{'); if (i < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let j = i; j < s.length; j++) {
+    const c = s[j];
+    if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; }
+    else if (c === '"') inStr = true;
+    else if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) return s.slice(i, j + 1); }
+  }
+  return null;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Date helpers                                                       */
+/* ------------------------------------------------------------------ */
+const pad = (n) => String(n).padStart(2, '0');
+const fmtISO = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); x.setHours(0, 0, 0, 0); return x; };
+const sameDay = (a, b) => fmtISO(a) === fmtISO(b);
+const parseISO = (iso) => { const d = new Date(String(iso) + 'T00:00:00'); d.setHours(0, 0, 0, 0); return d; };
+function startOfWeek(date, weekStartDay) {
+  const d = new Date(date); d.setHours(0, 0, 0, 0);
+  const diff = (d.getDay() - weekStartDay + 7) % 7;
+  return addDays(d, -diff);
+}
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const WEEKDAYS_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const WEEKDAYS_AR = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+const WEEKDAYS_FULL_AR = WEEKDAYS_AR;
+const MONTHS_AR = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+// Language-aware accessors — used everywhere a day/month name is shown.
+const wd = (i) => (LANG === 'ar' ? WEEKDAYS_AR : WEEKDAYS)[((i % 7) + 7) % 7];
+const wdFull = (i) => (LANG === 'ar' ? WEEKDAYS_FULL_AR : WEEKDAYS_FULL)[((i % 7) + 7) % 7];
+const mon = (i) => (LANG === 'ar' ? MONTHS_AR : MONTHS)[((i % 12) + 12) % 12];
+const weekdayFullList = () => (LANG === 'ar' ? WEEKDAYS_FULL_AR : WEEKDAYS_FULL);
+
+/* ------------------------------------------------------------------ */
+/*  Living sky — the day's ambient light and landscape, driven by the   */
+/*  clock. Interpolated continuously between reference points, same     */
+/*  technique as a dynamic wallpaper.                                   */
+/* ------------------------------------------------------------------ */
+const SKY_KEYFRAMES = [
+  { h: 0,     top: [15, 20, 42],  bot: [10, 30, 42],  night: 1,    glow: [90, 100, 130], token: [220, 228, 240], waveBack: [15, 45, 55],  waveFront: [10, 35, 45], discY: 0.20 },
+  { h: 4.25,  top: [30, 35, 60],  bot: [45, 55, 75],  night: 0.7,  glow: [130, 120, 140],token: [225, 220, 225], waveBack: [35, 60, 70],  waveFront: [20, 45, 55], discY: 0.50 },
+  { h: 5.833, top: [253, 235, 201],bot:[247, 201, 137],night: 0,   glow: [247, 166, 90], token: [251, 225, 150], waveBack: [224, 140, 95], waveFront:[178, 95, 60], discY: 0.82 },
+  { h: 9,     top: [250, 225, 175],bot:[240, 180, 120],night: 0,   glow: [250, 215, 150],token: [255, 240, 210], waveBack: [214, 130, 80], waveFront:[168, 88, 52], discY: 0.50 },
+  { h: 12.917,top: [252, 220, 165],bot:[236, 155, 90], night: 0,   glow: [255, 235, 190],token: [255, 246, 220], waveBack: [210, 120, 70], waveFront:[160, 80, 46], discY: 0.14 },
+  { h: 16.5,  top: [235, 180, 120],bot:[233, 140, 80], night: 0,   glow: [250, 210, 140],token: [250, 220, 140], waveBack: [196, 105, 60], waveFront:[150, 72, 40], discY: 0.42 },
+  { h: 19,    top: [74, 59, 99],  bot: [229, 138, 94], night: 0.15,glow: [242, 166, 90], token: [242, 166, 90],  waveBack: [161, 88, 55], waveFront: [110, 55, 32],discY: 0.80 },
+  { h: 20.5,  top: [46, 35, 75],  bot: [130, 80, 80],  night: 0.6, glow: [215, 180, 160],token: [225, 205, 200], waveBack: [60, 45, 55],  waveFront: [35, 28, 35], discY: 0.60 },
+  { h: 21.25, top: [24, 26, 55],  bot: [60, 45, 65],   night: 0.85,glow: [200, 200, 220],token: [215, 220, 235], waveBack: [25, 40, 50],  waveFront: [15, 28, 36], discY: 0.35 },
+  { h: 24,    top: [15, 20, 42],  bot: [10, 30, 42],   night: 1,   glow: [90, 100, 130], token: [220, 228, 240], waveBack: [15, 45, 55],  waveFront: [10, 35, 45], discY: 0.20 },
+];
+const lerpN = (a, b, t) => a + (b - a) * t;
+const lerpArr = (a, b, t) => a.map((v, i) => Math.round(lerpN(v, b[i], t)));
+const rgbStr = (a) => `rgb(${a[0]}, ${a[1]}, ${a[2]})`;
+const rgbaStr = (a, alpha) => `rgba(${a[0]}, ${a[1]}, ${a[2]}, ${alpha})`;
+function skyAt(hourFloat) {
+  const h = ((hourFloat % 24) + 24) % 24;
+  let i = 0; while (i < SKY_KEYFRAMES.length - 1 && SKY_KEYFRAMES[i + 1].h <= h) i++;
+  const a = SKY_KEYFRAMES[i], b = SKY_KEYFRAMES[Math.min(i + 1, SKY_KEYFRAMES.length - 1)];
+  const span = (b.h - a.h) || 1;
+  const t = Math.max(0, Math.min(1, (h - a.h) / span));
+  return {
+    top: lerpArr(a.top, b.top, t), bot: lerpArr(a.bot, b.bot, t), night: lerpN(a.night, b.night, t),
+    glow: lerpArr(a.glow, b.glow, t), token: lerpArr(a.token, b.token, t),
+    waveBack: lerpArr(a.waveBack, b.waveBack, t), waveFront: lerpArr(a.waveFront, b.waveFront, t),
+    discY: lerpN(a.discY, b.discY, t),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Prayer blocks                                                      */
+/* ------------------------------------------------------------------ */
+const BLOCKS = [
+  { id: 'fajr',    name: 'Fajr',    ar: 'الفجر',  startKey: 'Fajr',    endKey: 'Sunrise', hint: 'Quiet, front-loaded deep work', hintAr: 'عمل عميق هادئ في أول اليوم', refHour: 4.25 },
+  { id: 'morning', name: 'Morning', ar: 'الضحى',  startKey: 'Sunrise', endKey: 'Dhuhr',   hint: 'The long productive stretch',   hintAr: 'الفترة المنتجة الطويلة', refHour: 5.833 },
+  { id: 'dhuhr',   name: 'Dhuhr',   ar: 'الظهر',  startKey: 'Dhuhr',   endKey: 'Asr',     hint: 'Midday — meetings, calls',      hintAr: 'منتصف اليوم — اجتماعات ومكالمات', refHour: 12.917 },
+  { id: 'asr',     name: 'Asr',     ar: 'العصر',  startKey: 'Asr',     endKey: 'Maghrib', hint: 'Afternoon follow-through',      hintAr: 'متابعة بعد الظهر', refHour: 16.5 },
+  { id: 'maghrib', name: 'Maghrib', ar: 'المغرب', startKey: 'Maghrib', endKey: 'Isha',    hint: 'Wind down, family',             hintAr: 'استرخاء ووقت العائلة', refHour: 19.75 },
+  { id: 'isha',    name: 'Isha',    ar: 'العشاء', startKey: 'Isha',    endKey: null,      hint: 'Reading, light planning',       hintAr: 'قراءة وتخطيط خفيف', refHour: 21.25 },
+].map((b) => { const s = skyAt(b.refHour); return { ...b, accent: rgbStr(s.token), accentDeep: rgbStr(s.token.map((c) => Math.round(c * 0.42))), tint: rgbaStr(s.glow, 0.14) }; });
+const blockById = (id) => BLOCKS.find((b) => b.id === id) || BLOCKS[1];
+// Language-aware block name/hint. In Arabic the Arabic name is primary.
+const bName = (b) => (LANG === 'ar' ? b.ar : b.name);
+const bSub = (b) => (LANG === 'ar' ? '' : b.ar);
+const bHint = (b) => (LANG === 'ar' ? b.hintAr : b.hint);
+const vBlock = (id) => (BLOCKS.some((x) => x.id === id) ? id : 'morning');
+const timeOrder = (str) => { const m = String(str || '').match(/(\d{1,2}):(\d{2})/); return m ? Number(m[1]) * 60 + Number(m[2]) : 100000; };
+const minutesOf = (t) => { const m = String(t || '').match(/(\d{1,2}):(\d{2})/); return m ? Number(m[1]) * 60 + Number(m[2]) : null; };
+
+function parseRange(str) {
+  if (!str) return null;
+  const s = String(str).toLowerCase().replace(/[\u2012\u2013\u2014\u2015]/g, '-').replace(/\bto\b/g, '-')
+    .replace(/\bmidnight\b/g, '12:00am').replace(/\bnoon\b/g, '12:00pm');
+  const parts = s.split('-').map((x) => x.trim()).filter((x) => /\d/.test(x));
+  if (!parts.length) return null;
+  const glob = (s.match(/am|pm/) || [])[0];
+  const toMin = (part, fb) => {
+    const m = part.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+    if (!m) return null;
+    let h = Number(m[1]); const min = Number(m[2] || 0); const mer = m[3] || fb;
+    if (mer === 'pm' && h !== 12) h += 12;
+    if (mer === 'am' && h === 12) h = 0;
+    return h * 60 + min;
+  };
+  const startMer = (parts[0].match(/am|pm/) || [])[0];
+  const endMer = parts[1] ? (parts[1].match(/am|pm/) || [])[0] : null;
+  const start = toMin(parts[0], startMer || endMer || glob);
+  const end = parts[1] != null ? toMin(parts[1], endMer || startMer || glob) : null;
+  if (start == null) return null;
+  return { start, end };
+}
+function inWindow(start, end, cur) { if (end == null) return false; return end > start ? (cur >= start && cur < end) : (cur >= start || cur < end); }
+function activeBlockAt(timings, curMin) {
+  const fajr = minutesOf(timings.Fajr), sun = minutesOf(timings.Sunrise), dhuhr = minutesOf(timings.Dhuhr),
+    asr = minutesOf(timings.Asr), magh = minutesOf(timings.Maghrib), isha = minutesOf(timings.Isha);
+  if (fajr == null) return 'morning';
+  if (curMin >= fajr && curMin < sun) return 'fajr';
+  if (curMin >= sun && curMin < dhuhr) return 'morning';
+  if (curMin >= dhuhr && curMin < asr) return 'dhuhr';
+  if (curMin >= asr && curMin < magh) return 'asr';
+  if (curMin >= magh && curMin < isha) return 'maghrib';
+  return 'isha';
+}
+function windowBounds() {
+  const n = new Date();
+  return { start: new Date(n.getFullYear(), n.getMonth() - 1, 1), end: new Date(n.getFullYear(), n.getMonth() + 3, 0) };
+}
+const DEFAULT_TIMINGS = { Fajr: '04:15', Sunrise: '05:50', Dhuhr: '12:55', Asr: '16:30', Maghrib: '19:45', Isha: '21:15' };
+const cleanTime = (t) => (t ? (String(t).match(/\d{1,2}:\d{2}/)?.[0] || '') : '');
+// Times are always STORED as 24h "HH:MM"; this formats for display. 12h is the default.
+let TIME_24 = false;
+const setTime24 = (v) => { TIME_24 = !!v; };
+const fmtTime = (hhmm) => {
+  const m = String(hhmm || '').match(/(\d{1,2}):(\d{2})/); if (!m) return hhmm || '';
+  const h = Number(m[1]), mn = m[2];
+  if (TIME_24) return `${pad(h)}:${mn}`;
+  const ap = h < 12 ? 'AM' : 'PM'; const h12 = ((h + 11) % 12) + 1;
+  return `${h12}:${mn} ${ap}`;
+};
+
+/* ---- Local prayer-time calculation (Egyptian Authority, Shafi'i Asr) ---- */
+const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+const dsin = (d) => Math.sin(d * D2R), dcos = (d) => Math.cos(d * D2R), dtan = (d) => Math.tan(d * D2R);
+const darcsin = (x) => R2D * Math.asin(x), darccos = (x) => R2D * Math.acos(x);
+const darctan2 = (y, x) => R2D * Math.atan2(y, x), darccot = (x) => R2D * Math.atan(1 / x);
+const fixAngle = (a) => { a = a - 360 * Math.floor(a / 360); return a < 0 ? a + 360 : a; };
+const fixHour = (h) => { h = h - 24 * Math.floor(h / 24); return h < 0 ? h + 24 : h; };
+function julianDay(y, m, d) { if (m <= 2) { y -= 1; m += 12; } const A = Math.floor(y / 100); const B = 2 - A + Math.floor(A / 4); return Math.floor(365.25 * (y + 4716)) + Math.floor(30.6001 * (m + 1)) + d + B - 1524.5; }
+function sunPosition(jd) {
+  const D = jd - 2451545.0;
+  const g = fixAngle(357.529 + 0.98560028 * D);
+  const q = fixAngle(280.459 + 0.98564736 * D);
+  const L = fixAngle(q + 1.915 * dsin(g) + 0.020 * dsin(2 * g));
+  const e = 23.439 - 0.00000036 * D;
+  const decl = darcsin(dsin(e) * dsin(L));
+  const RA = fixHour(darctan2(dcos(e) * dsin(L), dcos(L)) / 15);
+  return { decl, eqt: q / 15 - RA };
+}
+function toHM(hours) { let h = fixHour(hours + 0.5 / 60); const hh = Math.floor(h); const mm = Math.floor((h - hh) * 60); return `${pad(hh)}:${pad(mm)}`; }
+function computePrayerTimes(date, lat, lng, tz, fajrAngle, ishaAngle, asrFactor) {
+  const jd = julianDay(date.getFullYear(), date.getMonth() + 1, date.getDate()) - lng / (15 * 24);
+  const adjust = tz - lng / 15;
+  const declOf = (t) => sunPosition(jd + t / 24).decl;
+  const eqtOf = (t) => sunPosition(jd + t / 24).eqt;
+  const dhuhr = fixHour(12 - eqtOf(12));
+  const angleTime = (angle, t, ccw) => {
+    const decl = declOf(t);
+    const x = (-dsin(angle) - dsin(lat) * dsin(decl)) / (dcos(lat) * dcos(decl));
+    const tt = (1 / 15) * darccos(Math.max(-1, Math.min(1, x)));
+    return dhuhr + (ccw ? -tt : tt);
+  };
+  const asrTime = (t) => { const decl = declOf(t); const angle = -darccot(asrFactor + dtan(Math.abs(lat - decl))); return angleTime(angle, t, false); };
+  const out = {
+    Fajr: angleTime(fajrAngle, dhuhr, true), Sunrise: angleTime(0.833, dhuhr, true), Dhuhr: dhuhr,
+    Asr: asrTime(dhuhr), Maghrib: angleTime(0.833, dhuhr, false), Isha: angleTime(ishaAngle, dhuhr, false),
+  };
+  const r = {}; for (const k of Object.keys(out)) r[k] = toHM(out[k] + adjust); return r;
+}
+const CAIRO = { lat: 30.0444, lng: 31.2357, fajrAngle: 19.5, ishaAngle: 17.5, asrFactor: 1 };
+
+const LABEL_SWATCHES = ['#1F6F8B', '#4C7A34', '#8A5A9E', '#B23A6B', '#B7791F', '#2F6F6A', '#9C4221', '#3454D1', '#6B7280', '#0E7C66'];
+const DEFAULT_LABELS = [
+  { id: uid(), name: 'Newsroom',  color: '#1F6F8B' },
+  { id: uid(), name: 'Reporting', color: '#4C7A34' },
+  { id: uid(), name: 'Personal',  color: '#8A5A9E' },
+  { id: uid(), name: 'Admin',     color: '#B7791F' },
+];
+// Settings schema rev 2 (v1.1): `labels` are the colored task tags (formerly
+// "projects"); `projects` is now a distinct list of long-term projects with
+// their own goals, linked labels, and progress log.
+const DEFAULT_SETTINGS = {
+  rev: 2,
+  lang: 'en',
+  labels: DEFAULT_LABELS,
+  projects: [],
+  habits: [],
+  pin: null,           // { hash, salt } — soft lock, not encryption
+  apiKey: '',          // optional Anthropic API key for the brain-dump sorter (stored locally only)
+  weekStartDay: 6,
+  prayerGate: true,
+  time24: false,
+  prayer: { useLive: true, city: 'Cairo', country: 'Egypt', method: 5, customTimes: { ...DEFAULT_TIMINGS } },
+};
+
+/* Long-term project shape:
+   { id, name, color, goal, unit, target, deadline, startDate, entries:[{id,date,amount,note}] }
+   Tasks link to a project via task.projectRef (optional). */
+const newProject = () => ({
+  id: uid(), name: tx('New project', 'مشروع جديد'), color: LABEL_SWATCHES[Math.floor(Math.random() * LABEL_SWATCHES.length)],
+  goal: '', unit: tx('pages', 'صفحة'), target: 100, deadline: '', startDate: fmtISO(new Date()), entries: [],
+});
+const projectProgress = (p) => (p.entries || []).reduce((s, e) => s + (Number(e.amount) || 0), 0);
+// Pace math: honours the start date. "Expected today" is measured from start,
+// not from an assumed day one; a project whose start is in the future reads as
+// "not started" rather than instantly behind.
+function projectPace(p) {
+  const done = projectProgress(p);
+  const target = Number(p.target) || 0;
+  const pct = target > 0 ? Math.min(1, done / target) : 0;
+  const start = p.startDate ? parseISO(p.startDate) : null;
+  const end = p.deadline ? parseISO(p.deadline) : null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const DAY = 86400000;
+  let expected = null, onPace = null, elapsedFrac = null, daysLeft = null, perDay = null, projectedEnd = null, notStarted = false;
+  if (end) daysLeft = Math.round((end - today) / DAY);
+  if (target > 0 && start && end && end > start) {
+    if (today < start) {
+      // Hasn't begun yet — expected progress is zero, and being at zero is fine.
+      notStarted = true; elapsedFrac = 0; expected = 0; onPace = true;
+    } else {
+      elapsedFrac = Math.max(0, Math.min(1, (today - start) / (end - start)));
+      expected = target * elapsedFrac;
+      onPace = done >= expected - 1e-9;
+    }
+    const remaining = Math.max(0, target - done);
+    // Needed daily rate runs from the *effective* start: if the project hasn't
+    // started yet, the window is start→deadline, not today→deadline — so a
+    // future project shows the true rate it will demand, not a diluted one.
+    const from = today < start ? start : today;
+    const daysRemaining = Math.max(1, Math.ceil((end - from) / DAY));
+    perDay = remaining / daysRemaining;
+    // projected finish at the observed rate, measured from the actual start date
+    const daysSoFar = Math.max(1, Math.round((today - start) / DAY));
+    const rate = today > start ? done / daysSoFar : 0;
+    if (rate > 0) projectedEnd = addDays(today, Math.ceil(remaining / rate));
+  }
+  return { done, target, pct, expected, onPace, elapsedFrac, daysLeft, perDay, projectedEnd, notStarted, remaining: Math.max(0, target - done) };
+}
+
+/* ---- Habits ---- */
+// A habit is a daily commitment. Completion is stored per ISO date in habit.log.
+// Streak = consecutive completed days ending at (and including) the given date.
+const LABEL_ICON = null;
+const newHabit = () => ({ id: uid(), name: tx('New habit', 'عادة جديدة'), color: LABEL_SWATCHES[Math.floor(Math.random() * LABEL_SWATCHES.length)], block: 'morning', createdAt: fmtISO(new Date()), log: {} });
+const habitDoneOn = (h, iso) => !!(h.log && h.log[iso]);
+function habitStreak(h, uptoISO) {
+  const upto = uptoISO ? parseISO(uptoISO) : (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();
+  let n = 0; let cur = new Date(upto);
+  // If today isn't done yet, the streak is whatever ran up to yesterday.
+  if (!habitDoneOn(h, fmtISO(cur))) cur = addDays(cur, -1);
+  while (habitDoneOn(h, fmtISO(cur))) { n++; cur = addDays(cur, -1); if (n > 3660) break; }
+  return n;
+}
+// Glow intensity 0..7 — brighter with longer streaks, capped at a week.
+const glowLevel = (streak) => Math.max(0, Math.min(7, streak));
+
+// Centralised settings migration — used by both first load and backup import so
+// old (rev-1) backups upgrade the same way. In rev 1 the `projects` field held
+// the colored tags; those become `labels`, and `projects` is freed for the new
+// long-term projects feature.
+function migrateSettings(s) {
+  if (!s || typeof s !== 'object') return { ...DEFAULT_SETTINGS };
+  const base = { ...DEFAULT_SETTINGS, ...s, prayer: { ...DEFAULT_SETTINGS.prayer, ...(s.prayer || {}) } };
+  if ((s.rev || 1) < 2) {
+    base.labels = Array.isArray(s.labels) ? s.labels : (Array.isArray(s.projects) ? s.projects : DEFAULT_LABELS);
+    base.projects = Array.isArray(s.longProjects) ? s.longProjects : [];
+    base.rev = 2;
+  } else {
+    base.labels = Array.isArray(s.labels) ? s.labels : DEFAULT_LABELS;
+    base.projects = Array.isArray(s.projects) ? s.projects : [];
+  }
+  base.lang = s.lang === 'ar' ? 'ar' : 'en';
+  base.habits = Array.isArray(s.habits) ? s.habits : [];
+  base.pin = s.pin && s.pin.hash ? s.pin : null;
+  base.apiKey = typeof s.apiKey === 'string' ? s.apiKey : '';
+  return base;
+}
+// SHA-256 hex of pin+salt. This is a soft lock (deters casual access); it is not
+// full-disk encryption and the underlying data remains readable to anyone with
+// technical access to the device's storage.
+async function hashPin(pin, salt) {
+  try {
+    const enc = new TextEncoder().encode(`${salt}:${pin}`);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    // Fallback if SubtleCrypto is unavailable — weaker, still non-plaintext.
+    let h = 0; const str = `${salt}:${pin}`; for (let i = 0; i < str.length; i++) { h = (h * 31 + str.charCodeAt(i)) | 0; } return 'x' + (h >>> 0).toString(16);
+  }
+}
+const mkSubs = (arr) => (arr || []).map((s) => ({ id: uid(), title: typeof s === 'string' ? s : s.title, done: false }));
+const PRAYER_BLOCKS = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'];
+const mm2 = (m) => `${pad(Math.floor((m % 1440) / 60))}:${pad(m % 60)}`;
+// Structured start/end with lazy migration from the old free-text `time` field.
+const tStartMin = (t) => { if (t.start) return minutesOf(t.start); const r = parseRange(t.time); return r ? r.start : null; };
+const tEndMin = (t) => { if (t.end) return minutesOf(t.end); if (t.start) return null; const r = parseRange(t.time); return r && r.end != null ? r.end : null; };
+const timeLabel = (t) => { if (t.start) return t.end ? `${fmtTime(t.start)}–${fmtTime(t.end)}` : fmtTime(t.start); return t.time || ''; };
+
+export { hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
