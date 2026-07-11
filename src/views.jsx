@@ -271,7 +271,9 @@ function PinScreen({ onVerify, onSuccess }) {
 /* ------------------------------------------------------------------ */
 /*  Settings                                                           */
 /* ------------------------------------------------------------------ */
-function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, storageOk, onClose, onClearDay, dayLabel, onLang }) {
+function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncSignIn, onSyncSignOut, onSyncNow, storageOk, onClose, onClearDay, dayLabel, onLang }) {
+  const [syncEmail, setSyncEmail] = useState('');
+  const [syncPass, setSyncPass] = useState('');
   const [local, setLocal] = useState(settings);
   const [tab, setTab] = useState('general');
   // Keep the local editing copy in sync when the parent persists settings from
@@ -310,6 +312,7 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
     ['recurring', tx('Recurring', 'المتكررة'), Repeat],
     ['prayer', tx('Prayer', 'الصلاة'), Clock],
     ['security', tx('Security', 'الأمان'), Shield],
+    ['sync', tx('Sync', 'المزامنة'), Repeat],
     ['backup', tx('Backup', 'النسخ'), Copy],
   ];
 
@@ -400,6 +403,38 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
             </div>
           )}
 
+          {tab === 'sync' && (
+            <div className="sect">
+              <div className="sect-h"><Repeat size={13} /> {tx('Cross-device sync (optional)', 'المزامنة بين الأجهزة (اختياري)')}</div>
+              <div className="security-note"><Shield size={15} /><p>{tx('Sync copies your planner to a Supabase project you own, so your other devices can pull it. Turning this on means your data leaves the device — protected by your account, resolved per item by most-recent-edit. Leave it off to stay fully local. Setup steps are in the README (one SQL snippet, two values to paste below).', 'تنسخ المزامنة مخططك إلى مشروع Supabase تملكه أنت لتسحبه أجهزتك الأخرى. تفعيلها يعني خروج بياناتك من الجهاز — محمية بحسابك، وتُحسم التعارضات لكل عنصر بالأحدث تعديلًا. اتركها معطّلة لتبقى محليًا بالكامل. خطوات الإعداد في README.')}</p></div>
+              <div className="pin-set-grid">
+                <label><span>{tx('Supabase URL', 'عنوان Supabase')}</span><input className="time-input" style={{ letterSpacing: 0, textAlign: 'start' }} value={local.syncUrl || ''} onChange={(e) => patch({ syncUrl: e.target.value.trim() })} placeholder="https://xyz.supabase.co" autoComplete="off" /></label>
+                <label><span>{tx('Anon key', 'المفتاح العام')}</span><input className="time-input" type="password" style={{ letterSpacing: 0, textAlign: 'start' }} value={local.syncAnonKey || ''} onChange={(e) => patch({ syncAnonKey: e.target.value.trim() })} placeholder="eyJ…" autoComplete="off" /></label>
+              </div>
+              {sync && sync.user ? (
+                <>
+                  <p className="hint-text" style={{ color: 'var(--verdigris)', fontWeight: 700 }}><KeyRound size={12} /> {tx('Signed in as', 'مسجّل باسم')} {sync.user.email}{sync.lastSync ? ` · ${tx('last sync', 'آخر مزامنة')} ${sync.lastSync.toLocaleTimeString()}` : ''}</p>
+                  <div className="io-actions">
+                    <button className="primary" onClick={onSyncNow} disabled={sync.busy}>{sync.busy ? tx('Syncing…', 'جارٍ المزامنة…') : tx('Sync now', 'زامن الآن')}</button>
+                    <button className="ghost sm" onClick={onSyncSignOut} disabled={sync.busy}>{tx('Sign out', 'تسجيل الخروج')}</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="pin-set-grid" style={{ marginTop: 10 }}>
+                    <label><span>{tx('Email', 'البريد')}</span><input className="time-input" type="email" style={{ letterSpacing: 0, textAlign: 'start' }} value={syncEmail} onChange={(e) => setSyncEmail(e.target.value)} autoComplete="off" /></label>
+                    <label><span>{tx('Password', 'كلمة المرور')}</span><input className="time-input" type="password" style={{ letterSpacing: 0, textAlign: 'start' }} value={syncPass} onChange={(e) => setSyncPass(e.target.value)} autoComplete="off" /></label>
+                  </div>
+                  <div className="io-actions">
+                    <button className="primary" disabled={!syncEmail || !syncPass || (sync && sync.busy)} onClick={() => onSyncSignIn(syncEmail, syncPass, false)}>{tx('Sign in', 'تسجيل الدخول')}</button>
+                    <button className="ghost sm" disabled={!syncEmail || !syncPass || (sync && sync.busy)} onClick={() => onSyncSignIn(syncEmail, syncPass, true)}>{tx('Create account', 'إنشاء حساب')}</button>
+                  </div>
+                </>
+              )}
+              {sync && sync.msg && <p className="hint-text" style={{ marginTop: 8 }}>{sync.msg}</p>}
+            </div>
+          )}
+
           {tab === 'backup' && (
             <div className="sect">
               <div className="sect-h"><Copy size={13} /> {tx('Backup & move devices', 'النسخ الاحتياطي ونقل الأجهزة')}</div>
@@ -407,7 +442,11 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
               <div className="drive-box"><div className="drive-title">{tx('Local-only by design', 'محلي فقط حسب التصميم')}</div><p className="hint-text" style={{ marginTop: 0, marginBottom: 0 }}>{tx('Everything lives in this browser on this device — nothing is sent anywhere. That means backups are on you: export a file now and then, especially before clearing browser data.', 'كل شيء محفوظ في هذا المتصفح على هذا الجهاز — لا يُرسل شيء إلى أي مكان. لذا فالنسخ الاحتياطي مسؤوليتك: صدّر ملفًا بين الحين والآخر، خاصة قبل مسح بيانات المتصفح.')}</p></div>
               <div className="drive-box" style={{ marginTop: 12 }}><div className="drive-title"><Sparkles size={13} /> {tx('AI sorting (optional)', 'الفرز الذكي (اختياري)')}</div>
                 <p className="hint-text" style={{ marginTop: 0, marginBottom: 8 }}>{tx('The brain-dump sorter on the Plan page calls the Anthropic API directly from your browser and needs your own API key. The key is stored only on this device and is the one exception to "nothing is sent anywhere" — your dump text goes to Anthropic when you use it.', 'يستدعي فارز تفريغ الأفكار في صفحة التخطيط واجهة Anthropic مباشرة من متصفحك ويحتاج إلى مفتاحك الخاص. يُحفظ المفتاح على هذا الجهاز فقط، وهو الاستثناء الوحيد لمبدأ «لا يُرسل شيء» — إذ يُرسل نص التفريغ إلى Anthropic عند استخدامه.')}</p>
-                <input className="proj-log-note" style={{ width: '100%' }} type="password" value={local.apiKey || ''} onChange={(e) => patch({ apiKey: e.target.value.trim() })} placeholder="sk-ant-…" autoComplete="off" />
+                <div className="pin-set-grid" style={{ marginBottom: 8 }}>
+                  <label><span>{tx('Provider', 'المزوّد')}</span><select className="time-input" value={local.aiProvider || 'anthropic'} onChange={(e) => patch({ aiProvider: e.target.value })}><option value="anthropic">Anthropic (Claude)</option><option value="gemini">{tx('Google Gemini — free tier', 'Google Gemini — خطة مجانية')}</option></select></label>
+                  <label><span>{tx('API key', 'المفتاح')}</span><input className="time-input" type="password" value={local.apiKey || ''} onChange={(e) => patch({ apiKey: e.target.value.trim() })} placeholder={local.aiProvider === 'gemini' ? 'AIza…' : 'sk-ant-…'} autoComplete="off" style={{ letterSpacing: 0, textAlign: 'start' }} /></label>
+                </div>
+                <p className="hint-text" style={{ margin: 0 }}>{local.aiProvider === 'gemini' ? tx('Free keys: aistudio.google.com/apikey. Note: on the free tier Google may use prompts to improve its products.', 'مفاتيح مجانية: aistudio.google.com/apikey. ملاحظة: قد تستخدم Google المدخلات في الخطة المجانية لتحسين منتجاتها.') : tx('Keys: console.anthropic.com (paid).', 'المفاتيح: console.anthropic.com (مدفوع).')}</p>
               </div>
               <p className="hint-text" style={{ marginTop: 14 }}>{tx('Export a backup file, and import it here (or on a new device/browser) to restore.', 'صدّر ملف نسخة احتياطية، واستورده هنا (أو على جهاز/متصفح جديد) للاستعادة.')}</p>
               <div className="io-actions"><button className="ghost sm" onClick={doExport} disabled={busy}>{tx('Generate export', 'إنشاء نسخة للتصدير')}</button>{exp && <button className="ghost sm" onClick={doCopy}>{tx('Copy', 'نسخ')}</button>}{exp && <button className="ghost sm" onClick={doDownload}>{tx('Download .json', 'تنزيل .json')}</button>}</div>

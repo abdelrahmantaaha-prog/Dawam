@@ -36,5 +36,8 @@ export async function rawList(prefix) {
   return out;
 }
 export const loadKey = async (k) => { const r = await rawGet(k); if (r == null) return null; try { return JSON.parse(r); } catch { return null; } };
-export const saveKey = async (k, o) => { await rawSet(k, JSON.stringify(o)); };
+// Optional post-save observer (used by sync to mark keys dirty). One subscriber is enough.
+let saveHook = null;
+export const setSaveHook = (fn) => { saveHook = fn; };
+export const saveKey = async (k, o) => { await rawSet(k, JSON.stringify(o)); try { saveHook && saveHook(k); } catch { /* observers must not break saves */ } };
 export const storageAvailable = () => LS;

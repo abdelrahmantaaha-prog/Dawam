@@ -1,5 +1,5 @@
 /* Rhythm core - pure logic: i18n, dates, prayer math, sky, blocks, model. */
-const APP_VERSION = '2.1';
+const APP_VERSION = '2.2';
 
 /* ------------------------------------------------------------------ */
 /*  i18n — lightweight, module-level translator (same pattern as the   */
@@ -260,7 +260,10 @@ const DEFAULT_SETTINGS = {
   projects: [],
   habits: [],
   pin: null,           // { hash, salt } — soft lock, not encryption
-  apiKey: '',          // optional Anthropic API key for the brain-dump sorter (stored locally only)
+  apiKey: '',          // optional API key for the brain-dump sorter (stored locally only)
+  aiProvider: 'anthropic', // 'anthropic' (paid) or 'gemini' (free tier)
+  syncUrl: '',         // optional Supabase project URL for cross-device sync
+  syncAnonKey: '',     // Supabase anon (public) key — safe to store client-side by design
   weekStartDay: 6,
   prayerGate: true,
   time24: false,
@@ -348,6 +351,9 @@ function migrateSettings(s) {
   base.habits = Array.isArray(s.habits) ? s.habits : [];
   base.pin = s.pin && s.pin.hash ? s.pin : null;
   base.apiKey = typeof s.apiKey === 'string' ? s.apiKey : '';
+  base.aiProvider = s.aiProvider === 'gemini' ? 'gemini' : 'anthropic';
+  base.syncUrl = typeof s.syncUrl === 'string' ? s.syncUrl : '';
+  base.syncAnonKey = typeof s.syncAnonKey === 'string' ? s.syncAnonKey : '';
   return base;
 }
 // SHA-256 hex of pin+salt. This is a soft lock (deters casual access); it is not

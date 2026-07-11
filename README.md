@@ -45,11 +45,63 @@ The import path accepts every prior backup schema and migrates in place.
 
 ## AI brain-dump sorting (optional)
 
-The "Brain dump" box on the Plan page can file free text into your day using
-the Anthropic API. It needs your own API key: **Settings → Backup → AI sorting**.
-The key is stored only on this device. When you use the sorter, your dump text
-is sent to Anthropic — this is the single exception to local-only, it is off
-unless you add a key, and the rest of the app never touches the network.
+The "Brain dump" box on the Plan page can file free text into your day using an
+AI model. Pick a provider and add your key under **Settings → Backup → AI
+sorting** (stored only on this device):
+
+- **Google Gemini — free tier.** Get a key at aistudio.google.com/apikey, no
+  card needed. Caveat: on the free tier, Google may use prompts to improve its
+  products.
+- **Anthropic (Claude)** — paid; keys at console.anthropic.com.
+
+When you use the sorter, your dump text is sent to the chosen provider — an
+opt-in exception to local-only; the rest of the app never touches the network.
+
+## Cross-device sync (optional)
+
+Off by default. When enabled, your planner is copied to a **Supabase project
+you own**, and your other devices pull from it. Conflicts resolve per item by
+most-recent edit — right for one person on a few devices, not for teams.
+
+One-time setup (~10 minutes):
+
+1. Create a free project at supabase.com. Note the **Project URL** and **anon
+   public key** (Settings → API in the Supabase dashboard).
+2. In the Supabase **SQL Editor**, run:
+
+   ```sql
+   create table if not exists kv (
+     user_id uuid not null default auth.uid(),
+     key text not null,
+     value text not null,
+     updated_at timestamptz not null default now(),
+     primary key (user_id, key)
+   );
+   alter table kv enable row level security;
+   create policy "own rows" on kv
+     for all using (auth.uid() = user_id)
+     with check (auth.uid() = user_id);
+   ```
+
+3. (Recommended) In **Authentication → Providers → Email**, turn OFF "Confirm
+   email" — otherwise account creation requires clicking a confirmation link
+   before sign-in works.
+4. In Rhythm: **Settings → Sync** → paste the URL and anon key → **Create
+   account** with an email + password → it syncs immediately, seeding the
+   account with this device's data.
+5. On your other device: same URL/key → **Sign in** with the same account →
+   everything pulls down.
+
+Afterwards it's automatic: local edits push a couple of seconds after you make
+them, and the app pulls on launch, on returning to it, and on regaining
+network. "Sync now" in Settings forces a round trip.
+
+What sync changes about the privacy story: your data now lives in your Supabase
+project as plain JSON, protected by your account and row-level security — no
+longer device-only. The anon key is designed to be public; RLS is what keeps
+rows private. Deletes don't propagate (old weeks pruned locally linger
+remotely, harmlessly). Device clocks decide conflicts; for one person this is
+fine.
 
 ## Project layout
 

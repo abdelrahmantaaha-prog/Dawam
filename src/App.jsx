@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
 import { hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
-import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
+import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
+import { createSync } from './sync.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
@@ -382,6 +383,83 @@ export default function Rhythm() {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
+  /* ---- cross-device sync (optional, Supabase, last-write-wins per key) ---- */
+  const [syncUser, setSyncUser] = useState(null);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
+  const [lastSync, setLastSync] = useState(null);
+  const lastAutoSyncRef = useRef(0);
+  const pushTimerRef = useRef(null);
+  // Applying a remote key routes into live state WITHOUT re-persisting (the sync
+  // engine already wrote storage) — persisting here would echo the key back.
+  const applyRemote = useCallback((key, raw) => {
+    let v; try { v = JSON.parse(raw); } catch { return; }
+    if (key === 'planner:settings') { const m = migrateSettings(v); setLang(m.lang); setSettings(m); if (!m.pin) setLocked(false); }
+    else if (key === 'planner:pool') { const arr = Array.isArray(v) ? v : []; poolRef.current = arr; setPool(arr); }
+    else if (key === 'planner:templates') { setTemplates(Array.isArray(v) ? v : []); }
+    else if (key.startsWith('planner:week:')) {
+      const iso = key.slice('planner:week:'.length);
+      weeksRef.current[iso] = v;
+      if (iso === fmtISO(weekStart)) { weekRef.current = v; setWeek(v); }
+    }
+    bumpRefresh();
+  }, [weekStart]);
+  const syncRef = useRef(null);
+  if (!syncRef.current) {
+    syncRef.current = createSync({
+      getConfig: () => ({ url: settingsRef.current.syncUrl, anonKey: settingsRef.current.syncAnonKey }),
+      onRemote: (k, raw) => applyRemoteRef.current(k, raw),
+    });
+  }
+  const applyRemoteRef = useRef(applyRemote);
+  useEffect(() => { applyRemoteRef.current = applyRemote; }, [applyRemote]);
+  const syncConfigured = !!(settings.syncUrl && settings.syncAnonKey);
+  const runSync = useCallback(async (label = '') => {
+    if (!syncRef.current) return;
+    setSyncBusy(true); setSyncMsg('');
+    try {
+      const r = await syncRef.current.syncNow();
+      if (!r.skipped) { setLastSync(new Date()); if (label === 'manual') setSyncMsg(tx(`Synced — ${r.pulled} pulled, ${r.pushed} pushed.`, `تمت المزامنة — ${r.pulled} وارد، ${r.pushed} صادر.`)); }
+      else if (label === 'manual') setSyncMsg(r.skipped === 'signed out' ? tx('Sign in first.', 'سجّل الدخول أولًا.') : tx('Add the Supabase URL and anon key first.', 'أضف عنوان Supabase والمفتاح أولًا.'));
+    } catch (e) { setSyncMsg(String(e.message || e)); }
+    setSyncBusy(false);
+  }, []);
+  // local edits → dirty queue → debounced push (a full sync, so pulls ride along)
+  useEffect(() => {
+    setSaveHook((key) => {
+      syncRef.current && syncRef.current.markDirty(key);
+      if (!settingsRef.current.syncUrl || !settingsRef.current.syncAnonKey) return;
+      clearTimeout(pushTimerRef.current);
+      pushTimerRef.current = setTimeout(() => { runSync('auto'); }, 2500);
+    });
+    return () => { setSaveHook(null); clearTimeout(pushTimerRef.current); };
+  }, [runSync]);
+  // sync on startup (once signed in), on returning to the app, and on regaining network
+  useEffect(() => {
+    if (!ready || !syncConfigured) return;
+    let stop = false;
+    (async () => { const u = await syncRef.current.getUser(); if (stop) return; setSyncUser(u); if (u) runSync('start'); })();
+    const maybeAuto = () => {
+      if (document.hidden) return;
+      if (Date.now() - lastAutoSyncRef.current < 15000) return;
+      lastAutoSyncRef.current = Date.now();
+      runSync('auto');
+    };
+    document.addEventListener('visibilitychange', maybeAuto);
+    window.addEventListener('online', maybeAuto);
+    return () => { stop = true; document.removeEventListener('visibilitychange', maybeAuto); window.removeEventListener('online', maybeAuto); };
+  }, [ready, syncConfigured, runSync]);
+  const syncSignIn = async (email, pass, create) => {
+    setSyncBusy(true); setSyncMsg('');
+    try {
+      const u = create ? await syncRef.current.signUp(email, pass) : await syncRef.current.signIn(email, pass);
+      setSyncUser(u);
+      if (u) { setSyncMsg(create ? tx('Account created. If sign-in fails, confirm the email Supabase sent you.', 'تم إنشاء الحساب. إذا فشل الدخول، أكّد البريد الذي أرسله Supabase.') : ''); runSync('start'); }
+    } catch (e) { setSyncMsg(String(e.message || e)); }
+    setSyncBusy(false);
+  };
+  const syncSignOut = async () => { await syncRef.current.signOut(); setSyncUser(null); setSyncMsg(tx('Signed out. Data stays on this device.', 'تم تسجيل الخروج. تبقى البيانات على هذا الجهاز.')); };
+
   /* ---- scheduled task ops (operate on the displayed week) ---- */
   const tasksFor = (dayIdx, blockId) =>
     week.tasks.filter((t) => t.day === dayIdx && t.block === blockId).sort((a, b) => (a.done - b.done) || ((tStartMin(a) ?? 100000) - (tStartMin(b) ?? 100000)) || (a.order - b.order));
@@ -657,7 +735,7 @@ export default function Rhythm() {
     if (!dump.trim()) return;
     // Local-only PWA: the sorter needs your own Anthropic API key, stored on-device
     // in Settings. Without one, explain rather than fail cryptically.
-    if (!settings.apiKey) { setParseError(tx('The sorter needs an Anthropic API key — add one under Settings → Backup → AI sorting. It is stored only on this device.', 'يحتاج الفرز إلى مفتاح Anthropic API — أضفه من الإعدادات ← النسخ ← الفرز الذكي. يُحفظ على هذا الجهاز فقط.')); return; }
+    if (!settings.apiKey) { setParseError(tx('The sorter needs an API key — pick a provider and add a key under Settings → Backup → AI sorting (Google Gemini has a free tier). Stored only on this device.', 'يحتاج الفرز إلى مفتاح — اختر مزوّدًا وأضف مفتاحًا من الإعدادات ← النسخ ← الفرز الذكي (لدى Google Gemini خطة مجانية). يُحفظ على هذا الجهاز فقط.')); return; }
     setParsing(true); setParseError(''); setPreview(null);
     const dayList = Array.from({ length: 7 }, (_, i) => { const d = addDays(weekStart, i); return `${i}=${wdFull(d.getDay())} ${d.getDate()} ${mon(d.getMonth())}`; }).join(', ');
     const existing = week.tasks.map((t) => `{id:"${t.id}", title:"${t.title.replace(/"/g, "'")}", day:${t.day}, block:"${t.block}"}`).join('\n');
@@ -685,11 +763,18 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     try {
       let res;
       try {
-        res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4096, system, messages: [{ role: 'user', content: dump.trim() }] }) });
+        if (settings.aiProvider === 'gemini') {
+          // Gemini's OpenAI-compatible endpoint; free-tier keys from aistudio.google.com/apikey
+          res = await fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` }, body: JSON.stringify({ model: 'gemini-2.0-flash', max_tokens: 4096, messages: [{ role: 'system', content: system }, { role: 'user', content: dump.trim() }] }) });
+        } else {
+          res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4096, system, messages: [{ role: 'user', content: dump.trim() }] }) });
+        }
       } catch { setParseError("Can't reach the sorter — this view can't call Claude's API. Add items by hand instead."); setParsing(false); return; }
       if (!res.ok) { setParseError(`Sorter request failed (HTTP ${res.status}). Add items by hand instead.`); setParsing(false); return; }
       const data = await res.json();
-      const text = (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+      const text = settings.aiProvider === 'gemini'
+        ? (data.choices?.[0]?.message?.content || '')
+        : (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
       let clean = text.replace(/```json|```/g, '').trim();
       const a = clean.indexOf('{'); const b = clean.lastIndexOf('}');
       if (a > -1 && b > a) clean = clean.slice(a, b + 1);
@@ -1075,6 +1160,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           templates={templates} onAddTemplate={addTemplate} onUpdTemplate={updTemplate} onDelTemplate={delTemplate}
           onExport={buildExport} onImport={applyImport}
           onSetPin={setPin}
+          sync={{ configured: syncConfigured, user: syncUser, busy: syncBusy, msg: syncMsg, lastSync }}
+          onSyncSignIn={syncSignIn} onSyncSignOut={syncSignOut} onSyncNow={() => runSync('manual')}
           storageOk={storageOk} onClose={() => setShowSettings(false)}
           onClearDay={() => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.day !== selectedDay) }); flash(tx('Day cleared.', 'تم مسح اليوم.')); }}
           dayLabel={`${wdFull(selectedDate.getDay())} ${selectedDate.getDate()} ${mon(selectedDate.getMonth())}`} />

@@ -7,6 +7,35 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ---
 
+## [2.2] — 2026-07-10
+
+Optional cross-device sync via your own Supabase project, and a free-tier AI
+option for the brain-dump sorter.
+
+### Added
+- **Cross-device sync (opt-in).** Settings → Sync: paste the URL and anon key
+  of a Supabase project you own, create an account, and your planner syncs —
+  local edits push a couple of seconds after you make them; the app pulls on
+  launch, on returning to it, and on regaining network. Conflicts resolve per
+  item by most-recent edit (right for one person on a few devices). Edits made
+  before enabling sync queue locally and seed the account on first sign-in.
+  Setup is a one-time ~10-minute job (one SQL snippet); steps in the README.
+  Leaving it off keeps the app fully local, exactly as before.
+- **Google Gemini as a free AI-sorting provider.** Settings → Backup → AI
+  sorting now has a provider choice: Anthropic (paid) or Gemini, whose free
+  tier needs no card (aistudio.google.com/apikey). Caveat stated in-app: on the
+  free tier Google may use prompts to improve its products.
+
+### Notes
+- Enabling sync changes the privacy story: data leaves the device to your own
+  Supabase project, protected by your account and row-level security.
+- The sync merge logic is covered by 8 unit tests including a two-device
+  convergence round trip (29 tests total). The live Supabase round-trip should
+  be verified against your own project after setup.
+- Deletes don't propagate: weeks pruned locally linger remotely, harmlessly.
+
+---
+
 ## [2.1] — 2026-07-08
 
 Fixes the broken PIN, makes projects lighter-weight (optional targets,
