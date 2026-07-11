@@ -50,8 +50,11 @@ AI model. Pick a provider and add your key under **Settings → Backup → AI
 sorting** (stored only on this device):
 
 - **Google Gemini — free tier.** Get a key at aistudio.google.com/apikey, no
-  card needed. Caveat: on the free tier, Google may use prompts to improve its
-  products.
+  card needed. Rhythm calls Flash-Lite via the `gemini-flash-lite-latest`
+  alias (with a pinned fallback), so Google's model retirements don't break the
+  sorter. Free-tier limits are per-minute and per-day (HTTP 429 when exceeded;
+  daily quota resets at midnight Pacific). Caveat: on the free tier, Google may
+  use prompts to improve its products.
 - **Anthropic (Claude)** — paid; keys at console.anthropic.com.
 
 When you use the sorter, your dump text is sent to the chosen provider — an
@@ -91,6 +94,28 @@ One-time setup (~10 minutes):
    account with this device's data.
 5. On your other device: same URL/key → **Sign in** with the same account →
    everything pulls down.
+
+### Google sign-in (optional, ~10 minutes once)
+
+Email + password works with zero extra setup. To sign in with your Google
+account instead:
+
+1. In **Google Cloud Console** (console.cloud.google.com) → APIs & Services →
+   Credentials → **Create OAuth client ID** (type: Web application). If asked,
+   configure the consent screen first (External, just app name + your email;
+   "Testing" status is fine for personal use — add yourself as a test user).
+2. Under **Authorized redirect URIs**, add your Supabase callback:
+   `https://<your-project>.supabase.co/auth/v1/callback`
+3. Copy the client ID and secret into **Supabase → Authentication → Providers
+   → Google** and enable it.
+4. In **Supabase → Authentication → URL Configuration**, set the Site URL to
+   your deployed app URL (and add it to the redirect allowlist).
+5. In Rhythm → Settings → Sync → **Continue with Google**. The app redirects
+   to Google and back, then syncs.
+
+Note: use the same account method consistently — an email/password account and
+a Google account with the same address are separate users in Supabase, with
+separate data.
 
 Afterwards it's automatic: local edits push a couple of seconds after you make
 them, and the app pulls on launch, on returning to it, and on regaining

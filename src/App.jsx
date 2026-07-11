@@ -459,6 +459,11 @@ export default function Rhythm() {
     setSyncBusy(false);
   };
   const syncSignOut = async () => { await syncRef.current.signOut(); setSyncUser(null); setSyncMsg(tx('Signed out. Data stays on this device.', 'تم تسجيل الخروج. تبقى البيانات على هذا الجهاز.')); };
+  const syncGoogle = async () => {
+    setSyncMsg('');
+    try { await syncRef.current.signInWithGoogle(); /* redirects away; session is picked up on return */ }
+    catch (e) { setSyncMsg(String(e.message || e)); }
+  };
 
   /* ---- scheduled task ops (operate on the displayed week) ---- */
   const tasksFor = (dayIdx, blockId) =>
@@ -764,12 +769,18 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       let res;
       try {
         if (settings.aiProvider === 'gemini') {
-          // Gemini's OpenAI-compatible endpoint; free-tier keys from aistudio.google.com/apikey
-          res = await fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` }, body: JSON.stringify({ model: 'gemini-2.0-flash', max_tokens: 4096, messages: [{ role: 'system', content: system }, { role: 'user', content: dump.trim() }] }) });
+          // Gemini's OpenAI-compatible endpoint; free-tier keys from aistudio.google.com/apikey.
+          // The "-latest" alias tracks the newest Flash-Lite so model retirements
+          // (2.0-flash died 2026-03-03 and broke exactly this call) can't silently
+          // return; a pinned fallback covers the alias being unavailable.
+          const geminiCall = (model) => fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` }, body: JSON.stringify({ model, max_tokens: 4096, messages: [{ role: 'system', content: system }, { role: 'user', content: dump.trim() }] }) });
+          res = await geminiCall('gemini-flash-lite-latest');
+          if (res.status === 404 || res.status === 400) res = await geminiCall('gemini-2.5-flash-lite');
         } else {
           res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4096, system, messages: [{ role: 'user', content: dump.trim() }] }) });
         }
       } catch { setParseError("Can't reach the sorter — this view can't call Claude's API. Add items by hand instead."); setParsing(false); return; }
+      if (res.status === 429) { setParseError(settings.aiProvider === 'gemini' ? tx('Gemini free-tier limit hit (per-minute or daily). Wait a minute and retry — daily quotas reset at midnight Pacific.', 'تم بلوغ حد Gemini المجاني (بالدقيقة أو اليومي). انتظر دقيقة وأعد المحاولة — تتجدد الحصة اليومية منتصف الليل بتوقيت المحيط الهادئ.') : tx('Rate limit hit (HTTP 429). Wait a moment and retry.', 'تم بلوغ حد المعدل (429). انتظر قليلًا وأعد المحاولة.')); setParsing(false); return; }
       if (!res.ok) { setParseError(`Sorter request failed (HTTP ${res.status}). Add items by hand instead.`); setParsing(false); return; }
       const data = await res.json();
       const text = settings.aiProvider === 'gemini'
@@ -879,8 +890,35 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     ? (cleanTime(todayTimings.Dhuhr) || '')
     : (gateBlock.endKey ? cleanTime(todayTimings[gateBlock.endKey]) || '' : '');
   const gateActive = settings.prayerGate !== false && !!gateId && prayerDayCol >= 0 && !prayersToday[gateId];
+  // Hard window: the first 15 minutes of a prayer's own period belong to the
+  // prayer — the gate cannot be dismissed, not even by marking it done. The
+  // modulo handles the overnight Isha wrap. (The Fajr-through-morning carryover
+  // is long past its start by then, so it is never hard-locked.)
+  const PRAYER_HARD_MIN = 15;
+  const gateStartMin = gateStart ? minutesOf(gateStart) : null;
+  const gateElapsed = gateStartMin == null ? null : ((curMin - gateStartMin) + 1440) % 1440;
+  const gateHard = gateActive && gateElapsed != null && gateElapsed < PRAYER_HARD_MIN;
+  const gateHardLeft = gateHard ? PRAYER_HARD_MIN - gateElapsed : 0;
   const usedTpl = {}; week.tasks.forEach((t) => { if (t.day === selectedDay && t.templateId) usedTpl[t.templateId] = (usedTpl[t.templateId] || 0) + 1; });
   const isSelectedToday = sameDay(selectedDate, new Date());
+  // Habits missed on recent days (yesterday back, max a week, not before the
+  // habit existed). Checking one off here backfills that day's log. Plain
+  // computation, deliberately not a hook: this point in the component is below
+  // an early return, where hooks are illegal.
+  const overdueHabits = (() => {
+    const out = [];
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    for (const h of (settings.habits || [])) {
+      const created = h.createdAt ? parseISO(h.createdAt) : null;
+      for (let i = 1; i <= 7; i++) {
+        const d = addDays(today, -i);
+        if (created && d < created) break;
+        if (!habitDoneOn(h, fmtISO(d))) out.push({ h, iso: fmtISO(d), date: d });
+      }
+    }
+    out.sort((a, b) => a.date - b.date);
+    return out;
+  })();
   // Habits belonging to the current period, shown in Now. Tied to the same
   // calendar day the Now list uses (yesterday during the overnight-Isha window).
   const nowHabitISO = fmtISO(inOvernightIsha ? addDays(todayMid, -1) : todayMid);
@@ -972,11 +1010,12 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {view === 'overdue' && (
         <div className="hero-card">
           <SkyScene sky={sky} stars={stars} light={heroLight}
-            label={tx('Overdue', 'المتأخرات')} time={String(overdue.length)}
-            blockName={overdue.length === 1 ? tx('task needs attention', 'مهمة تحتاج انتباهك') : tx('tasks need attention', 'مهام تحتاج انتباهك')} blockAr=""
-            range={overdue.length ? `${tx('oldest', 'الأقدم')} — ${wd(overdue[0].date.getDay())} ${overdue[0].date.getDate()} ${mon(overdue[0].date.getMonth())}` : tx("you're all caught up", 'أنجزت كل شيء')} />
+            label={tx('Overdue', 'المتأخرات')} time={String(overdue.length + overdueHabits.length)}
+            blockName={(overdue.length + overdueHabits.length) === 1 ? tx('item needs attention', 'عنصر يحتاج انتباهك') : tx('items need attention', 'عناصر تحتاج انتباهك')} blockAr=""
+            range={overdue.length ? `${tx('oldest', 'الأقدم')} — ${wd(overdue[0].date.getDay())} ${overdue[0].date.getDate()} ${mon(overdue[0].date.getMonth())}` : overdueHabits.length ? `${overdueHabits.length} ${tx('missed habits', 'عادات فائتة')}` : tx("you're all caught up", 'أنجزت كل شيء')} />
           <div className="hero-sheet">
-            {overdue.length === 0 ? (<div className="overdue-empty"><CheckCircle2 size={26} /><p>{tx("Nothing overdue. You're on top of it.", 'لا متأخرات. أنت متحكّم في الأمور.')}</p></div>) : (<>
+            {overdue.length === 0 && overdueHabits.length === 0 ? (<div className="overdue-empty"><CheckCircle2 size={26} /><p>{tx("Nothing overdue. You're on top of it.", 'لا متأخرات. أنت متحكّم في الأمور.')}</p></div>) : (<>
+            {overdue.length === 0 ? null : (<>
               <div className="od-bar">
                 <span className="od-bar-count">{overdue.length} {tr.overdue}</span>
                 <div className="od-bar-actions">
@@ -1006,6 +1045,21 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                   </div>
                   <button className="od-edit" onClick={() => editOverdue(it)} aria-label={tx('Edit', 'تعديل')} title={tx('Edit', 'تعديل')}><Settings size={15} /></button>
                 </li>); })}</ul>
+            </>)}
+            {overdueHabits.length > 0 && (
+              <div className="od-habits">
+                <div className="od-habits-h"><Flame size={13} /> {tx('Missed habits', 'عادات فائتة')} <span className="proj-rollup">{overdueHabits.length}</span></div>
+                <ul className="od-list">{overdueHabits.map(({ h, iso, date }) => (
+                  <li key={h.id + iso} className="od-item">
+                    <button className="tcheck" style={{ color: '#B23A3A' }} onClick={() => toggleHabitDay(h.id, iso)} aria-label={tx('Mark kept', 'تم الالتزام')}><Circle size={18} /></button>
+                    <div className="od-col">
+                      <span className="od-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><FlameGlyph level={glowLevel(habitStreak(h, iso))} size={12} /> {h.name}</span>
+                      <span className="od-meta"><span className="od-date">{wd(date.getDay())} {date.getDate()} {mon(date.getMonth())}</span><span className="od-block" style={{ color: blockById(h.block || 'morning').accentDeep }}>{bName(blockById(h.block || 'morning'))}</span></span>
+                    </div>
+                  </li>
+                ))}</ul>
+              </div>
+            )}
             </>)}
           </div>
         </div>
@@ -1118,6 +1172,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         <HabitsView
           habits={settings.habits} sky={sky} stars={stars} heroLight={heroLight}
           onAdd={addHabit} onUpd={updHabit} onDel={delHabit} onToggleDay={toggleHabitDay}
+          onFocus={(h, mins) => startFocus({ id: h.id, title: h.name }, mins)}
         />
       )}
 
@@ -1161,7 +1216,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           onExport={buildExport} onImport={applyImport}
           onSetPin={setPin}
           sync={{ configured: syncConfigured, user: syncUser, busy: syncBusy, msg: syncMsg, lastSync }}
-          onSyncSignIn={syncSignIn} onSyncSignOut={syncSignOut} onSyncNow={() => runSync('manual')}
+          onSyncSignIn={syncSignIn} onSyncSignOut={syncSignOut} onSyncGoogle={syncGoogle} onSyncNow={() => runSync('manual')}
           storageOk={storageOk} onClose={() => setShowSettings(false)}
           onClearDay={() => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.day !== selectedDay) }); flash(tx('Day cleared.', 'تم مسح اليوم.')); }}
           dayLabel={`${wdFull(selectedDate.getDay())} ${selectedDate.getDate()} ${mon(selectedDate.getMonth())}`} />
@@ -1210,8 +1265,12 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             <span className="gate-eyebrow">{tx('Time for prayer', 'حان وقت الصلاة')}</span>
             <span className="gate-name">{bName(gateBlock)} {bSub(gateBlock) && <span className="gate-ar">{bSub(gateBlock)}</span>}</span>
             <span className="gate-time">{fmtTime(gateStart)}{gateEnd ? `–${fmtTime(gateEnd)}` : ''}</span>
-            <p className="gate-note">{gateId === 'fajr' && activeId === 'morning' ? tx('Fajr stays locked through the morning until Dhuhr.', 'يبقى قفل الفجر طوال الصباح حتى الظهر.') : tx("Rhythm is paused until you've prayed.", 'التطبيق متوقف حتى تصلّي.')}</p>
-            <button className="primary gate-btn" onClick={() => togglePrayer(gateId, inOvernightIsha ? addDays(todayMid, -1) : todayMid)}><CheckCircle2 size={16} /> {tx("I've prayed", 'صلّيت')} {bName(gateBlock)}</button>
+            <p className="gate-note">{gateHard ? tx('This time belongs to the prayer.', 'هذا الوقت للصلاة.') : gateId === 'fajr' && activeId === 'morning' ? tx('Fajr stays locked through the morning until Dhuhr.', 'يبقى قفل الفجر طوال الصباح حتى الظهر.') : tx("Rhythm is paused until you've prayed.", 'التطبيق متوقف حتى تصلّي.')}</p>
+            {gateHard ? (
+              <div className="gate-hard"><Lock size={15} /> {gateHardLeft} {tx('min', 'د')}</div>
+            ) : (
+              <button className="primary gate-btn" onClick={() => togglePrayer(gateId, inOvernightIsha ? addDays(todayMid, -1) : todayMid)}><CheckCircle2 size={16} /> {tx("I've prayed", 'صلّيت')} {bName(gateBlock)}</button>
+            )}
           </div>
         </div>
       )}

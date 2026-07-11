@@ -7,6 +7,45 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ---
 
+## [2.3] — 2026-07-11
+
+Fixes the Gemini 429, adds Google sign-in for sync, hardens the prayer gate,
+and rounds out habits (period grouping, focus, missed-days recovery).
+
+### Fixed
+- **Gemini sorting no longer 429s on a fresh key.** v2.2 called
+  `gemini-2.0-flash`, a model Google retired on 2026-03-03 — requests to it
+  come back as quota errors. The sorter now uses **Flash-Lite** (ample for
+  sorting a task list, and the most generous free-tier limits) via the
+  `gemini-flash-lite-latest` alias, which tracks the newest version so future
+  retirements can't silently break it, with a pinned fallback. Genuine 429s now
+  show a useful message: free-tier limits are per-minute and per-day, with the
+  daily quota resetting at midnight Pacific.
+
+### Added
+- **The first 15 minutes of each prayer are unskippable.** When a prayer's
+  period begins, the gate shows a countdown instead of the "I've prayed"
+  button — that time belongs to the prayer and cannot be dismissed. After 15
+  minutes the button returns and the gate behaves as before. (The Fajr
+  carry-through-morning lock is past its own first 15 minutes by definition,
+  so it stays dismissible.)
+- **Habits are grouped by time period** on the Habits page — Fajr through Isha
+  in day order, each group under its period heading.
+- **Focus on a habit.** Open a habit and start a 5–45 minute focus lock on it,
+  identical to the task focus lock, with the habit's name on the lock screen.
+- **Missed habits appear in Overdue** — each unkept day from the past week
+  (never earlier than the habit's creation) is listed with its date and
+  period; checking one backfills that day's log and feeds the streak. The
+  Overdue count now includes them.
+- **"Continue with Google"** in Settings → Sync. The in-app code is done; it
+  needs a one-time ~10-minute setup on your side (Google Cloud OAuth client +
+  enabling the Google provider in Supabase) — exact steps in the README.
+  Email + password continues to work with no setup. Note: the same email via
+  password and via Google are *different* Supabase users with separate data —
+  pick one method and stick with it.
+
+---
+
 ## [2.2] — 2026-07-10
 
 Optional cross-device sync via your own Supabase project, and a free-tier AI

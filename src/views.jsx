@@ -4,7 +4,7 @@ import { hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DE
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
-function HabitsView({ habits, sky, stars, heroLight, onAdd, onUpd, onDel, onToggleDay }) {
+function HabitsView({ habits, sky, stars, heroLight, onAdd, onUpd, onDel, onToggleDay, onFocus }) {
   const [openId, setOpenId] = useState(null);
   const todayISO = fmtISO(new Date());
   const doneToday = habits.filter((h) => habitDoneOn(h, todayISO)).length;
@@ -21,19 +21,28 @@ function HabitsView({ habits, sky, stars, heroLight, onAdd, onUpd, onDel, onTogg
             <p>{tx('Commit to something daily — reading, exercise, writing morning pages. Check it off each day; the longer your streak, the brighter it glows, up to a full week.', 'التزم بشيء يومي — القراءة، الرياضة، الكتابة. علّمه كل يوم؛ وكلما طالت سلسلتك زاد توهّجها، حتى أسبوع كامل.')}</p>
           </div>
         )}
-        {habits.map((h) => (
-          <HabitCard key={h.id} h={h} todayISO={todayISO} open={openId === h.id}
-            onOpen={() => setOpenId(openId === h.id ? null : h.id)}
-            onUpd={(patch) => onUpd(h.id, patch)} onDel={() => { onDel(h.id); setOpenId(null); }}
-            onToggle={(iso) => onToggleDay(h.id, iso)} />
-        ))}
+        {BLOCKS.map((b) => {
+          const group = habits.filter((h) => (h.block || 'morning') === b.id);
+          if (!group.length) return null;
+          return (
+            <div key={b.id} className="habit-group">
+              <div className="habit-group-h" style={{ color: b.accentDeep }}>{bName(b)}{bSub(b) ? ` · ${bSub(b)}` : ''}</div>
+              {group.map((h) => (
+                <HabitCard key={h.id} h={h} todayISO={todayISO} open={openId === h.id}
+                  onOpen={() => setOpenId(openId === h.id ? null : h.id)}
+                  onUpd={(patch) => onUpd(h.id, patch)} onDel={() => { onDel(h.id); setOpenId(null); }}
+                  onToggle={(iso) => onToggleDay(h.id, iso)} onFocus={(mins) => onFocus(h, mins)} />
+              ))}
+            </div>
+          );
+        })}
         <button className="plan-day-btn proj-add" onClick={() => { const nh = onAdd(); setOpenId(nh.id); }}><Plus size={15} /> {tx('New habit', 'عادة جديدة')}</button>
       </div>
     </div>
   );
 }
 
-function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle }) {
+function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const streak = habitStreak(h, todayISO);
   const glow = glowLevel(streak);
@@ -67,6 +76,13 @@ function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle }) {
           <div className="proj-grid2">
             <label><span>{tx('Colour', 'اللون')}</span><input className="swatch proj-swatch" type="color" value={h.color} onChange={(e) => onUpd({ color: e.target.value })} /></label>
             <label><span>{tx('Day period', 'فترة اليوم')}</span><select className="time-input" value={h.block || 'morning'} onChange={(e) => onUpd({ block: e.target.value })}>{BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}</select></label>
+          </div>
+          <div className="proj-field">
+            <span>{tx('Focus on this habit', 'ركّز على هذه العادة')}</span>
+            <div className="focus-choices">
+              {[5, 10, 15, 20, 30, 45].map((mn) => (<button key={mn} className="ghost sm" onClick={() => onFocus(mn)}>{mn}{tx('m', 'د')}</button>))}
+            </div>
+            <p className="hint-text" style={{ margin: '4px 0 0' }}>{tx('Locks Rhythm for the duration, like a task focus lock. You can end early.', 'يقفل التطبيق طوال المدة، مثل قفل تركيز المهام. يمكنك الإنهاء مبكرًا.')}</p>
           </div>
           <div className="proj-edit-foot">
             {confirmDel ? (
@@ -271,7 +287,7 @@ function PinScreen({ onVerify, onSuccess }) {
 /* ------------------------------------------------------------------ */
 /*  Settings                                                           */
 /* ------------------------------------------------------------------ */
-function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncSignIn, onSyncSignOut, onSyncNow, storageOk, onClose, onClearDay, dayLabel, onLang }) {
+function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncSignIn, onSyncSignOut, onSyncGoogle, onSyncNow, storageOk, onClose, onClearDay, dayLabel, onLang }) {
   const [syncEmail, setSyncEmail] = useState('');
   const [syncPass, setSyncPass] = useState('');
   const [local, setLocal] = useState(settings);
@@ -428,7 +444,9 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                   <div className="io-actions">
                     <button className="primary" disabled={!syncEmail || !syncPass || (sync && sync.busy)} onClick={() => onSyncSignIn(syncEmail, syncPass, false)}>{tx('Sign in', 'تسجيل الدخول')}</button>
                     <button className="ghost sm" disabled={!syncEmail || !syncPass || (sync && sync.busy)} onClick={() => onSyncSignIn(syncEmail, syncPass, true)}>{tx('Create account', 'إنشاء حساب')}</button>
+                    <button className="ghost sm" disabled={sync && sync.busy} onClick={onSyncGoogle} title={tx('Requires enabling the Google provider in Supabase — see README', 'يتطلب تفعيل مزوّد Google في Supabase — انظر README')}>{tx('Continue with Google', 'المتابعة بحساب Google')}</button>
                   </div>
+                  <p className="hint-text" style={{ marginTop: 6 }}>{tx('Google sign-in needs a one-time setup in Supabase (README → Google sign-in). Email + password works with no extra setup.', 'يتطلب دخول Google إعدادًا لمرة واحدة في Supabase (انظر README). البريد وكلمة المرور يعملان دون إعداد إضافي.')}</p>
                 </>
               )}
               {sync && sync.msg && <p className="hint-text" style={{ marginTop: 8 }}>{sync.msg}</p>}

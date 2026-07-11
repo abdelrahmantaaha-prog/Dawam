@@ -41,7 +41,18 @@ export function createSync({ getConfig, onRemote, clientFactory = createClient, 
 
   const getUser = async () => {
     const c = ensureClient(); if (!c) return null;
-    try { const { data } = await c.auth.getSession(); return data?.session?.user || null; } catch { return null; }
+    try {
+      let { data } = await c.auth.getSession();
+      // After an OAuth redirect lands back on the app, supabase-js exchanges the
+      // code asynchronously — give it a moment before concluding "signed out".
+      if (!data?.session && typeof window !== 'undefined' && /[?#&](code|access_token)=/.test(window.location.href)) {
+        for (let i = 0; i < 6 && !data?.session; i++) {
+          await new Promise((r) => setTimeout(r, 350));
+          ({ data } = await c.auth.getSession());
+        }
+      }
+      return data?.session?.user || null;
+    } catch { return null; }
   };
 
   /* Called (via the storage save hook) on every local write. */
@@ -121,6 +132,15 @@ export function createSync({ getConfig, onRemote, clientFactory = createClient, 
     return data.user;
   };
   const signOut = async () => { const c = ensureClient(); if (c) await c.auth.signOut(); };
+  // OAuth: navigates away to Google, then back to the app; the session is
+  // detected from the URL on return (see getUser). Requires the Google provider
+  // to be enabled in Supabase and this app's URL to be in Supabase's redirect
+  // allowlist — steps in README → Google sign-in.
+  const signInWithGoogle = async () => {
+    const c = ensureClient(); if (!c) throw new Error('Enter the Supabase URL and anon key first.');
+    const { error } = await c.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
+    if (error) throw new Error(error.message);
+  };
 
-  return { markDirty, syncNow, signIn, signUp, signOut, getUser, _internals: { meta, dirty } };
+  return { markDirty, syncNow, signIn, signUp, signOut, signInWithGoogle, getUser, _internals: { meta, dirty } };
 }
