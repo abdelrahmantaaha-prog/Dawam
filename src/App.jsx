@@ -438,11 +438,28 @@ export default function Rhythm() {
   useEffect(() => {
     setSaveHook((key) => {
       syncRef.current && syncRef.current.markDirty(key);
-      if (!settingsRef.current.syncUrl || !settingsRef.current.syncAnonKey) return;
+      // Use the EFFECTIVE config (baked backend or per-device override) — not just
+      // settings.syncUrl, which is empty on the built-in backend. Without this the
+      // baked backend never auto-pushes within a session.
+      const url = settingsRef.current.syncUrl || SYNC_URL;
+      const key2 = settingsRef.current.syncAnonKey || SYNC_KEY;
+      if (!url || !key2) return;
       clearTimeout(pushTimerRef.current);
       pushTimerRef.current = setTimeout(() => { runSync('auto'); }, 2500);
     });
     return () => { setSaveHook(null); clearTimeout(pushTimerRef.current); };
+  }, [runSync]);
+  // Flush pending edits the moment the app is hidden or closed, so tasks added
+  // right before backgrounding aren't stranded until the next launch.
+  useEffect(() => {
+    const flush = () => {
+      if (!document.hidden) return;
+      clearTimeout(pushTimerRef.current);
+      runSync('auto');
+    };
+    document.addEventListener('visibilitychange', flush);
+    window.addEventListener('pagehide', flush);
+    return () => { document.removeEventListener('visibilitychange', flush); window.removeEventListener('pagehide', flush); };
   }, [runSync]);
   // sync on startup (once signed in), on returning to the app, and on regaining network
   useEffect(() => {

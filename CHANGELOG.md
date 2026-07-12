@@ -47,6 +47,13 @@ plus a project-link bug fix and quality passes on recurring tasks and Overdue.
 ### Fixed
 - **A task's project link no longer disappears when moved to the backlog**
   from a day (or back). Both directions now carry the link.
+- **Scheduled tasks now sync like everything else (patch).** On the built-in
+  backend, the in-session auto-push was gated on a per-device URL that is empty
+  when the baked backend is used — so weekly task edits only reached the server
+  on the next app launch, appearing as "tasks don't sync" while settings and
+  backlog (changed in earlier sessions) seemed fine. Auto-push now keys off the
+  effective backend, and pending edits are flushed the instant the app is
+  hidden or closed, so tasks added right before backgrounding aren't stranded.
 
 ---
 
