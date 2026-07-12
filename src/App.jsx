@@ -3,6 +3,7 @@ import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, 
 import { hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { createSync } from './sync.js';
+import { SYNC_URL, SYNC_KEY } from './config.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
@@ -45,6 +46,7 @@ export default function Rhythm() {
   const [toast, setToast] = useState('');
   const [locked, setLocked] = useState(false);          // PIN lock screen
   const [foldedTasks, setFoldedTasks] = useState(() => new Set()); // collapsed subtask lists (Now/Overdue)
+  const [editingTpl, setEditingTpl] = useState(null); // recurring task edited from the plan sidebar
   const toggleFoldTask = (id) => setFoldedTasks((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [sideTab, setSideTab] = useState('recurring');  // 'recurring' | 'backlog' — combined plan sidebar
   const pendingEditRef = useRef(null);                  // open editor after jumping to an overdue task's week
@@ -78,7 +80,14 @@ export default function Rhythm() {
       if (merged.pin && merged.pin.hash) setLocked(true);
       const poolArr = Array.isArray(pl) ? pl : (pl && pl.items) || [];
       setPool(poolArr); poolRef.current = poolArr;
-      setTemplates(Array.isArray(tpl) ? tpl : []);
+      // Legacy recurring tasks stored a free-text `time`; parse it once into
+      // proper start/end so the editor can use real time inputs.
+      const tplMigrated = (Array.isArray(tpl) ? tpl : []).map((tp) => {
+        if (tp.start || tp.end || !tp.time) return tp;
+        const r = parseRange(tp.time);
+        return r ? { ...tp, start: mm2(r.start), end: r.end != null ? mm2(r.end) : '', time: '' } : tp;
+      });
+      setTemplates(tplMigrated);
       const ws = startOfWeek(new Date(), merged.weekStartDay);
       setWeekStart(ws);
       const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -407,13 +416,14 @@ export default function Rhythm() {
   const syncRef = useRef(null);
   if (!syncRef.current) {
     syncRef.current = createSync({
-      getConfig: () => ({ url: settingsRef.current.syncUrl, anonKey: settingsRef.current.syncAnonKey }),
+      // Baked operator backend by default; per-device override kept under Advanced.
+      getConfig: () => ({ url: settingsRef.current.syncUrl || SYNC_URL, anonKey: settingsRef.current.syncAnonKey || SYNC_KEY }),
       onRemote: (k, raw) => applyRemoteRef.current(k, raw),
     });
   }
   const applyRemoteRef = useRef(applyRemote);
   useEffect(() => { applyRemoteRef.current = applyRemote; }, [applyRemote]);
-  const syncConfigured = !!(settings.syncUrl && settings.syncAnonKey);
+  const syncConfigured = !!((settings.syncUrl || SYNC_URL) && (settings.syncAnonKey || SYNC_KEY));
   const runSync = useCallback(async (label = '') => {
     if (!syncRef.current) return;
     setSyncBusy(true); setSyncMsg('');
@@ -524,7 +534,7 @@ export default function Rhythm() {
     const t = w.tasks.find((x) => x.id === id);
     if (!t) return;
     persistWeek({ ...w, tasks: w.tasks.filter((x) => x.id !== id) });
-    persistPool([...poolRef.current, { id: uid(), title: t.title, projectId: t.projectId || null, subtasks: t.subtasks || [], notes: t.notes || [], order: Date.now() }]);
+    persistPool([...poolRef.current, { id: uid(), title: t.title, projectId: t.projectId || null, projectRef: t.projectRef || null, subtasks: t.subtasks || [], notes: t.notes || [], order: Date.now() }]);
     flash(tx('Moved to backlog.', 'نُقلت إلى قائمة الانتظار.'));
   };
   // Schedule a backlog item onto a day/block.
@@ -533,7 +543,7 @@ export default function Rhythm() {
     if (!it) return;
     persistPool(poolRef.current.filter((p) => p.id !== poolId));
     const w = weekRef.current;
-    const t = { id: uid(), title: it.title, day: dayIdx, block: blockId, projectId: it.projectId || null, time: '', done: false, subtasks: it.subtasks || [], notes: it.notes || [], order: Date.now() };
+    const t = { id: uid(), title: it.title, day: dayIdx, block: blockId, projectId: it.projectId || null, projectRef: it.projectRef || null, time: '', done: false, subtasks: it.subtasks || [], notes: it.notes || [], order: Date.now() };
     // ensure we schedule on the currently-displayed week (dayIdx is within it)
     persistWeek({ ...w, tasks: [...w.tasks, t] });
   };
@@ -542,13 +552,13 @@ export default function Rhythm() {
   // A recurring task is only ever a *definition*. Applying it copies everything
   // by value (fresh subtask ids via mkSubs in addTask/addPoolItem), so editing a
   // recurring task later never reaches back into tasks you've already added.
-  const addTemplate = (tpl) => persistTemplates((prev) => [...prev, { id: uid(), title: tpl.title || tx('New recurring task', 'مهمة متكررة جديدة'), block: vBlock(tpl.block), time: tpl.time || '', projectId: tpl.projectId || null, subtasks: (tpl.subtasks || []).map((s) => (typeof s === 'string' ? s : s.title)) }]);
+  const addTemplate = (tpl) => persistTemplates((prev) => [...prev, { id: uid(), title: tpl.title || tx('New recurring task', 'مهمة متكررة جديدة'), block: vBlock(tpl.block), start: tpl.start || '', end: tpl.end || '', time: '', projectId: tpl.projectId || null, subtasks: (tpl.subtasks || []).map((s) => (typeof s === 'string' ? s : s.title)) }]);
   const updTemplate = (id, patch) => persistTemplates((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   const delTemplate = (id) => persistTemplates((prev) => prev.filter((t) => t.id !== id));
   const templateToDay = (tplId, dayIdx, blockId) => {
     const tpl = templates.find((t) => t.id === tplId); if (!tpl) return;
     // clone subtasks (strings) so the created task shares nothing with the definition
-    addTask(dayIdx, blockId || tpl.block, tpl.title, { projectId: tpl.projectId, time: tpl.time, templateId: tpl.id, subtasks: [...(tpl.subtasks || [])] });
+    addTask(dayIdx, blockId || tpl.block, tpl.title, { projectId: tpl.projectId, start: tpl.start || '', end: tpl.end || '', time: tpl.time || '', templateId: tpl.id, subtasks: [...(tpl.subtasks || [])] });
   };
   const templateToPool = (tplId) => {
     const tpl = templates.find((t) => t.id === tplId); if (!tpl) return;
@@ -867,6 +877,11 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const clockLabel = `${((now.getHours() + 11) % 12) + 1}:${pad(now.getMinutes())} ${now.getHours() < 12 ? 'AM' : 'PM'}`;
   const nowHourFloat = now.getHours() + now.getMinutes() / 60;
   const sky = skyAt(nowHourFloat);
+  // Night = after Maghrib, before Sunrise (falls back to 19:00–06:00 if timings missing)
+  const maghribMin = minutesOf(todayTimings.Maghrib) ?? 19 * 60;
+  const sunriseMin = minutesOf(todayTimings.Sunrise) ?? 6 * 60;
+  const isNight = curMin >= maghribMin || curMin < sunriseMin;
+  const darkOn = settings.autoDark !== false && isNight;
   setTime24(settings.time24 === true);
   setLang(settings.lang === 'ar' ? 'ar' : 'en');
   const topLuma = 0.299 * sky.top[0] + 0.587 * sky.top[1] + 0.114 * sky.top[2];
@@ -901,22 +916,43 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const gateHardLeft = gateHard ? PRAYER_HARD_MIN - gateElapsed : 0;
   const usedTpl = {}; week.tasks.forEach((t) => { if (t.day === selectedDay && t.templateId) usedTpl[t.templateId] = (usedTpl[t.templateId] || 0) + 1; });
   const isSelectedToday = sameDay(selectedDate, new Date());
-  // Habits missed on recent days (yesterday back, max a week, not before the
-  // habit existed). Checking one off here backfills that day's log. Plain
-  // computation, deliberately not a hook: this point in the component is below
-  // an early return, where hooks are illegal.
+  // Prayers as built-in habits: derived views over the existing prayer log, so
+  // marking a prayer at the gate and ticking it here are the same action. Not
+  // stored in settings.habits — no duplicate state to drift.
+  const prayerDoneOn = (blockId, iso) => {
+    const d = parseISO(iso); const ws = startOfWeek(d, settings.weekStartDay);
+    const wk = weeksRef.current[fmtISO(ws)];
+    if (!wk || !wk.prayers) return false;
+    const dIdx = Math.round((d - ws) / 86400000);
+    return !!(wk.prayers[dIdx] && wk.prayers[dIdx][blockId]);
+  };
+  const prayerHabits = PRAYER_BLOCKS.map((pid) => {
+    const b = blockById(pid);
+    const log = {};
+    const today0 = new Date(); today0.setHours(0, 0, 0, 0);
+    for (let i = 0; i < 366; i++) { const iso = fmtISO(addDays(today0, -i)); if (prayerDoneOn(pid, iso)) log[iso] = 1; }
+    return { id: `prayer:${pid}`, name: tx(`${b.name} prayer`, `صلاة ${b.ar}`), color: b.accentDeep || '#3E8A6C', block: pid, prayer: true, createdAt: '', log };
+  });
+  const toggleAnyHabitDay = (id, iso) => {
+    if (String(id).startsWith('prayer:')) { togglePrayer(id.slice(7), parseISO(iso)); return; }
+    toggleHabitDay(id, iso);
+  };
+  // Overdue habits: TODAY only — habits (including built-in prayers) whose day
+  // period has fully passed without being kept. During the overnight-Isha
+  // window the new day hasn't really begun, so nothing is overdue yet. Plain
+  // computation, deliberately not a hook (below an early return).
   const overdueHabits = (() => {
+    if (inOvernightIsha) return [];
+    const activeIdx = BLOCKS.findIndex((b) => b.id === activeId);
+    const todayD = new Date(); todayD.setHours(0, 0, 0, 0);
+    const todayISO = fmtISO(todayD);
     const out = [];
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    for (const h of (settings.habits || [])) {
-      const created = h.createdAt ? parseISO(h.createdAt) : null;
-      for (let i = 1; i <= 7; i++) {
-        const d = addDays(today, -i);
-        if (created && d < created) break;
-        if (!habitDoneOn(h, fmtISO(d))) out.push({ h, iso: fmtISO(d), date: d });
-      }
+    for (const h of [...prayerHabits, ...(settings.habits || [])]) {
+      const idx = BLOCKS.findIndex((b) => b.id === (h.block || 'morning'));
+      if (idx < 0 || idx >= activeIdx) continue; // period still ahead or current
+      const done = h.prayer ? habitDoneOn(h, todayISO) : habitDoneOn(h, todayISO);
+      if (!done) out.push({ h, iso: todayISO, date: todayD });
     }
-    out.sort((a, b) => a.date - b.date);
     return out;
   })();
   // Habits belonging to the current period, shown in Now. Tied to the same
@@ -935,7 +971,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     overdue: tx('overdue', 'متأخرة'),
   };
   return (
-    <div className="rhythm" dir={isRTL() ? 'rtl' : 'ltr'} lang={LANG}>
+    <div className={`rhythm ${darkOn ? 'dark' : ''}`} dir={isRTL() ? 'rtl' : 'ltr'} lang={LANG}>
 
       <div className="page-bg" style={{ background: `linear-gradient(180deg, ${rgbStr(sky.top)}, ${rgbStr(sky.bot)} 26vh, ${rgbaStr(sky.bot, 0.6)} 52vh, ${rgbaStr(sky.bot, 0.32)} 74vh, ${rgbaStr(sky.bot, 0.12)} 90vh, rgba(244,250,246,0) 100vh)` }} aria-hidden="true" />
       <div className="page-decor" aria-hidden="true">
@@ -1051,7 +1087,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 <div className="od-habits-h"><Flame size={13} /> {tx('Missed habits', 'عادات فائتة')} <span className="proj-rollup">{overdueHabits.length}</span></div>
                 <ul className="od-list">{overdueHabits.map(({ h, iso, date }) => (
                   <li key={h.id + iso} className="od-item">
-                    <button className="tcheck" style={{ color: '#B23A3A' }} onClick={() => toggleHabitDay(h.id, iso)} aria-label={tx('Mark kept', 'تم الالتزام')}><Circle size={18} /></button>
+                    <button className="tcheck" style={{ color: '#B23A3A' }} onClick={() => toggleAnyHabitDay(h.id, iso)} aria-label={tx('Mark kept', 'تم الالتزام')}><Circle size={18} /></button>
                     <div className="od-col">
                       <span className="od-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><FlameGlyph level={glowLevel(habitStreak(h, iso))} size={12} /> {h.name}</span>
                       <span className="od-meta"><span className="od-date">{wd(date.getDay())} {date.getDate()} {mon(date.getMonth())}</span><span className="od-block" style={{ color: blockById(h.block || 'morning').accentDeep }}>{bName(blockById(h.block || 'morning'))}</span></span>
@@ -1118,6 +1154,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               onManage={() => setShowSettings(true)}
               onAddPool={(title) => addPoolItem(title)}
               onOpenPool={setEditingPool}
+              onEditTpl={setEditingTpl}
               onTogglePoolDone={togglePoolDone}
               onPoolToDay={(id) => setPlacer({ kind: 'pool', id })}
               poolDropActive={poolDragActive} poolDropOver={drag && drag.over && drag.over.type === 'pool'}
@@ -1170,8 +1207,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {/* HABITS */}
       {view === 'habits' && (
         <HabitsView
-          habits={settings.habits} sky={sky} stars={stars} heroLight={heroLight}
-          onAdd={addHabit} onUpd={updHabit} onDel={delHabit} onToggleDay={toggleHabitDay}
+          habits={[...prayerHabits, ...settings.habits]} sky={sky} stars={stars} heroLight={heroLight}
+          onAdd={addHabit} onUpd={updHabit} onDel={delHabit} onToggleDay={toggleAnyHabitDay}
           onFocus={(h, mins) => startFocus({ id: h.id, title: h.name }, mins)}
         />
       )}
@@ -1317,6 +1354,23 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 {it.kind === 'review' && <button className="danger" onClick={() => { removeTask(obj.id); wizardNext(); }}>{tx('Remove', 'إزالة')}</button>}
                 {it.kind === 'habit' && <button className="primary" onClick={() => { toggleHabitDay(obj.id, dISO); wizardNext(); }}><Flame size={15} /> {tx('Mark kept', 'تم الالتزام')}</button>}
               </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {editingTpl && (() => {
+        const tp = templates.find((x) => x.id === editingTpl);
+        if (!tp) return null;
+        return (
+          <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setEditingTpl(null); }}>
+            <div className="modal">
+              <div className="modal-head plain"><strong>{tx('Recurring task', 'مهمة متكررة')}</strong><button className="icon" onClick={() => setEditingTpl(null)}><X size={18} /></button></div>
+              <div className="modal-body">
+                <TemplateEditor tpl={tp} projects={settings.labels} onChange={(patch) => updTemplate(tp.id, patch)} onDelete={() => { delTemplate(tp.id); setEditingTpl(null); }} />
+                <p className="hint-text" style={{ marginTop: 4 }}>{tx('Edits apply to tasks you add from now on — tasks already on your calendar are untouched.', 'تسري التعديلات على ما تضيفه لاحقًا — المهام الموجودة في تقويمك لا تتغيّر.')}</p>
+              </div>
+              <div className="modal-foot"><button className="primary" onClick={() => setEditingTpl(null)}>{tx('Done', 'تم')}</button></div>
             </div>
           </div>
         );

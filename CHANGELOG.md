@@ -7,6 +7,49 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ---
 
+## [2.4] — 2026-07-12
+
+Sync becomes sign-in-and-go, prayers join habits as built-ins, the interface
+goes dark at night, and the habit glow gets the calmer rework it needed —
+plus a project-link bug fix and quality passes on recurring tasks and Overdue.
+
+### Changed
+- **Sync is now just "sign in."** The app ships with its backend built in
+  (operator-configured Supabase). Settings → Sync leads with email/password
+  and **Continue with Google**; no URLs or keys to paste. A collapsed
+  Advanced section still lets a device point at its own Supabase project.
+  Notes: the operator is custodian of synced data; an email/password account
+  and a Google account with the same address are separate users; Supabase
+  free-tier projects pause after ~a week of zero activity (one-click resume).
+- **Habit glow reworked.** The flame stays; the fuzzy box-shadow halo is
+  gone. Streak now reads as a soft warm wash from the card's edge plus an
+  **ember bar** that literally fills toward the 7-day peak (with a gentle
+  shimmer at 7). Calmer, clearer, and honest about what it measures.
+- **Missed habits in Overdue are now today-only** — habits (and prayers)
+  whose period has already passed today without being kept. The week-back
+  list is gone; nothing shows during the overnight-Isha window.
+
+### Added
+- **Prayers are built-in habits.** The five daily prayers appear on the
+  Habits page automatically — streaks, flame, ember and all — tracked from
+  the same record as the prayer gate: marking a prayer at the gate and
+  ticking it in Habits are one action. Built-ins can't be renamed or
+  deleted, and past days can be backfilled from the 7-day strip.
+- **Automatic dark mode at night** (Maghrib to Sunrise, following your
+  prayer times), with a Settings → General toggle to disable. The dark
+  palette is a themed layer — a corner here or there may still want polish
+  on a real device.
+- **Recurring tasks are editable in place** — tap a chip in the Recurring
+  box to open its editor — and their times are now proper **start/end time
+  fields** like tasks, not free text. Existing text times migrate
+  automatically and show on the chip.
+
+### Fixed
+- **A task's project link no longer disappears when moved to the backlog**
+  from a day (or back). Both directions now carry the link.
+
+---
+
 ## [2.3] — 2026-07-11
 
 Fixes the Gemini 429, adds Google sign-in for sync, hardens the prayer gate,

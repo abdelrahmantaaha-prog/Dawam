@@ -447,17 +447,20 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .habit-day.on .habit-day-dot{background:var(--hcolor,var(--verdigris));border-color:var(--hcolor,var(--verdigris))}
 .habit-day.today .habit-day-d{color:var(--ink)}
 .habit-day.today{outline:1px dashed var(--line)}
-/* streak glow ramp — brightest at 7 */
-.habit-card.glow-0{}
-.habit-card.glow-1{border-color:color-mix(in srgb,var(--hcolor) 25%,var(--line))}
-.habit-card.glow-2{border-color:color-mix(in srgb,var(--hcolor) 35%,var(--line));box-shadow:0 0 0 1px color-mix(in srgb,var(--hcolor) 12%,transparent)}
-.habit-card.glow-3{border-color:color-mix(in srgb,var(--hcolor) 45%,var(--line));box-shadow:0 1px 10px -2px color-mix(in srgb,var(--hcolor) 22%,transparent)}
-.habit-card.glow-4{border-color:color-mix(in srgb,var(--hcolor) 55%,var(--line));box-shadow:0 2px 14px -2px color-mix(in srgb,var(--hcolor) 30%,transparent)}
-.habit-card.glow-5{border-color:color-mix(in srgb,var(--hcolor) 65%,var(--line));box-shadow:0 2px 18px -2px color-mix(in srgb,var(--hcolor) 38%,transparent)}
-.habit-card.glow-6{border-color:color-mix(in srgb,var(--hcolor) 78%,var(--line));box-shadow:0 3px 22px -1px color-mix(in srgb,var(--hcolor) 46%,transparent)}
-.habit-card.glow-7{border-color:var(--hcolor);box-shadow:0 0 26px -1px color-mix(in srgb,var(--hcolor) 55%,transparent),0 0 0 1px color-mix(in srgb,var(--hcolor) 40%,transparent)}
-.habit-card.glow-5 .habit-flame,.habit-card.glow-6 .habit-flame,.habit-card.glow-7 .habit-flame{color:var(--hcolor)}
+/* streak — the flame carries the fire; the card stays calm. A soft warm wash
+   grows from the start edge and an ember bar under the week strip fills to 7. */
+.habit-card{border-inline-start:3px solid color-mix(in srgb,var(--hcolor) 45%,var(--line))}
+.habit-card.glow-0{border-inline-start-color:var(--line)}
+.habit-card.glow-2{background:linear-gradient(var(--tpl-dir,90deg),color-mix(in srgb,var(--hcolor) 4%,transparent),transparent 45%),var(--panel)}
+.habit-card.glow-3,.habit-card.glow-4{background:linear-gradient(var(--tpl-dir,90deg),color-mix(in srgb,var(--hcolor) 6%,transparent),transparent 50%),var(--panel)}
+.habit-card.glow-5,.habit-card.glow-6{background:linear-gradient(var(--tpl-dir,90deg),color-mix(in srgb,var(--hcolor) 9%,transparent),transparent 55%),var(--panel)}
+.habit-card.glow-7{background:linear-gradient(var(--tpl-dir,90deg),color-mix(in srgb,var(--hcolor) 12%,transparent),transparent 60%),var(--panel);border-inline-start-color:var(--hcolor)}
 .habit-card.glow-4 .habit-streak,.habit-card.glow-5 .habit-streak,.habit-card.glow-6 .habit-streak,.habit-card.glow-7 .habit-streak{color:var(--ink)}
+/* ember bar: literal progress toward the 7-day peak */
+.habit-ember-track{height:3px;border-radius:3px;background:var(--soft);margin-top:9px;overflow:hidden}
+.habit-ember{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,#D89A3D,#F8752B,var(--hcolor));transition:width .5s ease}
+.habit-card.glow-7 .habit-ember{background-size:200% 100%;animation:emberShift 3s linear infinite}
+@keyframes emberShift{from{background-position:0% 0}to{background-position:200% 0}}
 /* Habits strip on the plan page */
 .habit-strip{margin:2px 0 4px}
 .habit-strip-h{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;color:var(--faint);text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px}
@@ -481,10 +484,8 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .habit-line.on .habit-line-flame{color:var(--hcolor,var(--verdigris))}
 .habit-line-meta{font-size:11px;color:var(--faint);font-weight:600}
 .habit-line.on{background:color-mix(in srgb,var(--hcolor) 7%,var(--panel))}
-.habit-line.glow-4{box-shadow:0 1px 8px -3px color-mix(in srgb,var(--hcolor) 30%,transparent)}
-.habit-line.glow-5{box-shadow:0 1px 11px -2px color-mix(in srgb,var(--hcolor) 38%,transparent)}
-.habit-line.glow-6{box-shadow:0 2px 14px -2px color-mix(in srgb,var(--hcolor) 46%,transparent);border-color:color-mix(in srgb,var(--hcolor) 40%,var(--line))}
-.habit-line.glow-7{box-shadow:0 0 18px -1px color-mix(in srgb,var(--hcolor) 55%,transparent);border-color:var(--hcolor)}
+.habit-line.glow-4,.habit-line.glow-5{border-inline-start-color:color-mix(in srgb,var(--hcolor) 70%,var(--line))}
+.habit-line.glow-6,.habit-line.glow-7{border-inline-start-color:var(--hcolor)}
 .rhythm[dir="rtl"] .habit-line-col{text-align:right}
 
 /* ---- Dynamic flame (streak glyph) ---- */
@@ -512,13 +513,9 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 @keyframes flick{0%,100%{transform:scale(1) rotate(0deg)}28%{transform:scale(1.09,1.14) rotate(-3.5deg)}55%{transform:scale(.94,.92) rotate(2.5deg)}78%{transform:scale(1.05,1.08) rotate(-1.5deg)}}
 @keyframes haloPulse{from{opacity:.3;transform:scale(.7)}to{opacity:.8;transform:scale(1.12)}}
 @keyframes sparkUp{0%{opacity:0;transform:translateY(0) scale(1)}12%{opacity:.95}100%{opacity:0;transform:translateY(-15px) translateX(1.5px) scale(.35)}}
-/* card breathes at high streaks */
-.habit-card.glow-6{animation:cardBreath6 2.6s ease-in-out infinite alternate}
-.habit-card.glow-7{animation:cardBreath7 2.1s ease-in-out infinite alternate}
-@keyframes cardBreath6{from{box-shadow:0 2px 13px -2px color-mix(in srgb,var(--hcolor) 38%,transparent)}to{box-shadow:0 3px 22px -1px color-mix(in srgb,var(--hcolor) 52%,transparent)}}
-@keyframes cardBreath7{from{box-shadow:0 0 16px -1px color-mix(in srgb,var(--hcolor) 42%,transparent),0 0 0 1px color-mix(in srgb,var(--hcolor) 32%,transparent)}to{box-shadow:0 0 30px 0 color-mix(in srgb,var(--hcolor) 62%,transparent),0 0 0 1px color-mix(in srgb,var(--hcolor) 46%,transparent)}}
+/* (card breathing removed in the v2.3 glow rework — the ember bar and flame carry it) */
 @media (prefers-reduced-motion: reduce){
-  .flame-ic,.flame-halo,.spark,.habit-card.glow-6,.habit-card.glow-7{animation:none !important}
+  .flame-ic,.flame-halo,.spark,.habit-ember{animation:none !important}
   .spark{display:none}
 }
 
@@ -605,3 +602,35 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .od-habits{margin-top:16px}
 .od-habits-h{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:800;color:var(--faint);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px}
 .gate-hard{display:inline-flex;align-items:center;gap:8px;padding:10px 18px;border-radius:12px;background:rgba(255,255,255,.14);color:#EAF5F0;font-weight:800;font-size:15px;font-variant-numeric:tabular-nums;letter-spacing:.3px}
+
+
+/* recurring chip is editable in place */
+.tpl-open{background:none;border:none;padding:0;cursor:pointer;text-align:start;font-family:inherit;min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+.tpl-open:hover .tpl-title{color:var(--verdigris)}
+.sync-advanced{margin:4px 0 12px}
+.sync-advanced summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--muted)}
+
+/* ---- Dark mode (auto at night, Settings → General to disable) ---- */
+.rhythm.dark{
+  --ink:#E6F1EA; --muted:#9FB8AA; --faint:#5E7A6C; --line:#2C463A;
+  --panel:#15241D; --soft:rgba(159,184,170,.10); --surface:#0E1813;
+  background:var(--surface); color-scheme:dark;
+}
+.rhythm.dark .hero-sheet{background:var(--panel)}
+.rhythm.dark .hero-card,.rhythm.dark .modal,.rhythm.dark .settings-modal{background:var(--panel)}
+.rhythm.dark .hero-card.wide .proj-card,.rhythm.dark .habit-card,.rhythm.dark .drive-box,.rhythm.dark .security-note{background:var(--panel)}
+.rhythm.dark .now-habits .habit-line{background:rgba(21,36,29,.85)}
+.rhythm.dark input,.rhythm.dark select,.rhythm.dark textarea{background:#0F1B15;color:var(--ink);border-color:var(--line)}
+.rhythm.dark .icon,.rhythm.dark .ghost,.rhythm.dark .side-card,.rhythm.dark .habit-pill,.rhythm.dark .tpl-chip,.rhythm.dark .pool-item,.rhythm.dark .od-edit{background:var(--panel);border-color:var(--line);color:var(--muted)}
+.rhythm.dark .side-tabs{background:#0F1B15}
+.rhythm.dark .side-tab.on{background:var(--panel)}
+.rhythm.dark .block{background:transparent}
+.rhythm.dark .task,.rhythm.dark .now-item{background:transparent}
+.rhythm.dark .chip{background:var(--panel);border-color:var(--line);color:var(--muted)}
+.rhythm.dark .navbar,.rhythm.dark nav.nav{background:rgba(14,24,19,.92);border-color:var(--line)}
+.rhythm.dark .navbtn{color:var(--muted)}
+.rhythm.dark .navbtn.on{color:#8FD3B8}
+.rhythm.dark .primary{background:#2F6F51;border-color:#2F6F51}
+.rhythm.dark .toast{background:#1C3328;color:var(--ink)}
+.rhythm.dark .proj-status.neutral{background:var(--soft);color:var(--muted)}
+.rhythm.dark .settings-tab.on{color:var(--ink)}

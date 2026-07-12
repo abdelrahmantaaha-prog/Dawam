@@ -1,5 +1,5 @@
 /* Rhythm core - pure logic: i18n, dates, prayer math, sky, blocks, model. */
-const APP_VERSION = '2.3';
+const APP_VERSION = '2.4';
 
 /* ------------------------------------------------------------------ */
 /*  i18n — lightweight, module-level translator (same pattern as the   */
@@ -264,6 +264,7 @@ const DEFAULT_SETTINGS = {
   aiProvider: 'anthropic', // 'anthropic' (paid) or 'gemini' (free tier)
   syncUrl: '',         // optional Supabase project URL for cross-device sync
   syncAnonKey: '',     // Supabase anon (public) key — safe to store client-side by design
+  autoDark: true,      // switch the interface to dark at night (Maghrib→Sunrise)
   weekStartDay: 6,
   prayerGate: true,
   time24: false,
@@ -354,6 +355,7 @@ function migrateSettings(s) {
   base.aiProvider = s.aiProvider === 'gemini' ? 'gemini' : 'anthropic';
   base.syncUrl = typeof s.syncUrl === 'string' ? s.syncUrl : '';
   base.syncAnonKey = typeof s.syncAnonKey === 'string' ? s.syncAnonKey : '';
+  base.autoDark = s.autoDark !== false;
   return base;
 }
 // SHA-256 hex of pin+salt. This is a soft lock (deters casual access); it is not

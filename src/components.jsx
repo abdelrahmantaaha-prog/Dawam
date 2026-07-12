@@ -156,7 +156,7 @@ function SkyScene({ sky, stars, light, label, time, blockName, blockAr, range })
 /* ------------------------------------------------------------------ */
 /*  Plan sidebar — Recurring + Backlog in one box, switchable          */
 /* ------------------------------------------------------------------ */
-function PlanSide({ tab, onTab, templates, pool, labelById, usedTpl = {}, onDragStart, onTplToPool, onTplToDay, onAddTpl, onManage, onAddPool, onOpenPool, onTogglePoolDone, onPoolToDay, poolDropActive, poolDropOver }) {
+function PlanSide({ tab, onTab, templates, pool, labelById, usedTpl = {}, onDragStart, onTplToPool, onTplToDay, onAddTpl, onManage, onEditTpl, onAddPool, onOpenPool, onTogglePoolDone, onPoolToDay, poolDropActive, poolDropOver }) {
   const [val, setVal] = useState('');
   const submitPool = () => { if (val.trim()) { onAddPool(val); setVal(''); } };
   const isBacklog = tab === 'backlog';
@@ -174,10 +174,10 @@ function PlanSide({ tab, onTab, templates, pool, labelById, usedTpl = {}, onDrag
           {templates.map((tp) => { const p = labelById(tp.projectId); const b = blockById(tp.block); const nSub = (tp.subtasks || []).length; return (
             <div key={tp.id} className="tpl-chip" style={{ '--accent': b.accent }}>
               <span className="grip" onPointerDown={(e) => onDragStart(e, 'template', tp)} title={tx('Drag onto a slot', 'اسحب إلى موعد')}><GripVertical size={13} /></span>
-              <div className="tpl-body">
+              <button className="tpl-body tpl-open" onClick={() => onEditTpl(tp.id)} title={tx('Edit recurring task', 'تعديل المهمة المتكررة')}>
                 <span className="tpl-title">{tp.title}{usedTpl[tp.id] ? <span className="tpl-used"><Check size={11} />{usedTpl[tp.id] > 1 ? ` ×${usedTpl[tp.id]}` : ''}</span> : null}</span>
-                <span className="tpl-sub">{p && <span className="pdot" style={{ background: p.color }} />}{bName(b)}{nSub ? ` · ${nSub} ${LANG === 'ar' ? 'خطوة' : ('step' + (nSub > 1 ? 's' : ''))}` : ''}</span>
-              </div>
+                <span className="tpl-sub">{p && <span className="pdot" style={{ background: p.color }} />}{bName(b)}{timeLabel(tp) ? ` · ${timeLabel(tp)}` : ''}{nSub ? ` · ${nSub} ${LANG === 'ar' ? 'خطوة' : ('step' + (nSub > 1 ? 's' : ''))}` : ''}</span>
+              </button>
               <div className="tpl-actions">
                 <button className="tpl-act" title={tx('Add to the selected day', 'أضف إلى اليوم المحدد')} onClick={() => onTplToDay(tp.id)}><CornerUpRight size={14} /></button>
                 <button className="tpl-act" title={tx('Add to backlog', 'أضف إلى قائمة الانتظار')} onClick={() => onTplToPool(tp.id)}><Inbox size={14} /></button>

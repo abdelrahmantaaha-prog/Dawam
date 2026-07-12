@@ -44,6 +44,7 @@ function HabitsView({ habits, sky, stars, heroLight, onAdd, onUpd, onDel, onTogg
 
 function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus }) {
   const [confirmDel, setConfirmDel] = useState(false);
+  const isPrayer = !!h.prayer; // built-in, derived from the prayer log
   const streak = habitStreak(h, todayISO);
   const glow = glowLevel(streak);
   const doneToday = habitDoneOn(h, todayISO);
@@ -70,13 +71,18 @@ function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus 
           </button>
         ))}
       </div>
+      <div className="habit-ember-track"><span className="habit-ember" style={{ width: `${(glow / 7) * 100}%` }} /></div>
       {open && (
         <div className="proj-edit">
+          {isPrayer ? (
+            <p className="hint-text" style={{ margin: 0 }}>{tx('Built-in — tracked from the prayer gate. Marking it here and praying at the gate are the same record.', 'مدمجة — تُتتبَّع من قفل الصلاة. تعليمها هنا والصلاة عند القفل سجلٌ واحد.')}</p>
+          ) : (<>
           <div className="proj-field"><span>{tx('Habit name', 'اسم العادة')}</span><input className="projname" value={h.name} onChange={(e) => onUpd({ name: e.target.value })} /></div>
           <div className="proj-grid2">
             <label><span>{tx('Colour', 'اللون')}</span><input className="swatch proj-swatch" type="color" value={h.color} onChange={(e) => onUpd({ color: e.target.value })} /></label>
             <label><span>{tx('Day period', 'فترة اليوم')}</span><select className="time-input" value={h.block || 'morning'} onChange={(e) => onUpd({ block: e.target.value })}>{BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}</select></label>
           </div>
+          </>)}
           <div className="proj-field">
             <span>{tx('Focus on this habit', 'ركّز على هذه العادة')}</span>
             <div className="focus-choices">
@@ -84,13 +90,13 @@ function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus 
             </div>
             <p className="hint-text" style={{ margin: '4px 0 0' }}>{tx('Locks Rhythm for the duration, like a task focus lock. You can end early.', 'يقفل التطبيق طوال المدة، مثل قفل تركيز المهام. يمكنك الإنهاء مبكرًا.')}</p>
           </div>
-          <div className="proj-edit-foot">
+          {!isPrayer && <div className="proj-edit-foot">
             {confirmDel ? (
               <span className="od-confirm">{tx('Delete this habit?', 'حذف هذه العادة؟')}<button className="danger sm" onClick={onDel}>{tx('Yes', 'نعم')}</button><button className="ghost sm" onClick={() => setConfirmDel(false)}>{tx('Cancel', 'إلغاء')}</button></span>
             ) : (
               <button className="danger sm" onClick={() => setConfirmDel(true)}><Trash2 size={14} /> {tx('Delete habit', 'حذف العادة')}</button>
             )}
-          </div>
+          </div>}
         </div>
       )}
     </div>
@@ -352,6 +358,10 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
               <p className="hint-text">{tx('Arabic switches the whole app to right-to-left.', 'العربية تحوّل التطبيق بالكامل إلى الاتجاه من اليمين لليسار.')}</p>
             </div>
             <div className="sect">
+              <div className="sect-h">{tx('Dark mode', 'الوضع الداكن')}</div>
+              <label className="toggle"><input type="checkbox" checked={local.autoDark !== false} onChange={(e) => patch({ autoDark: e.target.checked })} /><span>{tx('Switch to dark automatically at night (Maghrib to Sunrise)', 'التبديل إلى الداكن تلقائيًا ليلًا (من المغرب إلى الشروق)')}</span></label>
+            </div>
+            <div className="sect">
               <div className="sect-h">{tx('Time format', 'صيغة الوقت')}</div>
               <div className="seg time-seg">
                 <button className={local.time24 !== true ? 'on' : ''} onClick={() => patch({ time24: false })}>{tx('12-hour', '12 ساعة')}</button>
@@ -423,10 +433,14 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
             <div className="sect">
               <div className="sect-h"><Repeat size={13} /> {tx('Cross-device sync (optional)', 'المزامنة بين الأجهزة (اختياري)')}</div>
               <div className="security-note"><Shield size={15} /><p>{tx('Sync copies your planner to a Supabase project you own, so your other devices can pull it. Turning this on means your data leaves the device — protected by your account, resolved per item by most-recent-edit. Leave it off to stay fully local. Setup steps are in the README (one SQL snippet, two values to paste below).', 'تنسخ المزامنة مخططك إلى مشروع Supabase تملكه أنت لتسحبه أجهزتك الأخرى. تفعيلها يعني خروج بياناتك من الجهاز — محمية بحسابك، وتُحسم التعارضات لكل عنصر بالأحدث تعديلًا. اتركها معطّلة لتبقى محليًا بالكامل. خطوات الإعداد في README.')}</p></div>
-              <div className="pin-set-grid">
-                <label><span>{tx('Supabase URL', 'عنوان Supabase')}</span><input className="time-input" style={{ letterSpacing: 0, textAlign: 'start' }} value={local.syncUrl || ''} onChange={(e) => patch({ syncUrl: e.target.value.trim() })} placeholder="https://xyz.supabase.co" autoComplete="off" /></label>
-                <label><span>{tx('Anon key', 'المفتاح العام')}</span><input className="time-input" type="password" style={{ letterSpacing: 0, textAlign: 'start' }} value={local.syncAnonKey || ''} onChange={(e) => patch({ syncAnonKey: e.target.value.trim() })} placeholder="eyJ…" autoComplete="off" /></label>
-              </div>
+              <details className="sync-advanced">
+                <summary>{tx('Advanced: use your own Supabase backend', 'متقدم: استخدم خادم Supabase الخاص بك')}</summary>
+                <p className="hint-text" style={{ marginTop: 6 }}>{tx('Leave empty to use the built-in Rhythm backend. Fill both to point this device at your own project instead (setup in the README).', 'اتركهما فارغين لاستخدام خادم التطبيق المدمج. املأ الحقلين لتوجيه هذا الجهاز إلى مشروعك الخاص (الإعداد في README).')}</p>
+                <div className="pin-set-grid">
+                  <label><span>{tx('Supabase URL', 'عنوان Supabase')}</span><input className="time-input" style={{ letterSpacing: 0, textAlign: 'start' }} value={local.syncUrl || ''} onChange={(e) => patch({ syncUrl: e.target.value.trim() })} placeholder="https://xyz.supabase.co" autoComplete="off" /></label>
+                  <label><span>{tx('Anon key', 'المفتاح العام')}</span><input className="time-input" type="password" style={{ letterSpacing: 0, textAlign: 'start' }} value={local.syncAnonKey || ''} onChange={(e) => patch({ syncAnonKey: e.target.value.trim() })} placeholder="sb_publishable_…" autoComplete="off" /></label>
+                </div>
+              </details>
               {sync && sync.user ? (
                 <>
                   <p className="hint-text" style={{ color: 'var(--verdigris)', fontWeight: 700 }}><KeyRound size={12} /> {tx('Signed in as', 'مسجّل باسم')} {sync.user.email}{sync.lastSync ? ` · ${tx('last sync', 'آخر مزامنة')} ${sync.lastSync.toLocaleTimeString()}` : ''}</p>
@@ -494,7 +508,8 @@ function TemplateEditor({ tpl, projects, onChange, onDelete }) {
       <div className="routine-top"><input className="projname" value={tpl.title} onChange={(e) => onChange({ title: e.target.value })} /><button className="mini-del" onClick={onDelete} aria-label="Delete recurring task"><Trash2 size={14} /></button></div>
       <div className="routine-fields">
         <select value={tpl.block} onChange={(e) => onChange({ block: e.target.value })}>{BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}</select>
-        <input className="time-input" value={tpl.time || ''} onChange={(e) => onChange({ time: e.target.value })} placeholder={tx('time (opt)', 'الوقت (اختياري)')} />
+        <input className="time-input" type="time" value={tpl.start || ''} onChange={(e) => onChange({ start: e.target.value, time: '' })} title={tx('Start (optional)', 'البداية (اختياري)')} />
+        <input className="time-input" type="time" value={tpl.end || ''} onChange={(e) => onChange({ end: e.target.value, time: '' })} title={tx('End (optional)', 'النهاية (اختياري)')} />
         <select value={tpl.projectId || ''} onChange={(e) => onChange({ projectId: e.target.value || null })}><option value="">{tx('no label', 'بلا وسم')}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
       </div>
       {subs.length > 0 && <div className="routine-subs">{subs.map((s, i) => (<span key={i} className="subchip">{s}<button onClick={() => delSub(i)}><X size={11} /></button></span>))}</div>}
