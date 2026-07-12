@@ -47,6 +47,21 @@ plus a project-link bug fix and quality passes on recurring tasks and Overdue.
 ### Fixed
 - **A task's project link no longer disappears when moved to the backlog**
   from a day (or back). Both directions now carry the link.
+
+### Fixed (2.4 patches)
+- **Dark mode now covers the Plan and Projects pages.** Their surfaces —
+  the day timeline, day pills, recurring/backlog cards, project cards — were
+  forced white and stayed white at night; they now follow the dark palette.
+- **Calmer page background.** The full-screen sky behind the content was a
+  five-stop gradient that showed as three stacked colour bands down the left
+  and right edges. It's now a single soft wash at the very top resolving to
+  one solid colour, so the edges read as one calm tone in both themes. The
+  moon/stars scene in the top card is unchanged.
+- **Unmarking a prayer re-arms the 15-minute lock.** Marking a prayer done
+  and then unmarking it — any time within that prayer's window — now starts a
+  fresh 15-minute unskippable lock, by design, to discourage marking a prayer
+  you haven't prayed. The penalty is stored device-locally so a page reload
+  can't dodge it.
 - **Scheduled tasks now sync like everything else (patch).** On the built-in
   backend, the in-session auto-push was gated on a per-device URL that is empty
   when the baked backend is used — so weekly task edits only reached the server

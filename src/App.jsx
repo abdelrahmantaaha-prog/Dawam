@@ -627,6 +627,19 @@ export default function Rhythm() {
   };
 
   // Prayer performance, stored per-day inside the week object.
+  // Anti-cheat penalty: unmarking a prayer during its own window arms a fresh
+  // 15-minute hard lock. Persisted in a device-local (non-synced) key so a page
+  // reload can't dodge it. Keyed by day:block.
+  const PENALTY_KEY = 'rhythm:prayerPenalty';
+  const prayerPenaltyRef = useRef((() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(PENALTY_KEY) || '{}');
+      const cutoff = Date.now() - 2 * 86400000; // drop entries older than ~2 days
+      const out = {}; for (const k in raw) if (raw[k] > cutoff) out[k] = raw[k];
+      return out;
+    } catch { return {}; }
+  })());
+  const savePenalty = () => { try { localStorage.setItem(PENALTY_KEY, JSON.stringify(prayerPenaltyRef.current)); } catch { /* ignore */ } };
   const togglePrayer = async (blockId, forDate) => {
     const t = forDate ? new Date(forDate) : new Date(); t.setHours(0, 0, 0, 0);
     const ws = startOfWeek(t, settings.weekStartDay);
@@ -635,7 +648,12 @@ export default function Rhythm() {
     const cur = await readWeek(wsISO);
     const prayers = { ...(cur.prayers || {}) };
     const day = { ...(prayers[dIdx] || {}) };
-    day[blockId] = !day[blockId];
+    const willBeDone = !day[blockId];
+    const key = `${fmtISO(t)}:${blockId}`;
+    // Unmark → punish (re-lock 15 min). Re-mark → clear any pending penalty.
+    if (!willBeDone) { prayerPenaltyRef.current[key] = Date.now(); savePenalty(); }
+    else if (prayerPenaltyRef.current[key]) { delete prayerPenaltyRef.current[key]; savePenalty(); }
+    day[blockId] = willBeDone;
     prayers[dIdx] = day;
     await writeWeek(wsISO, { ...cur, prayers });
     bumpRefresh();
@@ -929,8 +947,15 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const PRAYER_HARD_MIN = 15;
   const gateStartMin = gateStart ? minutesOf(gateStart) : null;
   const gateElapsed = gateStartMin == null ? null : ((curMin - gateStartMin) + 1440) % 1440;
-  const gateHard = gateActive && gateElapsed != null && gateElapsed < PRAYER_HARD_MIN;
-  const gateHardLeft = gateHard ? PRAYER_HARD_MIN - gateElapsed : 0;
+  // Fresh-arrival lock (first 15 min of the period)…
+  const gateArrivalLeft = gateElapsed != null && gateElapsed < PRAYER_HARD_MIN ? PRAYER_HARD_MIN - gateElapsed : 0;
+  // …plus the unmark penalty (15 min from the moment it was unticked). nowTick in
+  // the render deps makes this recompute each minute so the countdown advances.
+  const gatePenaltyKey = gateId ? `${fmtISO(inOvernightIsha ? addDays(todayMid, -1) : todayMid)}:${gateId}` : '';
+  const gatePenaltyTs = gatePenaltyKey ? prayerPenaltyRef.current[gatePenaltyKey] : 0;
+  const gatePenaltyLeft = gatePenaltyTs ? Math.ceil((PRAYER_HARD_MIN * 60000 - (Date.now() - gatePenaltyTs)) / 60000) : 0;
+  const gateHardLeft = Math.max(gateArrivalLeft, gatePenaltyLeft > 0 ? gatePenaltyLeft : 0);
+  const gateHard = gateActive && gateHardLeft > 0;
   const usedTpl = {}; week.tasks.forEach((t) => { if (t.day === selectedDay && t.templateId) usedTpl[t.templateId] = (usedTpl[t.templateId] || 0) + 1; });
   const isSelectedToday = sameDay(selectedDate, new Date());
   // Prayers as built-in habits: derived views over the existing prayer log, so
@@ -990,7 +1015,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   return (
     <div className={`rhythm ${darkOn ? 'dark' : ''}`} dir={isRTL() ? 'rtl' : 'ltr'} lang={LANG}>
 
-      <div className="page-bg" style={{ background: `linear-gradient(180deg, ${rgbStr(sky.top)}, ${rgbStr(sky.bot)} 26vh, ${rgbaStr(sky.bot, 0.6)} 52vh, ${rgbaStr(sky.bot, 0.32)} 74vh, ${rgbaStr(sky.bot, 0.12)} 90vh, rgba(244,250,246,0) 100vh)` }} aria-hidden="true" />
+      <div className="page-bg" style={{ background: `linear-gradient(180deg, ${rgbaStr(sky.top, darkOn ? 0.5 : 0.42)}, ${darkOn ? '#0E1813' : '#EAF1EC'} 32vh)` }} aria-hidden="true" />
       <div className="page-decor" aria-hidden="true">
         {stars.map((s, i) => (<span key={`pd-s${i}`} className="star deco-star" style={{ left: `${s.x}%`, top: `${s.y}vh`, opacity: sky.night * s.base, animationDuration: `${s.tw}s`, animationDelay: `${s.dl}s` }} />))}
         {birds.map((b, i) => (

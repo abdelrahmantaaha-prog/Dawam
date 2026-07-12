@@ -634,3 +634,23 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .rhythm.dark .toast{background:#1C3328;color:var(--ink)}
 .rhythm.dark .proj-status.neutral{background:var(--soft);color:var(--muted)}
 .rhythm.dark .settings-tab.on{color:var(--ink)}
+
+/* Plan/Projects surfaces are forced white in light mode (.hero-card.wide …);
+   bring them into the dark palette. Higher specificity + later source wins. */
+.rhythm.dark .hero-card.wide .timeline,
+.rhythm.dark .hero-card.wide .tpl-card,
+.rhythm.dark .hero-card.wide .pool-card,
+.rhythm.dark .hero-card.wide .dump-card,
+.rhythm.dark .hero-card.wide .chip:not(.sel),
+.rhythm.dark .hero-card.wide .icon,
+.rhythm.dark .hero-card.wide .today-btn,
+.rhythm.dark .hero-card.wide .proj-card{background:var(--panel)}
+.rhythm.dark .habit-card{background:var(--panel)}
+.rhythm.dark .habit-card.glow-2,
+.rhythm.dark .habit-card.glow-3,.rhythm.dark .habit-card.glow-4,
+.rhythm.dark .habit-card.glow-5,.rhythm.dark .habit-card.glow-6,
+.rhythm.dark .habit-card.glow-7{background:linear-gradient(var(--tpl-dir,90deg),color-mix(in srgb,var(--hcolor) 14%,transparent),transparent 55%),var(--panel)}
+.rhythm.dark .chip .chip-d,.rhythm.dark .chip .chip-n{color:var(--ink)}
+.rhythm.dark .chip.today{border-color:var(--verdigris)}
+.rhythm.dark .timeline{box-shadow:none}
+.rhythm.dark .block{border-top-color:var(--line)}
