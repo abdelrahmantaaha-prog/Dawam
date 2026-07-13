@@ -149,3 +149,33 @@ Notes for future work:
   cross-week features (tasks under a Project, overdue) are complete.
 - `npm test` covers pace math, streaks, and block resolution (including the
   overnight-Isha window). Extend it when touching `core.jsx`.
+
+## Google Calendar (read-only, optional)
+
+Show your Google Calendar events inside the Plan day, each in its prayer
+period, with all-day events pinned at the top. **Read-only** — Rhythm never
+writes to or changes your calendar.
+
+Setup (builds on the Google sign-in above):
+
+1. In **Google Cloud Console → APIs & Services → Library**, enable the
+   **Google Calendar API** for the project you used for sign-in.
+2. In **OAuth consent screen → Scopes**, add
+   `.../auth/calendar.readonly` (a "sensitive" scope). For personal/newsroom
+   use, keep the app in **Testing** and add your users as test users — no
+   Google verification review needed. Public distribution would require that
+   review.
+3. In the app: **Settings → Sync → Connect Google Calendar**. This re-runs
+   Google sign-in requesting calendar access, then **Load my calendars** and
+   tick the ones you want shown. Events appear on the Plan day.
+
+How it works and its limits:
+- The Google access token comes from your Supabase Google sign-in and is
+  **short-lived (~1 hour)**; Supabase doesn't refresh provider tokens, so the
+  calendar section will occasionally ask you to **Reconnect**. Everything else
+  in the app is unaffected when it lapses — the events just stop showing until
+  you reconnect.
+- The token is stored only on this device and is never synced.
+- Events are fetched per viewed day from the calendars you ticked, expanded
+  from recurrences, and placed in the prayer block their start time falls in.
+

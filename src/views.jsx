@@ -293,7 +293,7 @@ function PinScreen({ onVerify, onSuccess }) {
 /* ------------------------------------------------------------------ */
 /*  Settings                                                           */
 /* ------------------------------------------------------------------ */
-function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncSignIn, onSyncSignOut, onSyncGoogle, onSyncNow, storageOk, onClose, onClearDay, dayLabel, onLang }) {
+function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncSignIn, onSyncSignOut, onSyncGoogle, onSyncNow, gcal, onCalConnect, onCalDisconnect, onCalLoad, onCalToggle, storageOk, onClose, onClearDay, dayLabel, onLang }) {
   const [syncEmail, setSyncEmail] = useState('');
   const [syncPass, setSyncPass] = useState('');
   const [local, setLocal] = useState(settings);
@@ -464,6 +464,32 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                 </>
               )}
               {sync && sync.msg && <p className="hint-text" style={{ marginTop: 8 }}>{sync.msg}</p>}
+
+              <div className="sect-h" style={{ marginTop: 20 }}><Calendar size={13} /> {tx('Google Calendar (read-only)', 'تقويم Google (للعرض فقط)')}</div>
+              <p className="hint-text" style={{ marginTop: 0 }}>{tx('Show your Google Calendar events inside the Plan day, in their prayer period. Read-only — Rhythm never changes your calendar. Uses your Google sign-in; the calendar permission is short-lived, so you may need to reconnect from time to time.', 'اعرض أحداث تقويم Google داخل يوم التخطيط ضمن فترة الصلاة. للعرض فقط — لا يغيّر التطبيق تقويمك. يستخدم دخول Google؛ صلاحية التقويم قصيرة العمر، لذا قد تحتاج إلى إعادة الاتصال أحيانًا.')}</p>
+              {!gcal.connected ? (
+                <button className="primary" onClick={onCalConnect}><Calendar size={14} /> {tx('Connect Google Calendar', 'ربط تقويم Google')}</button>
+              ) : (
+                <>
+                  <div className="io-actions">
+                    <button className="ghost sm" onClick={onCalLoad}>{tx('Load my calendars', 'تحميل تقاويمي')}</button>
+                    <button className="ghost sm" onClick={onCalConnect}>{tx('Reconnect', 'إعادة الاتصال')}</button>
+                    <button className="ghost sm" onClick={onCalDisconnect}>{tx('Disconnect', 'فصل')}</button>
+                  </div>
+                  {gcal.calendars.length > 0 && (
+                    <div className="cal-picker">
+                      {gcal.calendars.map((c) => (
+                        <label key={c.id} className="cal-pick-row">
+                          <input type="checkbox" checked={gcal.ids.includes(c.id)} onChange={() => onCalToggle(c.id)} />
+                          <span className="cal-dot" style={{ background: c.color }} />
+                          <span className="cal-pick-name">{c.name}{c.primary ? ` · ${tx('primary', 'الأساسي')}` : ''}</span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
+              {gcal.msg && <p className="hint-text" style={{ marginTop: 8 }}>{gcal.msg}</p>}
             </div>
           )}
 

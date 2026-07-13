@@ -265,6 +265,8 @@ const DEFAULT_SETTINGS = {
   syncUrl: '',         // optional Supabase project URL for cross-device sync
   syncAnonKey: '',     // Supabase anon (public) key — safe to store client-side by design
   autoDark: true,      // switch the interface to dark at night (Maghrib→Sunrise)
+  gcalOn: false,       // Google Calendar (read-only) enabled
+  gcalIds: [],         // which Google calendar IDs to show
   weekStartDay: 6,
   prayerGate: true,
   time24: false,
@@ -356,6 +358,8 @@ function migrateSettings(s) {
   base.syncUrl = typeof s.syncUrl === 'string' ? s.syncUrl : '';
   base.syncAnonKey = typeof s.syncAnonKey === 'string' ? s.syncAnonKey : '';
   base.autoDark = s.autoDark !== false;
+  base.gcalOn = s.gcalOn === true;
+  base.gcalIds = Array.isArray(s.gcalIds) ? s.gcalIds : [];
   return base;
 }
 // SHA-256 hex of pin+salt. This is a soft lock (deters casual access); it is not

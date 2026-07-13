@@ -4,6 +4,7 @@ import { hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DE
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { createSync } from './sync.js';
 import { SYNC_URL, SYNC_KEY } from './config.js';
+import { GCAL_SCOPE, saveGcalToken, loadGcalToken, clearGcalToken, gcalConnected, listCalendars, listDayEvents, bucketDayEvents } from './gcal.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
@@ -486,11 +487,62 @@ export default function Rhythm() {
     setSyncBusy(false);
   };
   const syncSignOut = async () => { await syncRef.current.signOut(); setSyncUser(null); setSyncMsg(tx('Signed out. Data stays on this device.', 'تم تسجيل الخروج. تبقى البيانات على هذا الجهاز.')); };
-  const syncGoogle = async () => {
+  const syncGoogle = async (withCalendar = false) => {
     setSyncMsg('');
-    try { await syncRef.current.signInWithGoogle(); /* redirects away; session is picked up on return */ }
+    try { await syncRef.current.signInWithGoogle(withCalendar ? GCAL_SCOPE : ''); /* redirects away; session is picked up on return */ }
     catch (e) { setSyncMsg(String(e.message || e)); }
   };
+
+  /* ---- Google Calendar (read-only, one-way: Google → Rhythm) ---- */
+  const [gcalCalendars, setGcalCalendars] = useState([]); // available calendars to pick from
+  const [gcalConn, setGcalConn] = useState(gcalConnected());
+  const [gcalMsg, setGcalMsg] = useState('');
+  const [gcalByBlock, setGcalByBlock] = useState({}); // events for the selected day, keyed by block
+  const [gcalAllDay, setGcalAllDay] = useState([]);    // all-day events for the selected day
+  // After a Google OAuth return, capture the short-lived provider token for the API.
+  useEffect(() => {
+    if (!ready || !syncConfigured) return;
+    let stop = false;
+    (async () => {
+      const tok = await syncRef.current.getProviderToken();
+      if (stop) return;
+      if (tok) { saveGcalToken(tok); setGcalConn(true); }
+    })();
+    return () => { stop = true; };
+  }, [ready, syncConfigured]);
+  const connectCalendar = () => { setGcalMsg(tx('Redirecting to Google…', 'إعادة توجيه إلى Google…')); syncGoogle(true); };
+  const disconnectCalendar = () => { clearGcalToken(); setGcalConn(false); setGcalCalendars([]); setGcalByBlock({}); setGcalAllDay([]); persistSettings({ ...settings, gcalOn: false }); setGcalMsg(tx('Calendar disconnected.', 'تم فصل التقويم.')); };
+  const loadGcalCalendars = async () => {
+    const tok = loadGcalToken();
+    if (!tok) { setGcalConn(false); setGcalMsg(tx('Reconnect needed — the Google session expired.', 'يلزم إعادة الاتصال — انتهت جلسة Google.')); return; }
+    setGcalMsg(tx('Loading calendars…', 'جارٍ تحميل التقاويم…'));
+    try { const cals = await listCalendars(tok); setGcalCalendars(cals); setGcalMsg(''); }
+    catch (e) { if (e.code === 'auth') { setGcalConn(false); setGcalMsg(tx('Reconnect needed — the Google session expired.', 'يلزم إعادة الاتصال — انتهت جلسة Google.')); } else setGcalMsg(String(e.message || e)); }
+  };
+  const toggleGcalId = (id) => {
+    const ids = settings.gcalIds || [];
+    const next = ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
+    persistSettings({ ...settings, gcalOn: next.length > 0, gcalIds: next });
+  };
+  // Fetch the selected day's events whenever the day, enabled calendars, or
+  // connection change. Read-only; failures degrade to showing nothing.
+  useEffect(() => {
+    const ids = settings.gcalIds || [];
+    if (!gcalConn || !settings.gcalOn || ids.length === 0) { setGcalByBlock({}); setGcalAllDay([]); return; }
+    const tok = loadGcalToken();
+    if (!tok) { setGcalConn(false); return; }
+    let stop = false;
+    (async () => {
+      try {
+        const lists = await Promise.all(ids.map((cid) => listDayEvents(tok, cid, selectedDate).catch(() => [])));
+        if (stop) return;
+        const all = lists.flat();
+        const { allDay, byBlock } = bucketDayEvents(all, (min) => activeBlockAt(timings, min));
+        setGcalAllDay(allDay); setGcalByBlock(byBlock);
+      } catch (e) { if (!stop && e.code === 'auth') setGcalConn(false); }
+    })();
+    return () => { stop = true; };
+  }, [gcalConn, settings.gcalOn, settings.gcalIds, selectedDay, weekStart, timings, refresh]);
 
   /* ---- scheduled task ops (operate on the displayed week) ---- */
   const tasksFor = (dayIdx, blockId) =>
@@ -1170,12 +1222,24 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         {/* Day timeline (left) + Recurring/Backlog sidebar (right) — kept side by side so both stay visible as drop targets while dragging */}
         <div className="plan-columns">
           <div className="timeline">
+            {gcalAllDay.length > 0 && (
+              <div className="cal-allday">
+                {gcalAllDay.map((ev) => (
+                  <div key={ev.id} className="cal-event allday" title={tx('All-day · Google Calendar (read-only)', 'طوال اليوم · تقويم Google (للعرض فقط)')}>
+                    <Calendar size={13} className="cal-ic" />
+                    <span className="cal-title">{ev.title}</span>
+                    <span className="cal-allday-tag">{tx('all day', 'طوال اليوم')}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {BLOCKS.map((b) => (
               <BlockRow key={b.id} block={b}
                 start={cleanTime(timings[b.startKey]) || ''} end={b.endKey ? cleanTime(timings[b.endKey]) || '' : ''}
                 tasks={tasksFor(selectedDay, b.id)} labelById={labelById}
                 habits={settings.habits.filter((h) => (h.block || 'morning') === b.id)}
                 habitDate={fmtISO(selectedDate)} onToggleHabit={toggleHabitDay}
+                events={gcalByBlock[b.id] || []}
                 current={isSelectedToday && b.id === activeId && !inOvernightIsha}
                 prayer={isSelectedToday && PRAYER_BLOCKS.includes(b.id) ? { done: !!(week.prayers?.[selectedDay]?.[b.id]) } : null}
                 onPrayer={() => togglePrayer(b.id)}
@@ -1296,6 +1360,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           onSetPin={setPin}
           sync={{ configured: syncConfigured, user: syncUser, busy: syncBusy, msg: syncMsg, lastSync }}
           onSyncSignIn={syncSignIn} onSyncSignOut={syncSignOut} onSyncGoogle={syncGoogle} onSyncNow={() => runSync('manual')}
+          gcal={{ connected: gcalConn, calendars: gcalCalendars, ids: settings.gcalIds || [], msg: gcalMsg }}
+          onCalConnect={connectCalendar} onCalDisconnect={disconnectCalendar} onCalLoad={loadGcalCalendars} onCalToggle={toggleGcalId}
           storageOk={storageOk} onClose={() => setShowSettings(false)}
           onClearDay={() => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.day !== selectedDay) }); flash(tx('Day cleared.', 'تم مسح اليوم.')); }}
           dayLabel={`${wdFull(selectedDate.getDay())} ${selectedDate.getDate()} ${mon(selectedDate.getMonth())}`} />

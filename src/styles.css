@@ -654,3 +654,18 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .rhythm.dark .chip.today{border-color:var(--verdigris)}
 .rhythm.dark .timeline{box-shadow:none}
 .rhythm.dark .block{border-top-color:var(--line)}
+
+/* ---- Google Calendar (read-only) events ---- */
+.block-cal{display:flex;flex-direction:column;gap:6px;margin-bottom:8px}
+.cal-event{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:9px;border:1px dashed var(--line);background:transparent;color:var(--muted);font-size:13px}
+.cal-event .cal-ic{color:var(--faint);flex-shrink:0}
+.cal-time{font-variant-numeric:tabular-nums;font-weight:700;color:var(--muted);flex-shrink:0}
+.cal-title{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.cal-allday{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.cal-event.allday{border-style:solid;background:var(--soft)}
+.cal-allday-tag{margin-inline-start:auto;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:var(--faint);flex-shrink:0}
+.cal-picker{display:flex;flex-direction:column;gap:2px;margin-top:10px}
+.cal-pick-row{display:flex;align-items:center;gap:9px;padding:7px 4px;cursor:pointer;font-size:13.5px}
+.cal-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0}
+.cal-pick-name{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rhythm.dark .cal-event{border-color:var(--line)}

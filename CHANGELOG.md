@@ -48,6 +48,17 @@ plus a project-link bug fix and quality passes on recurring tasks and Overdue.
 - **A task's project link no longer disappears when moved to the backlog**
   from a day (or back). Both directions now carry the link.
 
+### Added (2.4)
+- **Google Calendar, read-only.** Optionally show your Google Calendar events
+  inside the Plan day — each timed event in the prayer period its start falls
+  in, all-day events pinned at the top. One-way (Google → Rhythm); the app
+  never writes to your calendar. Connect under Settings → Sync, then pick which
+  calendars to show. Uses your Google sign-in; the calendar permission is
+  short-lived, so the section occasionally asks to reconnect, and nothing else
+  in the app is affected when it does. Token is device-local, never synced.
+  Setup steps (enable the Calendar API, add the read-only scope) are in the
+  README.
+
 ### Fixed (2.4 patches)
 - **Dark mode now covers the Plan and Projects pages.** Their surfaces —
   the day timeline, day pills, recurring/backlog cards, project cards — were

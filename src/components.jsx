@@ -37,7 +37,7 @@ function HabitLine({ h, iso, onToggle }) {
 /* ------------------------------------------------------------------ */
 /*  Block row (drop target for tasks, pool items, templates)           */
 /* ------------------------------------------------------------------ */
-function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId }) {
+function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, events = [], labelById, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId }) {
   const [folded, setFolded] = useState(() => new Set()); // collapsed subtask lists, per task id (session-local)
   const toggleFold = (id) => setFolded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [quick, setQuick] = useState('');
@@ -60,7 +60,18 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
           {habits.map((h) => <HabitLine key={h.id} h={h} iso={habitDate} onToggle={onToggleHabit} />)}
         </div>
       )}
-      {tasks.length === 0 && habits.length === 0 && !adding && <button className="empty" onClick={() => setAdding(true)}>{bHint(block)}</button>}
+      {events.length > 0 && (
+        <div className="block-cal">
+          {events.map((ev) => (
+            <div key={ev.id} className="cal-event" title={tx('From Google Calendar (read-only)', 'من تقويم Google (للعرض فقط)')}>
+              <Calendar size={13} className="cal-ic" />
+              <span className="cal-time">{fmtTime(ev.startHM)}</span>
+              <span className="cal-title">{ev.title}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {tasks.length === 0 && habits.length === 0 && events.length === 0 && !adding && <button className="empty" onClick={() => setAdding(true)}>{bHint(block)}</button>}
       {tasks.map((t) => { const p = labelById(t.projectId); return (
         <div key={t.id} className={`task ${t.done ? 'done' : ''} ${draggingId === t.id ? 'dragging' : ''}`}>
           <span className="grip" onPointerDown={(e) => onDragStart(e, 'task', t)} title="Drag to another slot or the backlog"><GripVertical size={15} /></span>

@@ -136,11 +136,19 @@ export function createSync({ getConfig, onRemote, clientFactory = createClient, 
   // detected from the URL on return (see getUser). Requires the Google provider
   // to be enabled in Supabase and this app's URL to be in Supabase's redirect
   // allowlist — steps in README → Google sign-in.
-  const signInWithGoogle = async () => {
+  const signInWithGoogle = async (extraScopes = '') => {
     const c = ensureClient(); if (!c) throw new Error('Enter the Supabase URL and anon key first.');
-    const { error } = await c.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
+    const opts = { redirectTo: window.location.origin };
+    if (extraScopes) { opts.scopes = extraScopes; opts.queryParams = { access_type: 'offline', prompt: 'consent' }; }
+    const { error } = await c.auth.signInWithOAuth({ provider: 'google', options: opts });
     if (error) throw new Error(error.message);
   };
+  // The Google access token (for calling Google APIs) is present on the session
+  // only right after an OAuth sign-in, and is short-lived.
+  const getProviderToken = async () => {
+    const c = ensureClient(); if (!c) return null;
+    try { const { data } = await c.auth.getSession(); return data?.session?.provider_token || null; } catch { return null; }
+  };
 
-  return { markDirty, syncNow, signIn, signUp, signOut, signInWithGoogle, getUser, _internals: { meta, dirty } };
+  return { markDirty, syncNow, signIn, signUp, signOut, signInWithGoogle, getProviderToken, getUser, _internals: { meta, dirty } };
 }
