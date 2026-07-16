@@ -612,26 +612,26 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 
 /* ---- Dark mode (auto at night, Settings → General to disable) ---- */
 .rhythm.dark{
-  --ink:#E6F1EA; --muted:#9FB8AA; --faint:#5E7A6C; --line:#2C463A;
-  --panel:#15241D; --soft:rgba(159,184,170,.10); --surface:#0E1813;
+  --ink:#E7ECF3; --muted:#A3AFBF; --faint:#5D697A; --line:#2A323E;
+  --panel:#161C25; --soft:rgba(163,175,191,.10); --surface:#0D1219;
   background:var(--surface); color-scheme:dark;
 }
 .rhythm.dark .hero-sheet{background:var(--panel)}
 .rhythm.dark .hero-card,.rhythm.dark .modal,.rhythm.dark .settings-modal{background:var(--panel)}
 .rhythm.dark .hero-card.wide .proj-card,.rhythm.dark .habit-card,.rhythm.dark .drive-box,.rhythm.dark .security-note{background:var(--panel)}
-.rhythm.dark .now-habits .habit-line{background:rgba(21,36,29,.85)}
-.rhythm.dark input,.rhythm.dark select,.rhythm.dark textarea{background:#0F1B15;color:var(--ink);border-color:var(--line)}
+.rhythm.dark .now-habits .habit-line{background:rgba(22,28,37,.85)}
+.rhythm.dark input,.rhythm.dark select,.rhythm.dark textarea{background:#10161E;color:var(--ink);border-color:var(--line)}
 .rhythm.dark .icon,.rhythm.dark .ghost,.rhythm.dark .side-card,.rhythm.dark .habit-pill,.rhythm.dark .tpl-chip,.rhythm.dark .pool-item,.rhythm.dark .od-edit{background:var(--panel);border-color:var(--line);color:var(--muted)}
-.rhythm.dark .side-tabs{background:#0F1B15}
+.rhythm.dark .side-tabs{background:#10161E}
 .rhythm.dark .side-tab.on{background:var(--panel)}
 .rhythm.dark .block{background:transparent}
 .rhythm.dark .task,.rhythm.dark .now-item{background:transparent}
 .rhythm.dark .chip{background:var(--panel);border-color:var(--line);color:var(--muted)}
-.rhythm.dark .navbar,.rhythm.dark nav.nav{background:rgba(14,24,19,.92);border-color:var(--line)}
+.rhythm.dark .navbar,.rhythm.dark nav.nav{background:rgba(13,18,25,.92);border-color:var(--line)}
 .rhythm.dark .navbtn{color:var(--muted)}
 .rhythm.dark .navbtn.on{color:#8FD3B8}
 .rhythm.dark .primary{background:#2F6F51;border-color:#2F6F51}
-.rhythm.dark .toast{background:#1C3328;color:var(--ink)}
+  .rhythm.dark .toast{background:#1E2632;color:var(--ink)}
 .rhythm.dark .proj-status.neutral{background:var(--soft);color:var(--muted)}
 .rhythm.dark .settings-tab.on{color:var(--ink)}
 
@@ -669,3 +669,39 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .cal-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0}
 .cal-pick-name{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rhythm.dark .cal-event{border-color:var(--line)}
+
+/* ---- the prayer oath ---- */
+.gate-oath{display:flex;flex-direction:column;align-items:center;gap:10px;width:min(320px,86vw)}
+.gate-oath-label{font-size:13px;color:rgba(234,245,240,.82);text-align:center;line-height:1.6}
+.gate-oath-word{font-family:'Cormorant',serif;font-size:19px;font-weight:600;color:#EAF5F0;padding:0 3px}
+.gate-oath-input{width:100%;height:48px;border-radius:12px;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.10);color:#EAF5F0;text-align:center;font-family:'Cormorant',serif;font-size:24px;font-weight:600;letter-spacing:.02em;outline:none}
+.gate-oath-input::placeholder{color:rgba(234,245,240,.30)}
+.gate-oath-input:focus{border-color:rgba(143,211,184,.75);background:rgba(255,255,255,.14)}
+.gate-oath .gate-btn:disabled{opacity:.42;cursor:not-allowed}
+
+/* ---- planning assistant chat ---- */
+.chat-modal{max-width:560px;display:flex;flex-direction:column;max-height:82vh}
+.chat-body{display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1}
+.chat-empty{color:var(--muted);font-size:13.5px;line-height:1.65}
+.chat-empty p{margin:0 0 10px}
+.chat-suggests{display:flex;flex-wrap:wrap;gap:6px}
+.chat-msg{display:flex;flex-direction:column;gap:7px;max-width:100%}
+.chat-msg.user{align-items:flex-end}
+.chat-bubble{padding:9px 13px;border-radius:13px;font-size:14px;line-height:1.6;max-width:88%;white-space:pre-wrap;overflow-wrap:anywhere}
+.chat-msg.user .chat-bubble{background:var(--verdigris);color:#fff;border-bottom-right-radius:4px}
+.rhythm[dir="rtl"] .chat-msg.user .chat-bubble{border-bottom-right-radius:13px;border-bottom-left-radius:4px}
+.chat-msg.assistant .chat-bubble{background:var(--soft);color:var(--ink);border-bottom-left-radius:4px}
+.chat-bubble.thinking{display:inline-flex;align-items:center;gap:7px;color:var(--muted)}
+.chat-props{display:flex;flex-direction:column;gap:6px;width:100%}
+.chat-prop{display:flex;align-items:center;gap:10px;padding:9px 11px;border:1px solid var(--line);border-radius:11px;background:var(--panel)}
+.chat-prop.done{border-color:var(--verdigris);opacity:.75}
+.chat-prop.skip{opacity:.5}
+.chat-prop-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.chat-prop-desc{font-size:13px;font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+.chat-prop-why{font-size:11px;color:var(--faint)}
+.chat-prop-actions{display:flex;gap:6px;flex-shrink:0}
+.chat-prop-state{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:800;color:var(--verdigris);flex-shrink:0}
+.chat-prop-state.muted{color:var(--faint)}
+.chat-foot{display:flex;gap:8px;align-items:center}
+.chat-input{flex:1;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:0 12px;font-family:inherit;font-size:14px;outline:none}
+.chat-input:focus{border-color:var(--verdigris)}

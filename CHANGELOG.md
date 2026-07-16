@@ -48,7 +48,31 @@ plus a project-link bug fix and quality passes on recurring tasks and Overdue.
 - **A task's project link no longer disappears when moved to the backlog**
   from a day (or back). Both directions now carry the link.
 
+### Changed (2.4 patches)
+- **Night mode is now slate/blue-grey, not green.** The dark surfaces were
+  tinted with the app's verdigris; they're now a cool neutral palette. The
+  verdigris accent is kept for buttons and the active tab as the brand colour.
+- **The prayer gate is released by typing والله, not by tapping a button.**
+  An oath is a deliberate piece of friction — you can't dismiss the gate
+  absent-mindedly. Input is normalised generously (diacritics, tatweel, the ﷲ
+  ligature, alef variants, whitespace all fold), so any genuine attempt counts,
+  while a wrong word never releases it. The 15-minute unskippable window and
+  the unmark penalty still take precedence: during those, there is no input at
+  all, only the countdown.
+
 ### Added (2.4)
+- **Planning assistant (chat).** A sparkle button in the header opens a chat
+  that can see the shown day — tasks, habits and streaks, prayers kept, overdue,
+  projects and their pace, backlog — and answers questions like "what should I
+  focus on?" or "am I overcommitted?". It **proposes** changes rather than
+  making them: each proposal (add, move, complete, send to backlog, schedule
+  from backlog) appears as a card you Approve or dismiss individually. Nothing
+  touches your plan until you approve it. Proposals referencing ids that don't
+  exist, unknown actions, or malformed times are discarded before you ever see
+  them. Uses the same API key as the brain-dump sorter (Gemini's free tier
+  works); without a key it says so rather than failing.
+
+
 - **Google Calendar, read-only.** Optionally show your Google Calendar events
   inside the Plan day — each timed event in the prayer period its start falls
   in, all-day events pinned at the top. One-way (Google → Rhythm); the app

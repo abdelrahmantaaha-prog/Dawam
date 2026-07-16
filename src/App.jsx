@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
-import { hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { createSync } from './sync.js';
 import { SYNC_URL, SYNC_KEY } from './config.js';
+import { ASSISTANT_SYSTEM, buildDaySnapshot, parseAssistantReply, callAssistant } from './assistant.js';
 import { GCAL_SCOPE, saveGcalToken, loadGcalToken, clearGcalToken, gcalConnected, listCalendars, listDayEvents, bucketDayEvents } from './gcal.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
@@ -48,6 +49,12 @@ export default function Rhythm() {
   const [locked, setLocked] = useState(false);          // PIN lock screen
   const [foldedTasks, setFoldedTasks] = useState(() => new Set()); // collapsed subtask lists (Now/Overdue)
   const [editingTpl, setEditingTpl] = useState(null); // recurring task edited from the plan sidebar
+  const [oathText, setOathText] = useState('');      // the gate's typed oath
+  const [chatOpen, setChatOpen] = useState(false);   // planning assistant
+  const [chatMsgs, setChatMsgs] = useState([]);      // [{role:'user'|'assistant', text, proposals?, applied?}]
+  const [chatInput, setChatInput] = useState('');
+  const [chatBusy, setChatBusy] = useState(false);
+  const [chatErr, setChatErr] = useState('');
   const toggleFoldTask = (id) => setFoldedTasks((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [sideTab, setSideTab] = useState('recurring');  // 'recurring' | 'backlog' — combined plan sidebar
   const pendingEditRef = useRef(null);                  // open editor after jumping to an overdue task's week
@@ -1007,6 +1014,81 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const gatePenaltyTs = gatePenaltyKey ? prayerPenaltyRef.current[gatePenaltyKey] : 0;
   const gatePenaltyLeft = gatePenaltyTs ? Math.ceil((PRAYER_HARD_MIN * 60000 - (Date.now() - gatePenaltyTs)) / 60000) : 0;
   const gateHardLeft = Math.max(gateArrivalLeft, gatePenaltyLeft > 0 ? gatePenaltyLeft : 0);
+  /* ---- planning assistant (chat; proposes, never writes) ---- */
+  const chatIds = () => ({ taskIds: (weekRef.current.tasks || []).map((t) => t.id), poolIds: (poolRef.current || []).map((p) => p.id) });
+  const buildSnapshot = () => {
+    const todayISO = fmtISO(todayMid);
+    const projName = (t) => (settings.projects.find((p) => p.id === t.projectRef) || {}).name || (labelById(t.projectId) || {}).name || '';
+    return buildDaySnapshot({
+      dateLabel: `${wdFull(selectedDate.getDay())} ${selectedDate.getDate()} ${mon(selectedDate.getMonth())}`,
+      dayIdx: selectedDay,
+      dayNames: Array.from({ length: 7 }, (_, i) => wdFull(addDays(weekStart, i).getDay())),
+      timings, activeBlock: activeId,
+      tasks: (week.tasks || []).filter((t) => t.day === selectedDay).map((t) => ({ id: t.id, block: t.block, time: timeLabel(t), done: t.done, title: t.title, project: projName(t), subtasks: (t.subtasks || []).length })),
+      pool: (pool || []).map((p) => ({ id: p.id, title: p.title, done: !!p.done })),
+      habits: [...prayerHabits, ...(settings.habits || [])].map((h) => ({ name: h.name, block: h.block || 'morning', streak: habitStreak(h, todayISO), doneToday: habitDoneOn(h, todayISO), builtin: !!h.prayer })),
+      prayersDone: PRAYER_BLOCKS.filter((pid) => prayersToday[pid]),
+      overdue: (overdue || []).map((o) => ({ title: o.t.title, when: `${wd(o.date.getDay())} ${o.date.getDate()} ${mon(o.date.getMonth())}` })),
+      projects: (settings.projects || []).map((p) => {
+        const pc = projectPace(p);
+        const status = p.completedAt ? 'completed' : pc.notStarted ? 'not started' : pc.onPace === true ? 'on pace' : pc.onPace === false ? 'behind' : 'in progress';
+        return { name: p.name, target: p.target, done: pc.done, unit: p.unit || 'units', status, perDay: pc.perDay ? Math.ceil(pc.perDay) : null, daysLeft: pc.daysLeft };
+      }),
+      labels: (settings.labels || []).map((l) => l.name),
+    });
+  };
+  const sendChat = async () => {
+    const q = chatInput.trim();
+    if (!q || chatBusy) return;
+    if (!settings.apiKey) { setChatErr(tx('The assistant needs an API key — add one under Settings → Backup → AI sorting (Gemini has a free tier).', 'يحتاج المساعد إلى مفتاح — أضفه من الإعدادات ← النسخ ← الفرز الذكي (لدى Gemini خطة مجانية).')); return; }
+    setChatErr(''); setChatBusy(true);
+    const prior = chatMsgs.slice(-6).map((m) => ({ role: m.role, content: m.text }));
+    setChatMsgs((prev) => [...prev, { role: 'user', text: q }]);
+    setChatInput('');
+    try {
+      const messages = [...prior, { role: 'user', content: `Current state of my planner:\n\n${buildSnapshot()}\n\n---\n${q}` }];
+      const text = await callAssistant({ provider: settings.aiProvider || 'anthropic', apiKey: settings.apiKey, system: ASSISTANT_SYSTEM, messages });
+      const { reply, proposals } = parseAssistantReply(text, chatIds());
+      setChatMsgs((prev) => [...prev, { role: 'assistant', text: reply, proposals, applied: {} }]);
+    } catch (e) {
+      setChatErr(e.code === 'rate'
+        ? tx('Rate limit hit — wait a moment and try again.', 'تم بلوغ حد المعدل — انتظر قليلًا وأعد المحاولة.')
+        : tx(`Assistant unavailable (${e.message || e}).`, `المساعد غير متاح (${e.message || e}).`));
+    }
+    setChatBusy(false);
+  };
+  // Applying is always a deliberate, per-proposal act by the person.
+  const applyProposal = (msgIdx, pIdx) => {
+    const p = chatMsgs[msgIdx]?.proposals?.[pIdx]; if (!p) return;
+    if (p.kind === 'add_task') addTask(p.day, p.block, p.title, { start: p.start || '', end: p.end || '' });
+    else if (p.kind === 'move_task') mutateTask(p.taskId, (t) => ({ ...t, day: p.day, block: p.block }));
+    else if (p.kind === 'complete_task') mutateTask(p.taskId, (t) => ({ ...t, done: true }));
+    else if (p.kind === 'task_to_backlog') taskToPool(p.taskId);
+    else if (p.kind === 'backlog_to_day') poolToDay(p.poolId, p.day, p.block);
+    setChatMsgs((prev) => prev.map((m, i) => (i === msgIdx ? { ...m, applied: { ...(m.applied || {}), [pIdx]: 'done' } } : m)));
+    flash(tx('Applied.', 'تم التطبيق.'));
+  };
+  const dismissProposal = (msgIdx, pIdx) => setChatMsgs((prev) => prev.map((m, i) => (i === msgIdx ? { ...m, applied: { ...(m.applied || {}), [pIdx]: 'skip' } } : m)));
+  const describeProposal = (p) => {
+    const bn = (id) => bName(blockById(id));
+    const dn = (d) => wdFull(addDays(weekStart, d).getDay());
+    const tTitle = (id) => ((weekRef.current.tasks || []).find((t) => t.id === id) || {}).title || '?';
+    const pTitle = (id) => ((poolRef.current || []).find((x) => x.id === id) || {}).title || '?';
+    switch (p.kind) {
+      case 'add_task': return `${tx('Add', 'أضف')} “${p.title}” → ${dn(p.day)} · ${bn(p.block)}${p.start ? ` · ${fmtTime(p.start)}` : ''}`;
+      case 'move_task': return `${tx('Move', 'انقل')} “${tTitle(p.taskId)}” → ${dn(p.day)} · ${bn(p.block)}`;
+      case 'complete_task': return `${tx('Mark done', 'علّم كمنجز')}: “${tTitle(p.taskId)}”`;
+      case 'task_to_backlog': return `${tx('To backlog', 'إلى قائمة الانتظار')}: “${tTitle(p.taskId)}”`;
+      case 'backlog_to_day': return `${tx('Schedule', 'جدولة')} “${pTitle(p.poolId)}” → ${dn(p.day)} · ${bn(p.block)}`;
+      default: return p.kind;
+    }
+  };
+
+  const confirmOath = () => {
+    if (!isOath(oathText)) return; // belt and braces: the button is disabled too
+    togglePrayer(gateId, inOvernightIsha ? addDays(todayMid, -1) : todayMid);
+    setOathText('');
+  };
   const gateHard = gateActive && gateHardLeft > 0;
   const usedTpl = {}; week.tasks.forEach((t) => { if (t.day === selectedDay && t.templateId) usedTpl[t.templateId] = (usedTpl[t.templateId] || 0) + 1; });
   const isSelectedToday = sameDay(selectedDate, new Date());
@@ -1067,7 +1149,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   return (
     <div className={`rhythm ${darkOn ? 'dark' : ''}`} dir={isRTL() ? 'rtl' : 'ltr'} lang={LANG}>
 
-      <div className="page-bg" style={{ background: `linear-gradient(180deg, ${rgbaStr(sky.top, darkOn ? 0.5 : 0.42)}, ${darkOn ? '#0E1813' : '#EAF1EC'} 32vh)` }} aria-hidden="true" />
+      <div className="page-bg" style={{ background: `linear-gradient(180deg, ${rgbaStr(sky.top, darkOn ? 0.5 : 0.42)}, ${darkOn ? '#0D1219' : '#EAF1EC'} 32vh)` }} aria-hidden="true" />
       <div className="page-decor" aria-hidden="true">
         {stars.map((s, i) => (<span key={`pd-s${i}`} className="star deco-star" style={{ left: `${s.x}%`, top: `${s.y}vh`, opacity: sky.night * s.base, animationDuration: `${s.tw}s`, animationDelay: `${s.dl}s` }} />))}
         {birds.map((b, i) => (
@@ -1083,6 +1165,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         </div>
         <div className="hdr-actions">
           <button className="icon lang-toggle" onClick={() => changeLang(LANG === 'ar' ? 'en' : 'ar')} aria-label={tx('Switch language', 'تبديل اللغة')} title={tx('Switch language', 'تبديل اللغة')}><Languages size={17} /><span>{LANG === 'ar' ? 'EN' : 'ع'}</span></button>
+          <button className="icon" onClick={() => setChatOpen(true)} aria-label={tx('Planning assistant', 'مساعد التخطيط')} title={tx('Planning assistant', 'مساعد التخطيط')}><Sparkles size={17} /></button>
           <button className="icon" onClick={() => setShowSettings(true)} aria-label={tx('Settings', 'الإعدادات')}><Settings size={18} /></button>
         </div>
       </header>
@@ -1414,7 +1497,14 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             {gateHard ? (
               <div className="gate-hard"><Lock size={15} /> {gateHardLeft} {tx('min', 'د')}</div>
             ) : (
-              <button className="primary gate-btn" onClick={() => togglePrayer(gateId, inOvernightIsha ? addDays(todayMid, -1) : todayMid)}><CheckCircle2 size={16} /> {tx("I've prayed", 'صلّيت')} {bName(gateBlock)}</button>
+              <div className="gate-oath">
+                <label className="gate-oath-label" htmlFor="oath-in">{tx('Type', 'اكتب')} <span className="gate-oath-word">{OATH_AR}</span> {tx('to confirm you have prayed', 'لتأكيد أنك صلّيت')}</label>
+                <input id="oath-in" className="gate-oath-input" dir="rtl" lang="ar" value={oathText} autoComplete="off" autoCorrect="off" spellCheck="false"
+                  onChange={(e) => setOathText(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && isOath(oathText)) confirmOath(); }}
+                  placeholder={OATH_AR} aria-label={tx('Type the oath', 'اكتب القسم')} />
+                <button className="primary gate-btn" disabled={!isOath(oathText)} onClick={confirmOath}><CheckCircle2 size={16} /> {tx('Confirm', 'تأكيد')} {bName(gateBlock)}</button>
+              </div>
             )}
           </div>
         </div>
@@ -1483,6 +1573,65 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           </div>
         );
       })()}
+
+      {chatOpen && (
+        <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setChatOpen(false); }}>
+          <div className="modal chat-modal">
+            <div className="modal-head plain">
+              <strong><Sparkles size={15} /> {tx('Planning assistant', 'مساعد التخطيط')}</strong>
+              <button className="icon" onClick={() => setChatOpen(false)}><X size={18} /></button>
+            </div>
+            <div className="modal-body chat-body">
+              {chatMsgs.length === 0 && (
+                <div className="chat-empty">
+                  <p>{tx('Ask about your day. It can see today\u2019s tasks, habits, prayers, overdue and projects — and it proposes changes you approve one by one.', 'اسأل عن يومك. يرى مهام اليوم والعادات والصلوات والمتأخرات والمشاريع — ويقترح تغييرات توافق عليها واحدًا تلو الآخر.')}</p>
+                  <div className="chat-suggests">
+                    {[tx('What should I focus on today?', 'على ماذا أركّز اليوم؟'), tx('Am I overcommitted?', 'هل حمّلت نفسي أكثر من اللازم؟'), tx('What am I slipping on this week?', 'ما الذي أتراجع فيه هذا الأسبوع؟')].map((sg) => (
+                      <button key={sg} className="ghost sm" onClick={() => setChatInput(sg)}>{sg}</button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {chatMsgs.map((m, mi) => (
+                <div key={mi} className={`chat-msg ${m.role}`}>
+                  <div className="chat-bubble">{m.text}</div>
+                  {m.role === 'assistant' && (m.proposals || []).length > 0 && (
+                    <div className="chat-props">
+                      {m.proposals.map((p, pi) => {
+                        const state = (m.applied || {})[pi];
+                        return (
+                          <div key={pi} className={`chat-prop ${state || ''}`}>
+                            <div className="chat-prop-main">
+                              <span className="chat-prop-desc">{describeProposal(p)}</span>
+                              {p.why && <span className="chat-prop-why">{p.why}</span>}
+                            </div>
+                            {state === 'done' ? <span className="chat-prop-state"><CheckCircle2 size={14} /> {tx('applied', 'طُبّق')}</span>
+                              : state === 'skip' ? <span className="chat-prop-state muted">{tx('dismissed', 'تم التجاهل')}</span>
+                                : (
+                                  <span className="chat-prop-actions">
+                                    <button className="primary sm" onClick={() => applyProposal(mi, pi)}>{tx('Approve', 'موافقة')}</button>
+                                    <button className="ghost sm" onClick={() => dismissProposal(mi, pi)}>{tx('No', 'لا')}</button>
+                                  </span>
+                                )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {chatBusy && <div className="chat-msg assistant"><div className="chat-bubble thinking"><Loader2 size={14} className="spin" /> {tx('Thinking…', 'يفكّر…')}</div></div>}
+              {chatErr && <p className="hint-text" style={{ color: '#9C4221' }}>{chatErr}</p>}
+            </div>
+            <div className="modal-foot chat-foot">
+              <input className="chat-input" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
+                placeholder={tx('Ask about your day…', 'اسأل عن يومك…')} aria-label={tx('Message', 'رسالة')} />
+              <button className="primary" onClick={sendChat} disabled={chatBusy || !chatInput.trim()}>{tx('Send', 'إرسال')}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {locked && settings.pin && (
         <PinScreen onVerify={verifyPin} onSuccess={() => setLocked(false)} />
