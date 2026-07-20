@@ -293,7 +293,7 @@ function PinScreen({ onVerify, onSuccess }) {
 /* ------------------------------------------------------------------ */
 /*  Settings                                                           */
 /* ------------------------------------------------------------------ */
-function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncNow, notify, onEnableNotify, onTestNotify, storageOk, onClose, onClearDay, dayLabel, onLang }) {
+function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncNow, notify, onEnableNotify, onTestNotify, onRecheck, storageOk, onClose, onClearDay, dayLabel, onLang }) {
   const [local, setLocal] = useState(settings);
   const [tab, setTab] = useState('general');
   // Keep the local editing copy in sync when the parent persists settings from
@@ -438,10 +438,17 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
               {sync && sync.lastSync && <p className="hint-text" style={{ marginTop: 8, color: 'var(--verdigris)', fontWeight: 700 }}><KeyRound size={12} /> {tx('Last sync', 'آخر مزامنة')} {sync.lastSync.toLocaleTimeString()}</p>}
               {sync && sync.msg && <p className="hint-text" style={{ marginTop: 8 }}>{sync.msg}</p>}
 
-              {notify && notify.supported && (<>
+              {/* Never gated on `supported`. Gating it meant that whenever the
+                  platform probe came back false — for any reason — the whole
+                  section vanished and there was nothing on screen to diagnose
+                  from. It costs one dull line in the browser and is the only
+                  way to see what the app actually believes on a device. */}
+              {notify && (<>
                 <div className="sect-h" style={{ marginTop: 20 }}><Clock size={13} /> {tx('Android reminders', 'تنبيهات أندرويد')}</div>
                 <p className="hint-text" style={{ marginTop: 0 }}>{tx('Get a notification when a timed task’s window opens, plus an ongoing card in the shade showing whatever Now is pointing at. Only in the Android app — the browser version is unaffected.', 'احصل على تنبيه عند بدء وقت مهمة موقّتة، بالإضافة إلى بطاقة دائمة في شريط الإشعارات تعرض ما تشير إليه صفحة الآن. في تطبيق أندرويد فقط — نسخة المتصفح لا تتأثر.')}</p>
-                {notify.state === 'granted' ? (
+                {!notify.supported ? (
+                  <p className="hint-text">{tx('Not running as the Android app — reminders are only available there.', 'لا يعمل كتطبيق أندرويد — التنبيهات متاحة هناك فقط.')}</p>
+                ) : notify.state === 'granted' ? (
                   <p className="hint-text" style={{ color: 'var(--verdigris)', fontWeight: 700 }}><CheckCircle2 size={12} /> {tx('Reminders are on.', 'التنبيهات مفعّلة.')}</p>
                 ) : notify.state === 'denied' ? (
                   <p className="hint-text vault-warn"><AlertCircle size={12} /> {tx('Blocked — turn notifications on for Rhythm in Android settings.', 'محظورة — فعّل الإشعارات للتطبيق من إعدادات أندرويد.')}</p>
@@ -450,11 +457,17 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                 )}
                 <div className="io-actions" style={{ marginTop: 8 }}>
                   <button className="ghost sm" onClick={onTestNotify}>{tx('Send a test notification', 'أرسل تنبيهًا تجريبيًا')}</button>
+                  <button className="ghost sm" onClick={onRecheck}>{tx('Re-check', 'إعادة الفحص')}</button>
                 </div>
-                <p className="hint-text" style={{ marginTop: 6 }}>
+                <p className="hint-text" style={{ marginTop: 6, overflowWrap: 'anywhere' }}>
+                  {tx('Platform', 'المنصة')}: <code>{notify.platform || '?'}</code>
+                  {' · '}{tx('bridge', 'الجسر')}: <code>{String(!!notify.hasBridge)}</code>
+                  {' · '}{tx('native', 'أصلي')}: <code>{String(!!notify.supported)}</code>
+                  <br />
                   {tx('Permission', 'الإذن')}: <code>{notify.state}</code>
                   {notify.pending != null ? <> · {tx('scheduled', 'مجدولة')}: <code>{notify.pending}</code></> : null}
-                  {notify.test ? <> · {tx('test', 'الاختبار')}: <code>{notify.test}</code></> : null}
+                  {' · '}{tx('checks', 'الفحوص')}: <code>{notify.probes || 0}</code>
+                  {notify.test ? <><br />{tx('test', 'الاختبار')}: <code>{notify.test}</code></> : null}
                 </p>
               </>)}
             </div>

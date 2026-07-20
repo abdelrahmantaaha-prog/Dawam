@@ -160,6 +160,22 @@ export async function syncReminders(items) {
 
 /* How many reminders Android currently holds for us — the honest answer to
    "is anything actually scheduled?". */
+/* Raw platform facts for the Settings readout — what the app actually sees,
+   so a stuck state can be diagnosed from a screenshot instead of guesswork. */
+export function platformInfo() {
+  try {
+    const g = typeof window !== 'undefined' ? window.Capacitor : null;
+    let platform = 'unknown';
+    if (g && typeof g.getPlatform === 'function') platform = g.getPlatform();
+    else { try { platform = Capacitor.getPlatform(); } catch { /* leave unknown */ } }
+    // androidBridge is the object Capacitor's WebView injects natively. Plain
+    // `window.Capacitor` exists on the web too, so it proves nothing; this is
+    // the signal that says whether we're genuinely inside the Android shell.
+    const hasBridge = typeof window !== 'undefined' && !!window.androidBridge;
+    return { platform, hasBridge };
+  } catch { return { platform: 'error', hasBridge: false }; }
+}
+
 export async function pendingCount() {
   try {
     const ln = await get();

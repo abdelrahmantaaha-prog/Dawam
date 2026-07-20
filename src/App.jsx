@@ -3,7 +3,7 @@ import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, 
 import { hasVault,vaultUnlocked,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { createSync, AUTO_EVERY_MS } from './sync.js';
-import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, testNotification, syncReminders, setOngoing } from './notify.js';
+import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing } from './notify.js';
 import { ASSISTANT_SYSTEM, buildDaySnapshot, parseAssistantReply, callAssistant } from './assistant.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
@@ -1184,32 +1184,36 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     return () => { stop = true; };
   }, [ready, ongoingKey]); // eslint-disable-line
 
-  // Surface notification support/permission to Settings (native only).
+  // Probe notification support/permission for Settings (native only).
+  // Deliberately has NO cancellation guard. An earlier version bailed on a
+  // `stop` flag before the final setState, so whenever the effect re-ran while
+  // the bridge calls were in flight the result was thrown away and the panel
+  // sat on "checking" forever. A late setState is a harmless no-op in React 18;
+  // a stranded UI is not. `probes` counts completions so the panel can show
+  // whether this is actually running.
+  const probeNotify = useCallback(async () => {
+    const info = platformInfo();
+    const nat = await nativeShell();
+    setNotifyState((p) => ({ ...p, ...info }));
+    if (!nat) { setNotifyState((p) => ({ ...p, ...info, supported: false, state: 'unsupported', probes: (p.probes || 0) + 1 })); return; }
+    setNotifyState((p) => ({ ...p, supported: true, state: p.state === 'unsupported' ? 'checking' : p.state }));
+    let st, pend = null;
+    try {
+      st = await permissionState();
+      pend = await pendingCount();
+    } catch (e) {
+      st = `error: ${e && e.message ? e.message : e}`;
+    }
+    setNotifyState((p) => ({ ...p, supported: true, state: st, pending: pend, probes: (p.probes || 0) + 1 }));
+  }, []);
+  useEffect(() => { probeNotify(); }, [ready, reminderPlan, probeNotify]);
+  // Re-probe on resume: permission can be changed in Android settings while
+  // we're backgrounded, and it self-heals a probe that failed earlier.
   useEffect(() => {
-    let stop = false;
-    (async () => {
-      const nat = await nativeShell();
-      if (stop) return;
-      if (!nat) { setNotifyState({ supported: false, state: 'unsupported' }); return; }
-      // Mark it supported IMMEDIATELY, before the slow bridge calls below.
-      // Otherwise `supported` stays false for their whole duration and the
-      // section is hidden — and if the effect re-runs in that window, the
-      // `stop` guard skips the final update and it never appears at all.
-      // Keep any state we already knew so a refresh doesn't flash 'checking';
-      // the calls below are timeout-bounded, so this always resolves.
-      setNotifyState((p) => ({ ...p, supported: true, state: p.state && p.state !== 'unsupported' ? p.state : 'checking' }));
-      let st, pend = null;
-      try {
-        st = await permissionState();
-        pend = await pendingCount();
-      } catch (e) {
-        st = `error: ${e && e.message ? e.message : e}`;
-      }
-      if (stop) return;
-      setNotifyState((p) => ({ ...p, supported: true, state: st, pending: pend }));
-    })();
-    return () => { stop = true; };
-  }, [ready, reminderPlan]);
+    const onVis = () => { if (!document.hidden) probeNotify(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [probeNotify]);
   const enableNotify = async () => {
     const ok = await ensurePermission();
     const st = ok ? 'granted' : await permissionState();
@@ -1602,7 +1606,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           onSetPin={setPin}
           sync={{ busy: syncBusy, msg: syncMsg, lastSync, everyMs: AUTO_EVERY_MS }}
           onSyncNow={() => runSync()}
-          notify={notifyState} onEnableNotify={enableNotify} onTestNotify={testNotify}
+          notify={notifyState} onEnableNotify={enableNotify} onTestNotify={testNotify} onRecheck={probeNotify}
           storageOk={storageOk} onClose={() => setShowSettings(false)}
           onClearDay={() => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.day !== selectedDay) }); flash(tx('Day cleared.', 'تم مسح اليوم.')); }}
           dayLabel={`${wdFull(selectedDate.getDay())} ${selectedDate.getDate()} ${mon(selectedDate.getMonth())}`} />
