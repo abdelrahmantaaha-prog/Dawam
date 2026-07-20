@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
-import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { hasVault,vaultUnlocked,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 
 function FlameGlyph({ level = 0, size = 14 }) {
@@ -75,7 +75,7 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
           <div className="tcol">
             <button className="tmain" onClick={() => onOpen(t.id)}>
               <span className="ttitle">{t.title}{timeLabel(t) ? <span className="ttime">{timeLabel(t)}</span> : null}</span>
-              <span className="tmeta">{p && <span className="pdot" style={{ background: p.color }} />}{p && <span className="pname">{p.name}</span>}{t.notes && t.notes.length > 0 && <span className="badge"><StickyNote size={11} /> {t.notes.length}</span>}</span>
+              <span className="tmeta">{p && <span className="pdot" style={{ background: p.color }} />}{p && <span className="pname">{p.name}</span>}{t.notes && t.notes.length > 0 && <span className="badge"><StickyNote size={11} /> {t.notes.length}</span>}{hasVault(t) && <span className="badge vault-badge" title={tx('Time vault', 'خزنة موقّتة')}><Lock size={11} /></span>}</span>
             </button>
             {subs.length > 0 && (
               <button className="subs-fold" onClick={() => toggleFold(t.id)} aria-expanded={!folded.has(t.id)}>
@@ -320,8 +320,19 @@ function NotesEditor({ notes, onAdd, onUpdate, onDel }) {
 /* ------------------------------------------------------------------ */
 /*  Task editor                                                        */
 /* ------------------------------------------------------------------ */
-function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, onMoveDate, onClose, onChange, onDelete, onToPool, onSaveTemplate, onFocus }) {
+function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaultOpen = false, onMoveDate, onClose, onChange, onDelete, onToPool, onSaveTemplate, onFocus }) {
   const setField = (k, v) => onChange((t) => ({ ...t, [k]: v }));
+  // Vault editing is write-anytime / read-only-in-window: the stored value is
+  // never rendered while the window is shut, only replaced wholesale.
+  const [vaultDraft, setVaultDraft] = useState('');
+  const [vaultEditing, setVaultEditing] = useState(false);
+  const [vaultCopied, setVaultCopied] = useState(false);
+  const vaultReady = tStartMin(task) != null && tEndMin(task) != null;
+  const saveVault = () => { setField('secret', vaultDraft); setVaultDraft(''); setVaultEditing(false); };
+  const clearVault = () => { setField('secret', ''); setVaultDraft(''); setVaultEditing(false); };
+  const copyVault = async () => {
+    try { await navigator.clipboard.writeText(task.secret || ''); setVaultCopied(true); setTimeout(() => setVaultCopied(false), 1600); } catch { /* clipboard blocked */ }
+  };
   return (
     <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal">
@@ -350,6 +361,39 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, onMo
               {[5, 10, 15, 20, 30, 45].map((mn) => (<button key={mn} className="ghost sm" onClick={() => onFocus(mn)}>{mn}{tx('m', 'د')}</button>))}
               {tEndMin(task) != null && <button className="ghost sm focus-whole" onClick={() => onFocus(null, true)}>{tx('Until end', 'حتى النهاية')} ({timeLabel(task).split('–')[1] || fmtTime(task.end)})</button>}
             </div>
+          </div>
+          <div className="sect">
+            <div className="sect-h"><Lock size={13} /> {tx('Time vault', 'خزنة موقّتة')}</div>
+            <p className="hint-text" style={{ marginTop: 0, marginBottom: 8 }}>
+              {tx('Hold something you only want back during this task’s window — it stays hidden until then, and re-hides after. Friction, not a safe: it is stored in plain text on this device and appears in backup exports.',
+                'احتفظ بشيء لا تريده إلا خلال وقت هذه المهمة — يبقى مخفيًا حتى ذلك الحين ثم يُخفى مجددًا. هذا عائق وليس خزنة: يُحفظ كنص عادي على هذا الجهاز ويظهر في النسخ الاحتياطية.')}
+            </p>
+            {!vaultReady && (
+              <p className="hint-text vault-warn" style={{ marginTop: 0 }}><AlertCircle size={12} /> {tx('Set both a start and an end time above, or it can never unlock.', 'حدّد وقت بداية ونهاية أعلاه، وإلا فلن تُفتح أبدًا.')}</p>
+            )}
+            {!hasVault(task) || vaultEditing ? (
+              <div className="inline-add vault-add">
+                <input type="password" autoComplete="off" value={vaultDraft} onChange={(e) => setVaultDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && vaultDraft) saveVault(); if (e.key === 'Escape') { setVaultDraft(''); setVaultEditing(false); } }}
+                  placeholder={tx('Something to unlock later…', 'شيء يُفتح لاحقًا…')} />
+                <button className="ghost sm" disabled={!vaultDraft} onClick={saveVault}>{tx('Save', 'حفظ')}</button>
+                {vaultEditing && <button className="ghost sm" onClick={() => { setVaultDraft(''); setVaultEditing(false); }}>{tx('Cancel', 'إلغاء')}</button>}
+              </div>
+            ) : vaultOpen ? (
+              <div className="vault-row open">
+                <code className="vault-value">{task.secret}</code>
+                <button className="ghost sm" onClick={copyVault}><Copy size={13} /> {vaultCopied ? tx('Copied', 'تم النسخ') : tx('Copy', 'نسخ')}</button>
+                <button className="ghost sm" onClick={() => setVaultEditing(true)}>{tx('Replace', 'استبدال')}</button>
+                <button className="mini-del" onClick={clearVault} aria-label={tx('Remove', 'إزالة')}><X size={13} /></button>
+              </div>
+            ) : (
+              <div className="vault-row">
+                <span className="vault-masked"><Lock size={13} /> ••••••••</span>
+                <span className="vault-when">{vaultReady ? `${tx('Unlocks', 'تُفتح')} ${timeLabel(task)}` : tx('No window set', 'لا يوجد وقت محدد')}</span>
+                <button className="ghost sm" onClick={() => setVaultEditing(true)}>{tx('Replace', 'استبدال')}</button>
+                <button className="mini-del" onClick={clearVault} aria-label={tx('Remove', 'إزالة')}><X size={13} /></button>
+              </div>
+            )}
           </div>
           <SubtaskEditor subtasks={task.subtasks} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...t.subtasks, { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.filter((s) => s.id !== id) }))} onMove={(id, targetId, after) => onChange((t) => ({ ...t, subtasks: moveById(t.subtasks || [], id, targetId, after) }))} />
           <NotesEditor notes={task.notes || []} onAdd={(n) => onChange((t) => ({ ...t, notes: [...(t.notes || []), n] }))} onUpdate={(id, c) => onChange((t) => ({ ...t, notes: (t.notes || []).map((x) => x.id === id ? { ...x, content: c } : x) }))} onDel={(id) => onChange((t) => ({ ...t, notes: (t.notes || []).filter((x) => x.id !== id) }))} />

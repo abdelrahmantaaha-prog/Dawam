@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
-import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { hasVault,vaultUnlocked,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { createSync, AUTO_EVERY_MS } from './sync.js';
+import { isNative as nativeShell, ensurePermission, permissionState, syncReminders, setOngoing } from './notify.js';
 import { ASSISTANT_SYSTEM, buildDaySnapshot, parseAssistantReply, callAssistant } from './assistant.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
@@ -69,6 +70,7 @@ export default function Rhythm() {
   const [sideTab, setSideTab] = useState('recurring');  // 'recurring' | 'backlog' — combined plan sidebar
   const [sideOpen, setSideOpen] = useState(true);       // recurring/backlog sidebar collapsed state
   const [nowLeaving, setNowLeaving] = useState(null);   // key of the Now card playing its exit
+  const [notifyState, setNotifyState] = useState({ supported: false, state: 'unsupported' });
   const pendingEditRef = useRef(null);                  // open editor after jumping to an overdue task's week
 
   const weekRef = useRef(week);
@@ -911,11 +913,11 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const rangeLabel = () => { const end = addDays(weekStart, 6); return `${mon(weekStart.getMonth())} ${weekStart.getDate()} – ${mon(end.getMonth())} ${end.getDate()}`; };
   const dayMeta = (i) => { const d = addDays(weekStart, i); const dt = week.tasks.filter((t) => t.day === i); return { date: d, label: wd(d.getDay()), num: d.getDate(), total: dt.length, done: dt.filter((t) => t.done).length, isToday: sameDay(d, logicalDayMid()) }; };
 
-  if (!ready) {
-    return (<div style={{ minHeight: 320, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6B6878' }}><Loader2 size={18} className="spin" style={{ marginRight: 8 }} /> Loading your day…</div>);
-  }
-
-  /* ---- "right now" derivation ---- */
+  /* ---- "right now" derivation ----
+     NB: this runs before the not-ready bail-out below, because the Now-queue
+     notification effects live down here and hooks must run in the same order
+     on every render. Every value it reads has a safe default, so computing it
+     once against empty state before `ready` flips is harmless. */
   const now = new Date();
   const curMin = now.getHours() * 60 + now.getMinutes();
   const activeId = activeBlockAt(todayTimings, curMin);
@@ -1103,6 +1105,102 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   // ISO of the current logical day, used by the Now habit/prayer items.
   const nowHabitISO = fmtISO(todayMid);
 
+  /* ---- the Now queue ----
+     Derived at component level (not inside the Now view) because the Android
+     notification layer mirrors it too, and must stay right whichever tab you
+     are looking at. */
+  const activeIdx = blockIdx(activeId);
+  const habitsOf = (bid) => (settings.habits || []).filter((h) => (h.block || 'morning') === bid);
+  // A task with BOTH a start and an end is a commitment to a slot, not a queue
+  // item: while the clock sits inside its window it surfaces on its own,
+  // wherever it happens to fall in the order. Outside that window it rejoins
+  // the queue so it can't quietly disappear.
+  const liveNow = nowList.filter((t) => {
+    if (t.done) return false;
+    const st = tStartMin(t), en = tEndMin(t);
+    return st != null && en != null && inWindow(st, en, curMin);
+  });
+  const liveIds = new Set(liveNow.map((t) => t.id));
+  const queue = [];
+  for (const b of BLOCKS) {
+    if (PRAYER_BLOCKS.includes(b.id) && blockIdx(b.id) <= activeIdx && !prayersToday[b.id]) queue.push({ kind: 'prayer', block: b });
+    for (const h of habitsOf(b.id)) if (!habitDoneOn(h, nowHabitISO)) queue.push({ kind: 'habit', block: b, h });
+    for (const t of nowList.filter((t) => t.block === b.id && !t.done && !liveIds.has(t.id))) queue.push({ kind: 'task', block: b, t });
+  }
+  const startedPrayers = PRAYER_BLOCKS.filter((pid) => blockIdx(pid) <= activeIdx).length;
+  const totalN = nowList.length + (settings.habits || []).length + startedPrayers;
+  const doneN = totalN - queue.length - liveNow.length;
+  const next = queue[0] || null;
+  // Everything up to and through the current period is clear when the head of
+  // the queue belongs to a LATER block. Then it stops being "do this now" and
+  // becomes a look-ahead under Next, until its period arrives.
+  const nextIsLater = !!next && blockIdx(next.block.id) > activeIdx;
+  const caughtUp = nextIsLater && liveNow.length === 0;
+
+  /* ---- Android notifications (no-ops in the browser) ----
+     Reminders are keyed to today's timed tasks; the ongoing card mirrors the
+     Now page. Both are described as plain strings first so the effects only
+     re-fire when the *content* actually changes, not on every tick. */
+  const reminderPlan = todayTasks
+    .filter((t) => !t.done && tStartMin(t) != null && tEndMin(t) != null)
+    .map((t) => `${t.id}|${t.title}|${tStartMin(t)}`)
+    .join('\n');
+  const ongoingText = liveNow.length > 0
+    ? { title: liveNow[0].title, body: `${tx('Happening now', 'يحدث الآن')} · ${timeLabel(liveNow[0])}` }
+    : caughtUp
+      ? { title: tx("You're all caught up.", 'أنجزت كل ما عليك الآن.'), body: next ? `${tx('Next', 'التالي')}: ${next.kind === 'task' ? next.t.title : next.kind === 'habit' ? next.h.name : bName(next.block)} · ${bName(next.block)}` : '' }
+      : next
+        ? { title: next.kind === 'task' ? next.t.title : next.kind === 'habit' ? next.h.name : tx(`${next.block.name} prayer`, `صلاة ${next.block.ar}`), body: `${bName(next.block)}${queue.length > 1 ? ` · ${queue.length - 1} ${tx('more today', 'أخرى اليوم')}` : ''}` }
+        : totalN > 0 ? { title: tx('All done for today. Rest easy.', 'أنجزت كل شيء اليوم. ارتَح.'), body: '' } : null;
+  const ongoingKey = ongoingText ? `${ongoingText.title} ${ongoingText.body}` : '';
+
+  useEffect(() => {
+    if (!ready) return;
+    let stop = false;
+    (async () => {
+      if (!(await nativeShell())) return;      // browser: nothing to do
+      if ((await permissionState()) !== 'granted') return; // never prompt from an effect
+      if (stop) return;
+      const day = todayMid;
+      await syncReminders(todayTasks
+        .filter((t) => !t.done && tStartMin(t) != null && tEndMin(t) != null)
+        .map((t) => {
+          const at = new Date(day); at.setHours(0, 0, 0, 0); at.setMinutes(tStartMin(t));
+          return { id: t.id, title: t.title, body: `${tx('Starts now', 'يبدأ الآن')} · ${timeLabel(t)}`, at };
+        }));
+    })();
+    return () => { stop = true; };
+  }, [ready, reminderPlan]); // eslint-disable-line
+
+  useEffect(() => {
+    if (!ready) return;
+    let stop = false;
+    (async () => {
+      if (!(await nativeShell())) return;
+      if ((await permissionState()) !== 'granted') return;
+      if (stop) return;
+      await setOngoing(ongoingText);
+    })();
+    return () => { stop = true; };
+  }, [ready, ongoingKey]); // eslint-disable-line
+
+  // Surface notification support/permission to Settings (native only).
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      const nat = await nativeShell();
+      if (stop) return;
+      if (!nat) { setNotifyState({ supported: false, state: 'unsupported' }); return; }
+      setNotifyState({ supported: true, state: await permissionState() });
+    })();
+    return () => { stop = true; };
+  }, [ready]);
+  const enableNotify = async () => {
+    const ok = await ensurePermission();
+    setNotifyState({ supported: true, state: ok ? 'granted' : await permissionState() });
+    if (ok) flash(tx('Reminders enabled.', 'تم تفعيل التنبيهات.'));
+  };
+
   const poolDragActive = drag && (drag.kind === 'task');
   // Strings rendered inside item-map callbacks (where the map's item variable is
   // also named `t` and shadows the translator) are precomputed here.
@@ -1113,6 +1211,11 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     steps: (n) => tx(`${n} step${n > 1 ? 's' : ''}`, `${n} خطوة`),
     overdue: tx('overdue', 'متأخرة'),
   };
+
+  // Every hook has now run, so bailing out here keeps their order stable.
+  if (!ready) {
+    return (<div style={{ minHeight: 320, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6B6878' }}><Loader2 size={18} className="spin" style={{ marginRight: 8 }} /> Loading your day…</div>);
+  }
   return (
     <div className={`rhythm ${darkOn ? 'dark' : ''}`} dir={isRTL() ? 'rtl' : 'ltr'} lang={LANG}>
 
@@ -1148,33 +1251,6 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           skipped: the next unchecked item is surfaced alone, and checking it
           reveals the one after. */}
       {view === 'now' && (() => {
-        const activeIdx = blockIdx(activeId);
-        const habitsOf = (bid) => (settings.habits || []).filter((h) => (h.block || 'morning') === bid);
-        // A task with BOTH a start and an end is a commitment to a slot, not a
-        // queue item: while the clock sits inside its window it surfaces on its
-        // own, wherever it happens to fall in the order. Outside that window it
-        // rejoins the queue so it can't quietly disappear.
-        const liveNow = nowList.filter((t) => {
-          if (t.done) return false;
-          const st = tStartMin(t), en = tEndMin(t);
-          return st != null && en != null && inWindow(st, en, curMin);
-        });
-        const liveIds = new Set(liveNow.map((t) => t.id));
-        const queue = [];
-        for (const b of BLOCKS) {
-          if (PRAYER_BLOCKS.includes(b.id) && blockIdx(b.id) <= activeIdx && !prayersToday[b.id]) queue.push({ kind: 'prayer', block: b });
-          for (const h of habitsOf(b.id)) if (!habitDoneOn(h, nowHabitISO)) queue.push({ kind: 'habit', block: b, h });
-          for (const t of nowList.filter((t) => t.block === b.id && !t.done && !liveIds.has(t.id))) queue.push({ kind: 'task', block: b, t });
-        }
-        const startedPrayers = PRAYER_BLOCKS.filter((pid) => blockIdx(pid) <= activeIdx).length;
-        const totalN = nowList.length + (settings.habits || []).length + startedPrayers;
-        const doneN = totalN - queue.length - liveNow.length;
-        const next = queue[0] || null;
-        // Everything up to and through the current period is clear when the head
-        // of the queue belongs to a LATER block. Then it stops being "do this
-        // now" and becomes a look-ahead under Next, until its period arrives.
-        const nextIsLater = !!next && blockIdx(next.block.id) > activeIdx;
-        const caughtUp = nextIsLater && liveNow.length === 0;
         // A key that changes whenever an item changes, so React mounts a fresh
         // node and the enter animation runs.
         const itemKeyOf = (it) => {
@@ -1226,6 +1302,16 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                     {timeLabel(t) ? <span className="ttime">{timeLabel(t)}</span> : null}
                     {tSubs.length > 0 ? <span className="now-step-count">{nDone}/{tSubs.length} {tx('steps', 'خطوات')}</span> : null}
                   </button>
+                )}
+                {/* The vault's whole point: the window is open, so hand it over. */}
+                {vaultUnlocked(t, curMin) && (
+                  <div className="vault-reveal">
+                    <code className="vault-value">{t.secret}</code>
+                    <button className="ghost sm" onClick={() => { navigator.clipboard?.writeText(t.secret).then(() => flash(tx('Copied.', 'تم النسخ.')), () => {}); }}><Copy size={13} /> {tx('Copy', 'نسخ')}</button>
+                  </div>
+                )}
+                {hasVault(t) && !vaultUnlocked(t, curMin) && (
+                  <span className="vault-when"><Lock size={12} /> {tx('Unlocks', 'تُفتح')} {timeLabel(t)}</span>
                 )}
               </div>
             </div>
@@ -1471,6 +1557,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {editingTask && (
         <TaskEditor task={editingTask} projects={settings.labels} allProjects={settings.projects} weekStart={weekStart}
           dateISO={fmtISO(addDays(weekStart, editingTask.day))}
+          vaultOpen={vaultUnlocked(editingTask, curMin)}
           onMoveDate={(iso) => moveTaskToDate(editingTask.id, iso)}
           onClose={() => setEditing(null)} onChange={(fn) => mutateTask(editingTask.id, fn)}
           onDelete={() => removeTask(editingTask.id)} onToPool={() => { taskToPool(editingTask.id); setEditing(null); }}
@@ -1492,6 +1579,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           onSetPin={setPin}
           sync={{ busy: syncBusy, msg: syncMsg, lastSync, everyMs: AUTO_EVERY_MS }}
           onSyncNow={() => runSync()}
+          notify={notifyState} onEnableNotify={enableNotify}
           storageOk={storageOk} onClose={() => setShowSettings(false)}
           onClearDay={() => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.day !== selectedDay) }); flash(tx('Day cleared.', 'تم مسح اليوم.')); }}
           dayLabel={`${wdFull(selectedDate.getDay())} ${selectedDate.getDate()} ${mon(selectedDate.getMonth())}`} />

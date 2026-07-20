@@ -1,0 +1,14 @@
+{
+  "appId": "app.rhythm.planner",
+  "appName": "Rhythm",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_launcher_foreground",
+      "iconColor": "#3E8A6C"
+    }
+  }
+}

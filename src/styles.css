@@ -720,6 +720,19 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 /* a look-ahead, not a call to action */
 .now-one-card.preview{opacity:.6;border-style:dashed}
 .now-one-card.preview .now-item-title{font-size:14.5px}
+/* ---- time vault: legible only inside its own window ---- */
+.vault-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--soft)}
+.vault-row.open{border-color:var(--verdigris);background:rgba(62,138,108,.07)}
+.vault-masked{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-weight:700;letter-spacing:2px}
+.vault-when{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:var(--faint);letter-spacing:0}
+.vault-value{flex:1;min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px;font-weight:700;color:var(--ink);overflow-wrap:anywhere;user-select:all}
+.vault-add input{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.vault-warn{display:inline-flex;align-items:center;gap:5px;color:#9C4221}
+.vault-badge{color:var(--muted)}
+.vault-reveal{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;padding:9px 11px;border:1px solid var(--verdigris);border-radius:10px;background:rgba(62,138,108,.08)}
+.rhythm.dark .vault-row{background:#141B24}
+.rhythm.dark .vault-row.open,.rhythm.dark .vault-reveal{background:rgba(62,138,108,.14)}
+
 /* a scheduled slot that owns the clock right now */
 .now-live{margin-bottom:4px}
 .now-one-card.live{border-color:var(--verdigris);box-shadow:0 0 0 2px rgba(62,138,108,.12)}

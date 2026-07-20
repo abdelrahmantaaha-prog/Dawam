@@ -388,4 +388,20 @@ const tStartMin = (t) => { if (t.start) return minutesOf(t.start); const r = par
 const tEndMin = (t) => { if (t.end) return minutesOf(t.end); if (t.start) return null; const r = parseRange(t.time); return r && r.end != null ? r.end : null; };
 const timeLabel = (t) => { if (t.start) return t.end ? `${fmtTime(t.start)}–${fmtTime(t.end)}` : fmtTime(t.start); return t.time || ''; };
 
-export { OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
+/* ------------------------------------------------------------------ */
+/*  Time vault — a task can carry a `secret` that is only legible      */
+/*  inside its own start–end window. Write whenever you like; read     */
+/*  only when the window is open.                                      */
+/*                                                                     */
+/*  This is FRICTION, NOT SECURITY. The value sits in localStorage in  */
+/*  plain text (and lands in Settings → Backup exports the same way),  */
+/*  so anyone with devtools or the device can read it at any hour.     */
+/*  It exists to put a speed bump between you and an impulse, which    */
+/*  is a real thing to want — just don't mistake it for a safe.        */
+/* ------------------------------------------------------------------ */
+const hasVault = (t) => !!(t && typeof t.secret === 'string' && t.secret.length > 0);
+// A vault needs BOTH ends of a window; without them it would never re-lock.
+const vaultWindowed = (t) => hasVault(t) && tStartMin(t) != null && tEndMin(t) != null;
+const vaultUnlocked = (t, curMin) => vaultWindowed(t) && inWindow(tStartMin(t), tEndMin(t), curMin);
+
+export { hasVault,vaultWindowed,vaultUnlocked,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };

@@ -293,7 +293,7 @@ function PinScreen({ onVerify, onSuccess }) {
 /* ------------------------------------------------------------------ */
 /*  Settings                                                           */
 /* ------------------------------------------------------------------ */
-function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncNow, storageOk, onClose, onClearDay, dayLabel, onLang }) {
+function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncNow, notify, onEnableNotify, storageOk, onClose, onClearDay, dayLabel, onLang }) {
   const [local, setLocal] = useState(settings);
   const [tab, setTab] = useState('general');
   // Keep the local editing copy in sync when the parent persists settings from
@@ -437,6 +437,18 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
               </div>
               {sync && sync.lastSync && <p className="hint-text" style={{ marginTop: 8, color: 'var(--verdigris)', fontWeight: 700 }}><KeyRound size={12} /> {tx('Last sync', 'آخر مزامنة')} {sync.lastSync.toLocaleTimeString()}</p>}
               {sync && sync.msg && <p className="hint-text" style={{ marginTop: 8 }}>{sync.msg}</p>}
+
+              {notify && notify.supported && (<>
+                <div className="sect-h" style={{ marginTop: 20 }}><Clock size={13} /> {tx('Android reminders', 'تنبيهات أندرويد')}</div>
+                <p className="hint-text" style={{ marginTop: 0 }}>{tx('Get a notification when a timed task’s window opens, plus an ongoing card in the shade showing whatever Now is pointing at. Only in the Android app — the browser version is unaffected.', 'احصل على تنبيه عند بدء وقت مهمة موقّتة، بالإضافة إلى بطاقة دائمة في شريط الإشعارات تعرض ما تشير إليه صفحة الآن. في تطبيق أندرويد فقط — نسخة المتصفح لا تتأثر.')}</p>
+                {notify.state === 'granted' ? (
+                  <p className="hint-text" style={{ color: 'var(--verdigris)', fontWeight: 700 }}><CheckCircle2 size={12} /> {tx('Reminders are on.', 'التنبيهات مفعّلة.')}</p>
+                ) : notify.state === 'denied' ? (
+                  <p className="hint-text vault-warn"><AlertCircle size={12} /> {tx('Blocked — turn notifications on for Rhythm in Android settings.', 'محظورة — فعّل الإشعارات للتطبيق من إعدادات أندرويد.')}</p>
+                ) : (
+                  <button className="primary" onClick={onEnableNotify}><Clock size={14} /> {tx('Enable reminders', 'تفعيل التنبيهات')}</button>
+                )}
+              </>)}
             </div>
           )}
 

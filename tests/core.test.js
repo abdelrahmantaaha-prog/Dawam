@@ -4,6 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   activeBlockAt, projectPace, habitStreak, habitDoneOn, glowLevel,
   fmtISO, addDays, startOfWeek, DEFAULT_TIMINGS, migrateSettings, inWindow,
+  hasVault, vaultWindowed, vaultUnlocked,
 } from '../src/core.jsx';
 
 const T = DEFAULT_TIMINGS; // Fajr 04:15, Sunrise 05:50, Dhuhr 12:55, Asr 16:30, Maghrib 19:45, Isha 21:15
@@ -138,5 +139,45 @@ describe('date helpers', () => {
     const ws = startOfWeek(wed, 6);
     expect(ws.getDay()).toBe(6); // Saturday
     expect(ws <= wed).toBe(true);
+  });
+});
+
+/* The time vault: readable only inside its own start–end window. */
+describe('time vault', () => {
+  const vault = (start, end, secret = 'hunter2') => ({ start, end, secret });
+  const at = (h, m = 0) => h * 60 + m;
+
+  it('needs a non-empty secret to be a vault at all', () => {
+    expect(hasVault(vault('19:00', '20:00'))).toBe(true);
+    expect(hasVault({ start: '19:00', end: '20:00' })).toBe(false);
+    expect(hasVault({ start: '19:00', end: '20:00', secret: '' })).toBe(false);
+  });
+
+  it('needs BOTH ends of a window, or it could never re-lock', () => {
+    expect(vaultWindowed(vault('19:00', '20:00'))).toBe(true);
+    expect(vaultWindowed(vault('19:00', ''))).toBe(false);   // open-ended = never re-locks
+    expect(vaultWindowed(vault('', ''))).toBe(false);
+  });
+
+  it('unlocks only inside the window', () => {
+    const v = vault('19:00', '20:00');
+    expect(vaultUnlocked(v, at(18, 59))).toBe(false);
+    expect(vaultUnlocked(v, at(19, 0))).toBe(true);   // inclusive start
+    expect(vaultUnlocked(v, at(19, 30))).toBe(true);
+    expect(vaultUnlocked(v, at(20, 0))).toBe(false);  // exclusive end
+    expect(vaultUnlocked(v, at(23, 0))).toBe(false);
+    expect(vaultUnlocked(v, at(3, 0))).toBe(false);
+  });
+
+  it('handles a window that wraps past midnight', () => {
+    const v = vault('23:00', '01:00');
+    expect(vaultUnlocked(v, at(23, 30))).toBe(true);
+    expect(vaultUnlocked(v, at(0, 30))).toBe(true);
+    expect(vaultUnlocked(v, at(1, 0))).toBe(false);
+    expect(vaultUnlocked(v, at(12, 0))).toBe(false);
+  });
+
+  it('a secret with no window never unlocks', () => {
+    expect(vaultUnlocked(vault('19:00', ''), at(19, 30))).toBe(false);
   });
 });
