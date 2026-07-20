@@ -1,21 +1,11 @@
 name: Build Android APK
 
-# Runs on demand, on pushes to main that touch the app, and on version tags.
 # GitHub's ubuntu runners already ship a JDK and the Android SDK, so this needs
 # nothing installed locally.
 on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - 'src/**'
-      - 'android/**'
-      - 'index.html'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'capacitor.config.json'
-      - 'vite.config.js'
-      - '.github/workflows/android.yml'
     tags: ['v*']
 
 permissions:
@@ -24,6 +14,14 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    # The secret is lifted to JOB level on purpose. The `secrets` context is NOT
+    # available in a step-level `if:`, and a step's own `env:` isn't visible to
+    # its own `if:` either — so this is the one place it can live and still be
+    # testable below.
+    env:
+      KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -49,25 +47,22 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-
-      - uses: gradle/actions/setup-gradle@v4
+          cache: gradle
 
       - name: Capacitor sync
         run: npx cap sync android
 
-      # Belt and braces: the repo tracks gradlew as executable, but a checkout
-      # on a filesystem without the exec bit would still break the build.
+      # Belt and braces: the repo tracks gradlew 755 with LF endings, but a
+      # checkout on a filesystem without the exec bit would still break.
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
-      # Release signing is used only when all four secrets are present.
-      # Without them we ship a debug APK, which is installable but signed with
-      # a keystore the runner regenerates every run — see the README.
+      # Release signing is used only when the keystore secret is present.
+      # Without it we ship a debug APK, which installs fine but is signed with a
+      # keystore the runner regenerates every run — see the README.
       - name: Decode signing keystore
         id: keystore
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        if: env.KEYSTORE_B64 != ''
         run: |
           echo "$KEYSTORE_B64" | base64 -d > android/app/release.keystore
           echo "signed=true" >> "$GITHUB_OUTPUT"
@@ -88,12 +83,10 @@ jobs:
         run: ./gradlew assembleDebug --no-daemon
 
       - name: Collect APK
-        id: apk
         run: |
           APK=$(find android/app/build/outputs/apk -name '*.apk' | head -1)
           echo "Found $APK"
           cp "$APK" rhythm.apk
-          echo "path=rhythm.apk" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
