@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, ChevronUp, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
+import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
 import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 
@@ -37,15 +37,16 @@ function HabitLine({ h, iso, onToggle }) {
 /* ------------------------------------------------------------------ */
 /*  Block row (drop target for tasks, pool items, templates)           */
 /* ------------------------------------------------------------------ */
-function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, events = [], labelById, current, prayer, onPrayer, onToggle, onToggleSub, onReorder, onReorderSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId }) {
+function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, events = [], labelById, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, onSubDragStart, dragActive, dragOver, draggingId, draggingSubId, over }) {
   const [folded, setFolded] = useState(() => new Set()); // collapsed subtask lists, per task id (session-local)
   const toggleFold = (id) => setFolded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [quick, setQuick] = useState('');
   const [adding, setAdding] = useState(false);
   const submit = () => { if (quick.trim()) { onAdd(quick); setQuick(''); } };
-  // Movable tasks are the not-done ones; the arrows reorder within this list,
-  // which is the exact order the Now page walks through one at a time.
-  const movable = tasks.filter((t) => !t.done);
+  // Insertion-line classes for the drop position (dragging a task within this
+  // block, or dragging a subtask within a task's list).
+  const taskDrop = over && over.type === 'block' && over.id === block.id ? over : null;
+  const subDrop = over && over.type === 'subtask' ? over : null;
   return (
     <div className={`block ${current ? 'active' : ''} ${dragActive ? 'drop-on' : ''} ${dragOver ? 'dragover' : ''}`} style={{ '--accent': block.accent, '--accent-deep': block.accentDeep, '--tint': block.tint }} data-dropblock={block.id}>
       <div className="block-head">
@@ -75,15 +76,12 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
         </div>
       )}
       {tasks.length === 0 && habits.length === 0 && events.length === 0 && !adding && <button className="empty" onClick={() => setAdding(true)}>{bHint(block)}</button>}
-      {tasks.map((t) => { const p = labelById(t.projectId); const mi = t.done ? -1 : movable.findIndex((x) => x.id === t.id); const subs = t.subtasks || []; const subMovable = subs.filter((s) => !s.done); return (
-        <div key={t.id} className={`task ${t.done ? 'done' : ''} ${draggingId === t.id ? 'dragging' : ''}`}>
-          <span className="grip" onPointerDown={(e) => onDragStart(e, 'task', t)} title="Drag to another slot or the backlog"><GripVertical size={15} /></span>
-          {!t.done && onReorder && movable.length > 1 && (
-            <span className="reorder">
-              <button className="reorder-btn" disabled={mi <= 0} onClick={() => onReorder(t.id, -1)} aria-label={tx('Move up', 'حرّك لأعلى')} title={tx('Move up', 'حرّك لأعلى')}><ChevronUp size={13} /></button>
-              <button className="reorder-btn" disabled={mi < 0 || mi >= movable.length - 1} onClick={() => onReorder(t.id, 1)} aria-label={tx('Move down', 'حرّك لأسفل')} title={tx('Move down', 'حرّك لأسفل')}><ChevronDown size={13} /></button>
-            </span>
-          )}
+      {tasks.map((t) => { const p = labelById(t.projectId); const subs = t.subtasks || [];
+        const dBefore = taskDrop && taskDrop.taskId === t.id && !taskDrop.after;
+        const dAfter = taskDrop && taskDrop.taskId === t.id && taskDrop.after;
+        return (
+        <div key={t.id} data-taskid={t.id} className={`task ${t.done ? 'done' : ''} ${draggingId === t.id ? 'dragging' : ''} ${dBefore ? 'drop-before' : ''} ${dAfter ? 'drop-after' : ''}`}>
+          <span className="grip" onPointerDown={(e) => onDragStart(e, 'task', t)} title={tx('Drag to reorder or move to another slot', 'اسحب لإعادة الترتيب أو النقل')}><GripVertical size={15} /></span>
           <button className="tcheck" onClick={() => onToggle(t.id)} aria-label="Toggle done">{t.done ? <CheckCircle2 size={18} /> : <Circle size={18} />}</button>
           <div className="tcol">
             <button className="tmain" onClick={() => onOpen(t.id)}>
@@ -97,16 +95,13 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
               </button>
             )}
             {subs.length > 0 && !folded.has(t.id) && (
-              <ul className="subs">{subs.map((s) => { const si = s.done ? -1 : subMovable.findIndex((x) => x.id === s.id); return (
-                <li key={s.id} className={`sub ${s.done ? 'done' : ''}`}>
+              <ul className="subs" data-subtasklist={t.id}>{subs.map((s) => {
+                const sBefore = subDrop && subDrop.taskId === t.id && subDrop.subId === s.id && !subDrop.after;
+                const sAfter = subDrop && subDrop.taskId === t.id && subDrop.subId === s.id && subDrop.after;
+                return (
+                <li key={s.id} data-subid={s.id} className={`sub ${s.done ? 'done' : ''} ${draggingSubId === s.id ? 'dragging' : ''} ${sBefore ? 'drop-before' : ''} ${sAfter ? 'drop-after' : ''}`}>
                   <button className="subcheck" onClick={() => onToggleSub(t.id, s.id)}>{s.done ? <CheckCircle2 size={13} /> : <Circle size={13} />}</button>
-                  <span>{s.title}</span>
-                  {!s.done && onReorderSub && subMovable.length > 1 && (
-                    <span className="reorder sub-reorder">
-                      <button className="reorder-btn" disabled={si <= 0} onClick={() => onReorderSub(t.id, s.id, -1)} aria-label={tx('Move up', 'حرّك لأعلى')}><ChevronUp size={12} /></button>
-                      <button className="reorder-btn" disabled={si < 0 || si >= subMovable.length - 1} onClick={() => onReorderSub(t.id, s.id, 1)} aria-label={tx('Move down', 'حرّك لأسفل')}><ChevronDown size={12} /></button>
-                    </span>
-                  )}
+                  <span className="sub-drag" onPointerDown={(e) => onSubDragStart && onSubDragStart(e, t.id, s)} title={tx('Drag to reorder', 'اسحب لإعادة الترتيب')}>{s.title}</span>
                 </li>); })}</ul>
             )}
           </div>
@@ -239,22 +234,12 @@ function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labe
 /* ------------------------------------------------------------------ */
 /*  Shared subtasks + notes editors                                    */
 /* ------------------------------------------------------------------ */
-function SubtaskEditor({ subtasks, onAdd, onToggle, onDel, onMove }) {
+function SubtaskEditor({ subtasks, onAdd, onToggle, onDel }) {
   const [val, setVal] = useState('');
   const add = () => { if (val.trim()) { onAdd(val.trim()); setVal(''); } };
   return (<div className="sect">
     <div className="sect-h">{tx('Subtasks', 'المهام الفرعية')}</div>
-    {subtasks.map((s, i) => (<div key={s.id} className={`subrow ${s.done ? 'done' : ''}`}>
-      <button className="tcheck sm" onClick={() => onToggle(s.id)}>{s.done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</button>
-      <span>{s.title}</span>
-      {onMove && subtasks.length > 1 && (
-        <span className="reorder">
-          <button className="reorder-btn" disabled={i === 0} onClick={() => onMove(s.id, -1)} aria-label={tx('Move up', 'حرّك لأعلى')}><ChevronUp size={13} /></button>
-          <button className="reorder-btn" disabled={i === subtasks.length - 1} onClick={() => onMove(s.id, 1)} aria-label={tx('Move down', 'حرّك لأسفل')}><ChevronDown size={13} /></button>
-        </span>
-      )}
-      <button className="mini-del" onClick={() => onDel(s.id)}><X size={13} /></button>
-    </div>))}
+    {subtasks.map((s) => (<div key={s.id} className={`subrow ${s.done ? 'done' : ''}`}><button className="tcheck sm" onClick={() => onToggle(s.id)}>{s.done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</button><span>{s.title}</span><button className="mini-del" onClick={() => onDel(s.id)}><X size={13} /></button></div>))}
     <div className="inline-add"><input value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder={tx('Add a subtask…', 'أضف مهمة فرعية…')} /><button className="ghost sm" onClick={add}><Plus size={14} /></button></div>
   </div>);
 }
@@ -326,7 +311,7 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, onMo
               {tEndMin(task) != null && <button className="ghost sm focus-whole" onClick={() => onFocus(null, true)}>{tx('Until end', 'حتى النهاية')} ({timeLabel(task).split('–')[1] || fmtTime(task.end)})</button>}
             </div>
           </div>
-          <SubtaskEditor subtasks={task.subtasks} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...t.subtasks, { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.filter((s) => s.id !== id) }))} onMove={(id, dir) => onChange((t) => { const arr = [...t.subtasks]; const i = arr.findIndex((s) => s.id === id); const j = i + dir; if (i < 0 || j < 0 || j >= arr.length) return t; [arr[i], arr[j]] = [arr[j], arr[i]]; return { ...t, subtasks: arr }; })} />
+          <SubtaskEditor subtasks={task.subtasks} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...t.subtasks, { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.filter((s) => s.id !== id) }))} />
           <NotesEditor notes={task.notes || []} onAdd={(n) => onChange((t) => ({ ...t, notes: [...(t.notes || []), n] }))} onUpdate={(id, c) => onChange((t) => ({ ...t, notes: (t.notes || []).map((x) => x.id === id ? { ...x, content: c } : x) }))} onDel={(id) => onChange((t) => ({ ...t, notes: (t.notes || []).filter((x) => x.id !== id) }))} />
         </div>
         <div className="modal-foot"><button className="danger" onClick={onDelete}><Trash2 size={14} /> {tx('Delete', 'حذف')}</button><button className="primary" onClick={onClose}>{tx('Done', 'تم')}</button></div>
@@ -357,7 +342,7 @@ function PoolEditor({ item, projects, allProjects = [], onClose, onChange, onDel
             <button className="primary sm" onClick={onToDay}><CornerUpRight size={14} /> {tx('Schedule on a day', 'جدولة في يوم')}</button>
             <button className="ghost sm" onClick={onSaveTemplate}><Repeat size={14} /> {tx('Save as recurring', 'حفظ كمتكررة')}</button>
           </div>
-          <SubtaskEditor subtasks={item.subtasks || []} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...(t.subtasks || []), { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).filter((s) => s.id !== id) }))} onMove={(id, dir) => onChange((t) => { const arr = [...(t.subtasks || [])]; const i = arr.findIndex((s) => s.id === id); const j = i + dir; if (i < 0 || j < 0 || j >= arr.length) return t; [arr[i], arr[j]] = [arr[j], arr[i]]; return { ...t, subtasks: arr }; })} />
+          <SubtaskEditor subtasks={item.subtasks || []} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...(t.subtasks || []), { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).filter((s) => s.id !== id) }))} />
           <NotesEditor notes={item.notes || []} onAdd={(n) => onChange((t) => ({ ...t, notes: [...(t.notes || []), n] }))} onUpdate={(id, c) => onChange((t) => ({ ...t, notes: (t.notes || []).map((x) => x.id === id ? { ...x, content: c } : x) }))} onDel={(id) => onChange((t) => ({ ...t, notes: (t.notes || []).filter((x) => x.id !== id) }))} />
         </div>
         <div className="modal-foot"><button className="danger" onClick={onDelete}><Trash2 size={14} /> {tx('Delete', 'حذف')}</button><button className="primary" onClick={onClose}>{tx('Done', 'تم')}</button></div>

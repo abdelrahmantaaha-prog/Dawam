@@ -708,7 +708,9 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 
 /* ---- Now: one thing at a time ---- */
 .now-one{display:flex;flex-direction:column;gap:9px;padding:4px 0 2px}
+.now-one-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .now-one-label{font-size:10.5px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--faint)}
+.now-one-block{font-size:10.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;flex-shrink:0}
 .now-one-card{border:1px solid var(--soft);border-radius:12px;padding:14px 13px;background:var(--panel);align-items:flex-start}
 .now-one-card.now-item{border-top:1px solid var(--soft)}
 .now-one-card .now-item-title{font-size:16px}
@@ -719,14 +721,14 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .now-empty.all-done{display:flex;align-items:center;gap:8px;color:var(--verdigris);font-weight:600;padding:22px 4px 30px}
 .rhythm[dir="rtl"] .now-one-ctx{text-align:right}
 
-/* ---- reorder arrows (Plan tasks + subtasks) ---- */
-.reorder{display:inline-flex;flex-direction:column;flex:0 0 auto;gap:1px;margin-top:1px}
-.reorder-btn{display:grid;place-items:center;width:20px;height:15px;padding:0;border:1px solid var(--line);border-radius:5px;background:var(--panel);color:var(--muted);cursor:pointer}
-.reorder-btn:hover:not(:disabled){background:var(--soft);color:var(--ink)}
-.reorder-btn:disabled{opacity:.32;cursor:default}
-.sub-reorder .reorder-btn{width:18px;height:13px}
+/* ---- drag-to-reorder (tasks within a block; subtasks within a task) ---- */
 .sub>span{flex:1}
-.rhythm.dark .reorder-btn{background:var(--panel);border-color:var(--line)}
+.sub-drag{cursor:grab;touch-action:none;-webkit-user-select:none;user-select:none}
+.sub-drag:active{cursor:grabbing}
+.task.dragging,.sub.dragging{opacity:.4}
+/* insertion line marking where the dragged item will land */
+.task.drop-before,.sub.drop-before{box-shadow:inset 0 2px 0 -0.5px var(--verdigris)}
+.task.drop-after,.sub.drop-after{box-shadow:inset 0 -2px 0 -0.5px var(--verdigris)}
 
 /* ---- collapsible recurring/backlog sidebar ---- */
 .side-collapse{display:grid;place-items:center;width:32px;border:none;background:none;color:var(--muted);cursor:pointer;margin-left:auto}

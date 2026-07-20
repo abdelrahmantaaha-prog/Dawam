@@ -97,9 +97,10 @@ export default function Rhythm() {
         return r ? { ...tp, start: mm2(r.start), end: r.end != null ? mm2(r.end) : '', time: '' } : tp;
       });
       setTemplates(tplMigrated);
-      const ws = startOfWeek(new Date(), merged.weekStartDay);
+      // Land on the current Fajr→Fajr day (pre-dawn, that's still yesterday).
+      const today = logicalDayMid();
+      const ws = startOfWeek(today, merged.weekStartDay);
       setWeekStart(ws);
-      const today = new Date(); today.setHours(0, 0, 0, 0);
       const idx = Math.round((today - ws) / 86400000);
       setSelectedDay(idx >= 0 && idx <= 6 ? idx : 0);
       // Preload every stored week into the session cache. localStorage is on-device
@@ -166,16 +167,29 @@ export default function Rhythm() {
   useEffect(() => { if (!ready) return; const { t, fallback } = loadTimings(selectedDate); setTimings(t); setUsingFallback(fallback); }, [selectedDay, weekStart, ready, loadTimings]);
   useEffect(() => { if (!ready) return; setTodayTimings(loadTimings(new Date()).t); }, [ready, loadTimings]);
 
+  // The app's day runs Fajr → next Fajr. Between midnight and today's Fajr we
+  // are still in *yesterday's* day, so the logical "today" is the previous date.
+  // Everything that means "today" (the Now queue, overdue, the Plan highlight,
+  // habits, prayers) resolves through this so the whole app agrees on the
+  // boundary. `at` lets callers ask about a specific instant.
+  const logicalDayMid = useCallback((at) => {
+    const ref = at ? new Date(at) : new Date();
+    const cm = ref.getHours() * 60 + ref.getMinutes();
+    const d = new Date(ref); d.setHours(0, 0, 0, 0);
+    const fm = minutesOf(todayTimings.Fajr);
+    return (fm != null && cm < fm) ? addDays(d, -1) : d;
+  }, [todayTimings]);
+
   /* ---- today's week (when not displayed) ---- */
   useEffect(() => {
     if (!ready) return;
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const today = logicalDayMid();
     const tws = startOfWeek(today, settings.weekStartDay);
     if (fmtISO(tws) === fmtISO(weekStart)) { setTodayData(null); return; }
     let cancelled = false;
     (async () => { const w = await readWeek(fmtISO(tws)); if (!cancelled) { todayRef.current = w; setTodayData(w); } })();
     return () => { cancelled = true; };
-  }, [ready, weekStart, settings.weekStartDay]);
+  }, [ready, weekStart, settings.weekStartDay, logicalDayMid]);
 
   /* ---- overdue scan ---- */
   useEffect(() => {
@@ -183,8 +197,15 @@ export default function Rhythm() {
     let cancelled = false;
     (async () => {
       const wsd = settings.weekStartDay;
-      const today = new Date(); today.setHours(0, 0, 0, 0);
+      // "Today" is the current Fajr→Fajr day. Days before it are fully past;
+      // within today, a task is overdue once its block has ended — measured on
+      // the Fajr-anchored clock so the pre-dawn hours belong to the day that is
+      // ending, not the one about to begin.
+      const today = logicalDayMid();
       const n = new Date(); const curMin = n.getHours() * 60 + n.getMinutes();
+      const fajrM = minutesOf(todayTimings.Fajr);
+      const sinceFajr = (m) => (fajrM == null ? m : (((m - fajrM) % 1440) + 1440) % 1440);
+      const curSinceFajr = sinceFajr(curMin);
       const startW = startOfWeek(windowBounds().start, wsd);
       const endW = startOfWeek(today, wsd);
       const todayWS = fmtISO(startOfWeek(today, wsd));
@@ -206,7 +227,7 @@ export default function Rhythm() {
             let endMin = null;
             if (en != null) endMin = (st != null && en <= st) ? en + 1440 : en;
             else { const ek = blockById(t.block).endKey; endMin = ek ? minutesOf(todayTimings[ek]) : null; }
-            if (endMin != null && endMin <= curMin) items.push({ t, ws: new Date(ws), date: d });
+            if (endMin != null && sinceFajr(endMin) <= curSinceFajr) items.push({ t, ws: new Date(ws), date: d });
           }
         }
       }
@@ -214,7 +235,7 @@ export default function Rhythm() {
       if (!cancelled) setOverdue(items);
     })();
     return () => { cancelled = true; };
-  }, [ready, weekStart, week, todayData, settings.weekStartDay, todayTimings, nowTick, view, refresh]);
+  }, [ready, weekStart, week, todayData, settings.weekStartDay, todayTimings, nowTick, view, refresh, logicalDayMid]);
 
   useEffect(() => { const id = setInterval(() => setNowTick((x) => x + 1), 30000); return () => clearInterval(id); }, []);
 
@@ -595,35 +616,29 @@ export default function Rhythm() {
   const removeTask = (id) => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.id !== id) }); setEditing(null); };
   const toggleDone = (id) => mutateTask(id, (t) => ({ ...t, done: !t.done }));
   const toggleSub = (id, subId) => mutateTask(id, (t) => ({ ...t, subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) }));
-  // Reorder a subtask within its task's not-done subtasks. Rebuilds the array so
-  // the moved pair swaps in place; done subtasks keep their slots. This order is
-  // what the Now page uses to surface the next single step.
-  const reorderSub = (taskId, subId, dir) => mutateTask(taskId, (t) => {
-    const subs = t.subtasks || [];
-    const movable = subs.filter((s) => !s.done);
-    const i = movable.findIndex((s) => s.id === subId);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= movable.length) return t;
-    [movable[i], movable[j]] = [movable[j], movable[i]];
-    let k = 0;
-    const next = subs.map((s) => (s.done ? s : movable[k++]));
-    return { ...t, subtasks: next };
-  });
   const moveTaskToBlock = (id, block) => mutateTask(id, (t) => ({ ...t, block }));
-  // Reorder a task among the not-done tasks of its day+block. Orders are
-  // renumbered 1..n on every move; done tasks keep their old order and sink to
-  // the bottom via the done-first sort key.
-  const reorderTask = (id, dir) => {
+  // Drag-to-reorder: drop the task into `blockId` right before/after `targetId`
+  // (or at the block's end when targetId is null), then renumber 1..n so the
+  // manual order is stable. This exact order drives the one-at-a-time Now queue.
+  const moveTaskToPosition = (id, blockId, targetId, after) => {
     const w = weekRef.current;
-    const t = w.tasks.find((x) => x.id === id); if (!t) return;
-    const list = w.tasks.filter((x) => x.day === t.day && x.block === t.block && !x.done).sort((a, b) => a.order - b.order);
-    const i = list.findIndex((x) => x.id === id);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= list.length) return;
-    [list[i], list[j]] = [list[j], list[i]];
-    const orderOf = new Map(list.map((x, n) => [x.id, n + 1]));
-    persistWeek({ ...w, tasks: w.tasks.map((x) => (orderOf.has(x.id) ? { ...x, order: orderOf.get(x.id) } : x)) });
+    const dragged = w.tasks.find((t) => t.id === id); if (!dragged) return;
+    const dest = w.tasks.filter((t) => t.block === blockId && t.id !== id).sort((a, b) => (a.done - b.done) || (a.order - b.order));
+    let idx = dest.length;
+    if (targetId) { const ti = dest.findIndex((t) => t.id === targetId); if (ti >= 0) idx = ti + (after ? 1 : 0); }
+    const ordered = [...dest.slice(0, idx), dragged, ...dest.slice(idx)];
+    const orderOf = new Map(ordered.map((t, i) => [t.id, i + 1]));
+    persistWeek({ ...w, tasks: w.tasks.map((t) => (t.id === id ? { ...t, block: blockId, order: orderOf.get(t.id) } : orderOf.has(t.id) ? { ...t, order: orderOf.get(t.id) } : t)) });
   };
+  // Drag-to-reorder a subtask within its task, before/after `targetSubId`.
+  const moveSubToPosition = (taskId, subId, targetSubId, after) => mutateTask(taskId, (t) => {
+    const subs = t.subtasks || [];
+    const dragged = subs.find((s) => s.id === subId); if (!dragged) return t;
+    const rest = subs.filter((s) => s.id !== subId);
+    let idx = rest.length;
+    if (targetSubId) { const ti = rest.findIndex((s) => s.id === targetSubId); if (ti >= 0) idx = ti + (after ? 1 : 0); }
+    return { ...t, subtasks: [...rest.slice(0, idx), dragged, ...rest.slice(idx)] };
+  });
 
   /* ---- pool (backlog) ops ---- */
   const addPoolItem = (title, extra = {}) => {
@@ -815,15 +830,35 @@ export default function Rhythm() {
   const editingTask = week.tasks.find((t) => t.id === editing) || null;
   const editingPoolItem = pool.find((p) => p.id === editingPool) || null;
 
-  /* ---- drag & drop (pointer-based; sources: task/pool/template, targets: block/pool) ---- */
+  /* ---- drag & drop (pointer-based; sources: task/pool/template/subtask) ---- */
   const dragRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const dragActive = !!drag;
+  // Resolve what's under the pointer. Task/pool/template drags look for a block
+  // (and, within it, the specific task being hovered so we can drop before/after
+  // it) or the backlog. Subtask drags look only for a sibling subtask. Which
+  // kind is dragging decides which targets we accept.
   const findTarget = (x, y) => {
+    const kind = dragRef.current?.kind;
     let el = document.elementFromPoint(x, y);
+    let taskEl = null, subEl = null;
     while (el) {
-      if (el.dataset && el.dataset.dropblock) return { type: 'block', id: el.dataset.dropblock };
-      if (el.dataset && el.dataset.droppool != null) return { type: 'pool' };
+      if (el.dataset) {
+        if (kind === 'subtask') {
+          if (!subEl && el.dataset.subid) subEl = el;
+          if (el.dataset.subtasklist != null) {
+            if (subEl) { const r = subEl.getBoundingClientRect(); return { type: 'subtask', taskId: el.dataset.subtasklist, subId: subEl.dataset.subid, after: y > r.top + r.height / 2 }; }
+            return { type: 'subtask', taskId: el.dataset.subtasklist, subId: null, after: false };
+          }
+        } else {
+          if (!taskEl && el.dataset.taskid) taskEl = el;
+          if (el.dataset.dropblock) {
+            if (kind === 'task' && taskEl) { const r = taskEl.getBoundingClientRect(); return { type: 'block', id: el.dataset.dropblock, taskId: taskEl.dataset.taskid, after: y > r.top + r.height / 2 }; }
+            return { type: 'block', id: el.dataset.dropblock, taskId: null, after: false };
+          }
+          if (el.dataset.droppool != null) return { type: 'pool' };
+        }
+      }
       el = el.parentElement;
     }
     return null;
@@ -832,6 +867,11 @@ export default function Rhythm() {
     e.preventDefault();
     const color = item.projectId ? (labelById(item.projectId)?.color || null) : null;
     const s = { kind, id: item.id, title: item.title, time: timeLabel(item) || '', color, fromBlock: item.block || null, x: e.clientX, y: e.clientY, over: null };
+    dragRef.current = s; setDrag({ ...s });
+  };
+  const startSubDrag = (e, taskId, sub) => {
+    e.preventDefault();
+    const s = { kind: 'subtask', id: sub.id, taskId, title: sub.title, time: '', color: null, fromBlock: null, x: e.clientX, y: e.clientY, over: null };
     dragRef.current = s; setDrag({ ...s });
   };
   useEffect(() => {
@@ -847,8 +887,12 @@ export default function Rhythm() {
       const d = dragRef.current; dragRef.current = null; setDrag(null);
       if (!d || !d.over) return;
       if (d.kind === 'task') {
-        if (d.over.type === 'block' && d.over.id !== d.fromBlock) moveTaskToBlock(d.id, d.over.id);
-        else if (d.over.type === 'pool') taskToPool(d.id);
+        if (d.over.type === 'block') {
+          if (d.over.taskId && d.over.taskId !== d.id) moveTaskToPosition(d.id, d.over.id, d.over.taskId, d.over.after);
+          else if (d.over.id !== d.fromBlock) moveTaskToPosition(d.id, d.over.id, null, false);
+        } else if (d.over.type === 'pool') taskToPool(d.id);
+      } else if (d.kind === 'subtask') {
+        if (d.over.type === 'subtask' && d.over.taskId === d.taskId && d.over.subId && d.over.subId !== d.id) moveSubToPosition(d.taskId, d.id, d.over.subId, d.over.after);
       } else if (d.kind === 'pool') {
         if (d.over.type === 'block') poolToDay(d.id, selectedDay, d.over.id);
       } else if (d.kind === 'template') {
@@ -882,7 +926,7 @@ export default function Rhythm() {
     const dayList = Array.from({ length: 7 }, (_, i) => { const d = addDays(weekStart, i); return `${i}=${wdFull(d.getDay())} ${d.getDate()} ${mon(d.getMonth())}`; }).join(', ');
     const existing = week.tasks.map((t) => `{id:"${t.id}", title:"${t.title.replace(/"/g, "'")}", day:${t.day}, block:"${t.block}"}`).join('\n');
     const labelNames = settings.labels.map((p) => p.name).join(', ');
-    const todayIdx = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); const i = Math.round((d - weekStart) / 86400000); return i >= 0 && i <= 6 ? i : selectedDay; })();
+    const todayIdx = (() => { const d = logicalDayMid(); const i = Math.round((d - weekStart) / 86400000); return i >= 0 && i <= 6 ? i : selectedDay; })();
     const blockTimes = 'fajr=before sunrise; morning=~sunrise-12:55; dhuhr=~12:55-16:30; asr=~16:30-sunset; maghrib=sunset-21:15; isha=after ~21:15';
     const system = `You sort a person's brain-dump into a prayer-time-anchored DAY planner. Return ONLY one valid JSON object, no prose, no fences.
 
@@ -965,9 +1009,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const shiftWeek = (n) => setWeekStart((w) => { let nw = addDays(w, n * 7); if (nw < navMin) nw = navMin; if (nw > navMax) nw = navMax; return nw; });
   const canPrev = weekStart > navMin;
   const canNext = weekStart < navMax;
-  const goToday = () => { const ws = startOfWeek(new Date(), settings.weekStartDay); setWeekStart(ws); const today = new Date(); today.setHours(0, 0, 0, 0); setSelectedDay(Math.max(0, Math.min(6, Math.round((today - ws) / 86400000)))); };
+  const goToday = () => { const today = logicalDayMid(); const ws = startOfWeek(today, settings.weekStartDay); setWeekStart(ws); setSelectedDay(Math.max(0, Math.min(6, Math.round((today - ws) / 86400000)))); };
   const rangeLabel = () => { const end = addDays(weekStart, 6); return `${mon(weekStart.getMonth())} ${weekStart.getDate()} – ${mon(end.getMonth())} ${end.getDate()}`; };
-  const dayMeta = (i) => { const d = addDays(weekStart, i); const dt = week.tasks.filter((t) => t.day === i); return { date: d, label: wd(d.getDay()), num: d.getDate(), total: dt.length, done: dt.filter((t) => t.done).length, isToday: sameDay(d, new Date()) }; };
+  const dayMeta = (i) => { const d = addDays(weekStart, i); const dt = week.tasks.filter((t) => t.day === i); return { date: d, label: wd(d.getDay()), num: d.getDate(), total: dt.length, done: dt.filter((t) => t.done).length, isToday: sameDay(d, logicalDayMid()) }; };
 
   if (!ready) {
     return (<div style={{ minHeight: 320, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6B6878' }}><Loader2 size={18} className="spin" style={{ marginRight: 8 }} /> Loading your day…</div>);
@@ -976,26 +1020,26 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   /* ---- "right now" derivation ---- */
   const now = new Date();
   const curMin = now.getHours() * 60 + now.getMinutes();
-  const todayMid = new Date(now); todayMid.setHours(0, 0, 0, 0);
+  const activeId = activeBlockAt(todayTimings, curMin);
+  const activeBlock = blockById(activeId);
+  const fajrMin = minutesOf(todayTimings.Fajr);
+  // The day runs Fajr → next Fajr, so `todayMid` is the current logical day
+  // (already the previous date during the pre-dawn hours). `beforeFajr` is kept
+  // only for the few UI notes that phrase things around the night crossover.
+  const beforeFajr = fajrMin != null && curMin < fajrMin;
+  const todayMid = logicalDayMid();
   const todayInView = sameDay(addDays(weekStart, Math.round((todayMid - weekStart) / 86400000)), todayMid) && Math.round((todayMid - weekStart) / 86400000) >= 0 && Math.round((todayMid - weekStart) / 86400000) <= 6;
   const todayCol = todayInView ? Math.round((todayMid - weekStart) / 86400000) : Math.round((todayMid - startOfWeek(todayMid, settings.weekStartDay)) / 86400000);
   const nowSrc = todayInView ? week.tasks : (todayData?.tasks || []);
-  const activeId = activeBlockAt(todayTimings, curMin);
-  const activeBlock = blockById(activeId);
-  // Isha runs until Fajr, which crosses into the next calendar day. Between
-  // midnight and Fajr, "today" has already flipped but today's own Isha
-  // hasn't happened yet (it's tonight, ~21:15) — the isha tasks that apply
-  // right now are last night's, filed under yesterday's date.
-  const fajrMin = minutesOf(todayTimings.Fajr);
-  const inOvernightIsha = activeId === 'isha' && fajrMin != null && curMin < fajrMin;
-  const nowDayCol = inOvernightIsha ? todayCol - 1 : todayCol;
+  const nowDayCol = todayCol;
   const todayTasks = nowDayCol >= 0 ? nowSrc.filter((t) => t.day === nowDayCol) : [];
-  const coversNow = (t) => { const st = tStartMin(t), en = tEndMin(t); return st != null && en != null ? inWindow(st, en, curMin) : false; };
-  // The Now queue mirrors the Plan page EXACTLY: blocks top-to-bottom, then the
+  // The Now queue mirrors the Plan page EXACTLY: every task from the START of the
+  // day (all blocks — not just the current prayer period, so nothing left behind
+  // earlier in the day gets skipped), ordered by block top-to-bottom then the
   // manual within-block order (same key as tasksFor). One item is surfaced at a
   // time; checking it reveals the next.
   const blockIdx = (id) => BLOCKS.findIndex((b) => b.id === id);
-  const nowList = todayTasks.filter((t) => t.block === activeId || coversNow(t)).sort((a, b) => (blockIdx(a.block) - blockIdx(b.block)) || (a.done - b.done) || (a.order - b.order));
+  const nowList = todayTasks.slice().sort((a, b) => (blockIdx(a.block) - blockIdx(b.block)) || (a.done - b.done) || (a.order - b.order));
   const nowStart = cleanTime(todayTimings[activeBlock.startKey]) || '';
   const nowEnd = activeBlock.endKey ? cleanTime(todayTimings[activeBlock.endKey]) || '' : '';
   const clockLabel = `${((now.getHours() + 11) % 12) + 1}:${pad(now.getMinutes())} ${now.getHours() < 12 ? 'AM' : 'PM'}`;
@@ -1010,10 +1054,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   setLang(settings.lang === 'ar' ? 'ar' : 'en');
   const topLuma = 0.299 * sky.top[0] + 0.587 * sky.top[1] + 0.114 * sky.top[2];
   const heroLight = topLuma < 140; // light text once the sky behind it is dark enough to need it
-  // During the overnight Isha window (midnight -> Fajr) the prayer that gates the
-  // app is *last night's* Isha, filed under yesterday — today's own Isha hasn't
-  // happened yet. Same day-shift the Now task list already applies.
-  const prayerDayCol = inOvernightIsha ? todayCol - 1 : todayCol;
+  // Prayers hang on the current logical day (Fajr→Fajr), so during the pre-dawn
+  // hours the gating prayer is last night's Isha — already handled by todayMid.
+  const prayerDayCol = todayCol;
   const prayersToday = ((todayInView ? week : todayData)?.prayers || {})[prayerDayCol] || {};
   // Which prayer, if any, is gating the app right now.
   //  • Inside a prayer period → that prayer.
@@ -1040,7 +1083,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const gateArrivalLeft = gateElapsed != null && gateElapsed < PRAYER_HARD_MIN ? PRAYER_HARD_MIN - gateElapsed : 0;
   // …plus the unmark penalty (15 min from the moment it was unticked). nowTick in
   // the render deps makes this recompute each minute so the countdown advances.
-  const gatePenaltyKey = gateId ? `${fmtISO(inOvernightIsha ? addDays(todayMid, -1) : todayMid)}:${gateId}` : '';
+  const gatePenaltyKey = gateId ? `${fmtISO(todayMid)}:${gateId}` : '';
   const gatePenaltyTs = gatePenaltyKey ? prayerPenaltyRef.current[gatePenaltyKey] : 0;
   const gatePenaltyLeft = gatePenaltyTs ? Math.ceil((PRAYER_HARD_MIN * 60000 - (Date.now() - gatePenaltyTs)) / 60000) : 0;
   const gateHardLeft = Math.max(gateArrivalLeft, gatePenaltyLeft > 0 ? gatePenaltyLeft : 0);
@@ -1116,12 +1159,12 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
 
   const confirmOath = () => {
     if (!isOath(oathText)) return; // belt and braces: the button is disabled too
-    togglePrayer(gateId, inOvernightIsha ? addDays(todayMid, -1) : todayMid);
+    togglePrayer(gateId, todayMid);
     setOathText('');
   };
   const gateHard = gateActive && gateHardLeft > 0;
   const usedTpl = {}; week.tasks.forEach((t) => { if (t.day === selectedDay && t.templateId) usedTpl[t.templateId] = (usedTpl[t.templateId] || 0) + 1; });
-  const isSelectedToday = sameDay(selectedDate, new Date());
+  const isSelectedToday = sameDay(selectedDate, todayMid);
   // Prayers as built-in habits: derived views over the existing prayer log, so
   // marking a prayer at the gate and ticking it here are the same action. Not
   // stored in settings.habits — no duplicate state to drift.
@@ -1143,28 +1186,24 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     if (String(id).startsWith('prayer:')) { togglePrayer(id.slice(7), parseISO(iso)); return; }
     toggleHabitDay(id, iso);
   };
-  // Overdue habits: TODAY only — habits (including built-in prayers) whose day
-  // period has fully passed without being kept. During the overnight-Isha
-  // window the new day hasn't really begun, so nothing is overdue yet. Plain
-  // computation, deliberately not a hook (below an early return).
+  // Overdue habits: the current logical day only — habits (including built-in
+  // prayers) whose period has fully passed without being kept. In the pre-dawn
+  // wind-down we don't nag (the day is ending, not begun). Plain computation,
+  // deliberately not a hook (below an early return).
   const overdueHabits = (() => {
-    if (inOvernightIsha) return [];
+    if (beforeFajr) return [];
     const activeIdx = BLOCKS.findIndex((b) => b.id === activeId);
-    const todayD = new Date(); todayD.setHours(0, 0, 0, 0);
-    const todayISO = fmtISO(todayD);
+    const todayISO = fmtISO(todayMid);
     const out = [];
     for (const h of [...prayerHabits, ...(settings.habits || [])]) {
       const idx = BLOCKS.findIndex((b) => b.id === (h.block || 'morning'));
       if (idx < 0 || idx >= activeIdx) continue; // period still ahead or current
-      const done = h.prayer ? habitDoneOn(h, todayISO) : habitDoneOn(h, todayISO);
-      if (!done) out.push({ h, iso: todayISO, date: todayD });
+      if (!habitDoneOn(h, todayISO)) out.push({ h, iso: todayISO, date: todayMid });
     }
     return out;
   })();
-  // Habits belonging to the current period, shown in Now. Tied to the same
-  // calendar day the Now list uses (yesterday during the overnight-Isha window).
-  const nowHabitISO = fmtISO(inOvernightIsha ? addDays(todayMid, -1) : todayMid);
-  const nowHabits = (settings.habits || []).filter((h) => (h.block || 'morning') === activeId);
+  // ISO of the current logical day, used by the Now habit/prayer items.
+  const nowHabitISO = fmtISO(todayMid);
 
   const poolDragActive = drag && (drag.kind === 'task');
   // Strings rendered inside item-map callbacks (where the map's item variable is
@@ -1205,15 +1244,25 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         <div className="warn"><AlertCircle size={15} /><span>{tx("This device isn't saving between sessions. Your plan lives only in this view — export it from Settings to keep it.", 'هذا الجهاز لا يحفظ بين الجلسات. خطتك موجودة في هذا العرض فقط — صدّرها من الإعدادات للاحتفاظ بها.')}</span></div>
       )}
 
-      {/* NOW — one thing at a time: the first unchecked habit/task of the
-          current period, in exact Plan-page order. Checking it reveals the next. */}
+      {/* NOW — one thing at a time. The queue is the WHOLE day (Fajr → next
+          Fajr), every block top-to-bottom in exact Plan order, with prayers,
+          habits and task subtasks folded in. Nothing earlier in the day gets
+          skipped: the next unchecked item is surfaced alone, and checking it
+          reveals the one after. */}
       {view === 'now' && (() => {
-        const pendingHabits = nowHabits.filter((h) => !habitDoneOn(h, nowHabitISO));
-        const pendingTasks = nowList.filter((t) => !t.done);
-        const queue = [...pendingHabits.map((h) => ({ kind: 'habit', h })), ...pendingTasks.map((t) => ({ kind: 'task', t }))];
-        const totalN = nowList.length + nowHabits.length;
+        const activeIdx = blockIdx(activeId);
+        const habitsOf = (bid) => (settings.habits || []).filter((h) => (h.block || 'morning') === bid);
+        const queue = [];
+        for (const b of BLOCKS) {
+          if (PRAYER_BLOCKS.includes(b.id) && blockIdx(b.id) <= activeIdx && !prayersToday[b.id]) queue.push({ kind: 'prayer', block: b });
+          for (const h of habitsOf(b.id)) if (!habitDoneOn(h, nowHabitISO)) queue.push({ kind: 'habit', block: b, h });
+          for (const t of nowList.filter((t) => t.block === b.id && !t.done)) queue.push({ kind: 'task', block: b, t });
+        }
+        const startedPrayers = PRAYER_BLOCKS.filter((pid) => blockIdx(pid) <= activeIdx).length;
+        const totalN = nowList.length + (settings.habits || []).length + startedPrayers;
         const doneN = totalN - queue.length;
         const next = queue[0] || null;
+        const nextBlock = next ? next.block : activeBlock;
         const nextTask = next && next.kind === 'task' ? next.t : null;
         const subs = nextTask ? nextTask.subtasks || [] : [];
         const nextSub = subs.find((s) => !s.done) || null;
@@ -1228,8 +1277,18 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           <div className="hero-sheet">
             {next ? (
               <div className="now-one">
-                <div className="now-one-label">{tx('One thing at a time', 'شيء واحد في كل مرة')}{queue.length > 1 ? ` · ${queue.length - 1} ${tx('more after this', 'غيره بعده')}` : ''}</div>
-                {next.kind === 'habit' ? (
+                <div className="now-one-top">
+                  <span className="now-one-label">{tx('One thing at a time', 'شيء واحد في كل مرة')}{queue.length > 1 ? ` · ${queue.length - 1} ${tx('more today', 'أخرى اليوم')}` : ''}</span>
+                  <span className="now-one-block" style={{ color: nextBlock.accentDeep }}>{bName(nextBlock)}</span>
+                </div>
+                {next.kind === 'prayer' ? (
+                  <div className="now-one-card now-item current">
+                    {todayInView
+                      ? <button className="tcheck big" onClick={() => togglePrayer(next.block.id, todayMid)} aria-label={tx('Mark prayer performed', 'تم أداء الصلاة')}><Circle size={22} /></button>
+                      : <span className="now-dot" style={{ background: 'var(--verdigris)' }} />}
+                    <div className="now-col"><span className="now-item-title">{tx(`${next.block.name} prayer`, `صلاة ${next.block.ar}`)}</span></div>
+                  </div>
+                ) : next.kind === 'habit' ? (
                   <div className="now-one-card">
                     <HabitLine h={next.h} iso={nowHabitISO} onToggle={toggleHabitDay} />
                   </div>
@@ -1260,9 +1319,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 )}
               </div>
             ) : totalN > 0 ? (
-              <div className="now-empty all-done"><CheckCircle2 size={22} /> {tx('All done for this period. Breathe.', 'أنجزت كل شيء في هذه الفترة. تنفّس.')}</div>
+              <div className="now-empty all-done"><CheckCircle2 size={22} /> {tx('All done for today. Rest easy.', 'أنجزت كل شيء اليوم. ارتَح.')}</div>
             ) : (
-              <div className="now-empty">{tx('Nothing scheduled here.', 'لا شيء مجدول هنا.')} {bHint(activeBlock)}.</div>
+              <div className="now-empty">{tx('Nothing scheduled today.', 'لا شيء مجدول اليوم.')} {bHint(activeBlock)}.</div>
             )}
             {!todayInView && <button className="now-jump" onClick={goToday}>{tx('Jump to today', 'انتقل إلى اليوم')}</button>}
           </div>
@@ -1374,13 +1433,16 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 habits={settings.habits.filter((h) => (h.block || 'morning') === b.id)}
                 habitDate={fmtISO(selectedDate)} onToggleHabit={toggleHabitDay}
                 events={gcalByBlock[b.id] || []}
-                current={isSelectedToday && b.id === activeId && !inOvernightIsha}
+                current={isSelectedToday && b.id === activeId}
                 prayer={isSelectedToday && PRAYER_BLOCKS.includes(b.id) ? { done: !!(week.prayers?.[selectedDay]?.[b.id]) } : null}
-                onPrayer={() => togglePrayer(b.id)}
-                onToggle={toggleDone} onToggleSub={toggleSub} onReorder={reorderTask} onReorderSub={reorderSub} onOpen={setEditing}
+                onPrayer={() => togglePrayer(b.id, selectedDate)}
+                onToggle={toggleDone} onToggleSub={toggleSub} onOpen={setEditing}
                 onAdd={(title) => addTask(selectedDay, b.id, title)}
-                onDragStart={startDrag}
-                dragActive={dragActive} dragOver={drag && drag.over && drag.over.type === 'block' && drag.over.id === b.id} draggingId={drag && drag.kind === 'task' ? drag.id : null} />
+                onDragStart={startDrag} onSubDragStart={startSubDrag}
+                dragActive={dragActive} dragOver={drag && drag.over && drag.over.type === 'block' && drag.over.id === b.id}
+                draggingId={drag && drag.kind === 'task' ? drag.id : null}
+                draggingSubId={drag && drag.kind === 'subtask' ? drag.id : null}
+                over={drag && drag.over ? drag.over : null} />
             ))}
           </div>
           <aside className="plan-side">
