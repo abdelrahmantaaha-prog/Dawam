@@ -21,8 +21,12 @@
 
 const ONGOING_ID = 1;            // fixed id: rescheduling replaces it in place
 const REMINDER_BASE = 1000;      // task reminders live above this
-const CH_REMIND = 'rhythm-reminders';
-const CH_ONGOING = 'rhythm-now';
+// Channel ids are VERSIONED. Android freezes a channel's importance at creation
+// and ignores later changes, so correcting importance means publishing a new id
+// — otherwise a device that already made the old channel keeps the old
+// behaviour forever (short of reinstalling).
+const CH_REMIND = 'rhythm-reminders-v2';
+const CH_ONGOING = 'rhythm-now-v2';
 
 let plugin = null;               // resolved LocalNotifications, native only
 let native = null;               // cached platform check
@@ -62,6 +66,25 @@ export async function permissionState() {
   try { return (await ln.checkPermissions()).display; } catch { return 'denied'; }
 }
 
+/* Create the channels. MUST run before anything is posted: on Android 8+ a
+   notification aimed at a channel that doesn't exist is dropped silently — no
+   error, no notification. This used to live only in ensurePermission(), which
+   meant that on Android <= 12 (where POST_NOTIFICATIONS is auto-granted, so the
+   Settings button is never needed) the channels were never created and every
+   single notification vanished. Idempotent: Android ignores repeat creates. */
+let channelsReady = false;
+async function ensureChannels(ln) {
+  if (channelsReady) return;
+  try {
+    // 4 = IMPORTANCE_HIGH: reminders must cut through.
+    await ln.createChannel({ id: CH_REMIND, name: 'Task reminders', importance: 4, visibility: 1 });
+    // 2 = IMPORTANCE_LOW: silent, but still shown with a status-bar icon.
+    // (1 = MIN hides the icon and collapses it, which reads as "nothing".)
+    await ln.createChannel({ id: CH_ONGOING, name: 'Now', importance: 2, visibility: 1 });
+    channelsReady = true;
+  } catch { /* channels are Android-only; harmless elsewhere */ }
+}
+
 /* Ask — call this from a real user gesture (the Settings button).
    Returns true when we may post notifications. */
 export async function ensurePermission() {
@@ -70,13 +93,23 @@ export async function ensurePermission() {
   let s = await ln.checkPermissions();
   if (s.display === 'prompt' || s.display === 'prompt-with-rationale') s = await ln.requestPermissions();
   if (s.display !== 'granted') return false;
-  // Android 8+ needs channels. Reminders are high importance (they must cut
-  // through); the ongoing card is low so it never buzzes.
-  try {
-    await ln.createChannel({ id: CH_REMIND, name: 'Task reminders', importance: 4, visibility: 1 });
-    await ln.createChannel({ id: CH_ONGOING, name: 'Now', importance: 1, visibility: 1 });
-  } catch { /* channels are Android-only; harmless elsewhere */ }
+  await ensureChannels(ln);
   return true;
+}
+
+/* Post one notification right now. Purely a diagnostic for the Settings
+   screen — if this doesn't appear, the problem is permission/channels/OS, not
+   the scheduling logic. Returns a short string describing what happened. */
+export async function testNotification() {
+  const ln = await get();
+  if (!ln) return 'not the Android app';
+  const state = (await ln.checkPermissions()).display;
+  if (state !== 'granted') return `permission is "${state}"`;
+  await ensureChannels(ln);
+  try {
+    await ln.schedule({ notifications: [{ id: 99, title: 'Rhythm', body: 'Notifications are working.', channelId: CH_REMIND }] });
+    return 'sent';
+  } catch (e) { return `failed: ${e && e.message ? e.message : e}`; }
 }
 
 /* Replace all pending task reminders with the given set.
@@ -84,6 +117,7 @@ export async function ensurePermission() {
 export async function syncReminders(items) {
   const ln = await get();
   if (!ln) return;
+  await ensureChannels(ln);
   try {
     const pending = await ln.getPending();
     const stale = (pending.notifications || []).filter((n) => n.id >= REMINDER_BASE);
@@ -103,10 +137,22 @@ export async function syncReminders(items) {
   } catch (e) { console.warn('reminder sync failed', e); }
 }
 
+/* How many reminders Android currently holds for us — the honest answer to
+   "is anything actually scheduled?". */
+export async function pendingCount() {
+  const ln = await get();
+  if (!ln) return null;
+  try {
+    const p = await ln.getPending();
+    return (p.notifications || []).filter((n) => n.id >= REMINDER_BASE).length;
+  } catch { return null; }
+}
+
 /* Post/refresh the ongoing "what's on Now" card. `null` clears it. */
 export async function setOngoing(text) {
   const ln = await get();
   if (!ln) return;
+  await ensureChannels(ln);
   try {
     if (!text) { await ln.cancel({ notifications: [{ id: ONGOING_ID }] }); return; }
     await ln.schedule({

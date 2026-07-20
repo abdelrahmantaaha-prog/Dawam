@@ -293,7 +293,7 @@ function PinScreen({ onVerify, onSuccess }) {
 /* ------------------------------------------------------------------ */
 /*  Settings                                                           */
 /* ------------------------------------------------------------------ */
-function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncNow, notify, onEnableNotify, storageOk, onClose, onClearDay, dayLabel, onLang }) {
+function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncNow, notify, onEnableNotify, onTestNotify, storageOk, onClose, onClearDay, dayLabel, onLang }) {
   const [local, setLocal] = useState(settings);
   const [tab, setTab] = useState('general');
   // Keep the local editing copy in sync when the parent persists settings from
@@ -448,6 +448,14 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                 ) : (
                   <button className="primary" onClick={onEnableNotify}><Clock size={14} /> {tx('Enable reminders', 'تفعيل التنبيهات')}</button>
                 )}
+                <div className="io-actions" style={{ marginTop: 8 }}>
+                  <button className="ghost sm" onClick={onTestNotify}>{tx('Send a test notification', 'أرسل تنبيهًا تجريبيًا')}</button>
+                </div>
+                <p className="hint-text" style={{ marginTop: 6 }}>
+                  {tx('Permission', 'الإذن')}: <code>{notify.state}</code>
+                  {notify.pending != null ? <> · {tx('scheduled', 'مجدولة')}: <code>{notify.pending}</code></> : null}
+                  {notify.test ? <> · {tx('test', 'الاختبار')}: <code>{notify.test}</code></> : null}
+                </p>
               </>)}
             </div>
           )}

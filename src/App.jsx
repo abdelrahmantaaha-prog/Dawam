@@ -3,7 +3,7 @@ import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, 
 import { hasVault,vaultUnlocked,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { createSync, AUTO_EVERY_MS } from './sync.js';
-import { isNative as nativeShell, ensurePermission, permissionState, syncReminders, setOngoing } from './notify.js';
+import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, testNotification, syncReminders, setOngoing } from './notify.js';
 import { ASSISTANT_SYSTEM, buildDaySnapshot, parseAssistantReply, callAssistant } from './assistant.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
@@ -1191,14 +1191,26 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       const nat = await nativeShell();
       if (stop) return;
       if (!nat) { setNotifyState({ supported: false, state: 'unsupported' }); return; }
-      setNotifyState({ supported: true, state: await permissionState() });
+      setNotifyState((p) => ({ ...p, supported: true, state: 'checking' }));
+      const st = await permissionState();
+      const pend = await pendingCount();
+      if (stop) return;
+      setNotifyState((p) => ({ ...p, supported: true, state: st, pending: pend }));
     })();
     return () => { stop = true; };
-  }, [ready]);
+  }, [ready, reminderPlan]);
   const enableNotify = async () => {
     const ok = await ensurePermission();
-    setNotifyState({ supported: true, state: ok ? 'granted' : await permissionState() });
+    const st = ok ? 'granted' : await permissionState();
+    const pend = await pendingCount();
+    setNotifyState((p) => ({ ...p, supported: true, state: st, pending: pend }));
     if (ok) flash(tx('Reminders enabled.', 'تم تفعيل التنبيهات.'));
+  };
+  const testNotify = async () => {
+    const r = await testNotification();
+    const pend = await pendingCount();
+    setNotifyState((p) => ({ ...p, test: r, pending: pend }));
+    flash(r === 'sent' ? tx('Test sent.', 'تم إرسال الاختبار.') : r);
   };
 
   const poolDragActive = drag && (drag.kind === 'task');
@@ -1579,7 +1591,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           onSetPin={setPin}
           sync={{ busy: syncBusy, msg: syncMsg, lastSync, everyMs: AUTO_EVERY_MS }}
           onSyncNow={() => runSync()}
-          notify={notifyState} onEnableNotify={enableNotify}
+          notify={notifyState} onEnableNotify={enableNotify} onTestNotify={testNotify}
           storageOk={storageOk} onClose={() => setShowSettings(false)}
           onClearDay={() => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.day !== selectedDay) }); flash(tx('Day cleared.', 'تم مسح اليوم.')); }}
           dayLabel={`${wdFull(selectedDate.getDay())} ${selectedDate.getDate()} ${mon(selectedDate.getMonth())}`} />
