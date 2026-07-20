@@ -37,16 +37,16 @@ function HabitLine({ h, iso, onToggle }) {
 /* ------------------------------------------------------------------ */
 /*  Block row (drop target for tasks, pool items, templates)           */
 /* ------------------------------------------------------------------ */
-function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, events = [], labelById, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, onSubDragStart, dragActive, dragOver, draggingId, draggingSubId, over }) {
+function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over }) {
   const [folded, setFolded] = useState(() => new Set()); // collapsed subtask lists, per task id (session-local)
   const toggleFold = (id) => setFolded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [quick, setQuick] = useState('');
   const [adding, setAdding] = useState(false);
   const submit = () => { if (quick.trim()) { onAdd(quick); setQuick(''); } };
-  // Insertion-line classes for the drop position (dragging a task within this
-  // block, or dragging a subtask within a task's list).
+  // Insertion-line position for a task being dragged within this block.
+  // Subtasks are NOT reorderable here — that lives in the task's detail editor,
+  // so the timeline stays a calm read/check surface.
   const taskDrop = over && over.type === 'block' && over.id === block.id ? over : null;
-  const subDrop = over && over.type === 'subtask' ? over : null;
   return (
     <div className={`block ${current ? 'active' : ''} ${dragActive ? 'drop-on' : ''} ${dragOver ? 'dragover' : ''}`} style={{ '--accent': block.accent, '--accent-deep': block.accentDeep, '--tint': block.tint }} data-dropblock={block.id}>
       <div className="block-head">
@@ -64,18 +64,7 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
           {habits.map((h) => <HabitLine key={h.id} h={h} iso={habitDate} onToggle={onToggleHabit} />)}
         </div>
       )}
-      {events.length > 0 && (
-        <div className="block-cal">
-          {events.map((ev) => (
-            <div key={ev.id} className="cal-event" title={tx('From Google Calendar (read-only)', 'من تقويم Google (للعرض فقط)')}>
-              <Calendar size={13} className="cal-ic" />
-              <span className="cal-time">{fmtTime(ev.startHM)}</span>
-              <span className="cal-title">{ev.title}</span>
-            </div>
-          ))}
-        </div>
-      )}
-      {tasks.length === 0 && habits.length === 0 && events.length === 0 && !adding && <button className="empty" onClick={() => setAdding(true)}>{bHint(block)}</button>}
+      {tasks.length === 0 && habits.length === 0 && !adding && <button className="empty" onClick={() => setAdding(true)}>{bHint(block)}</button>}
       {tasks.map((t) => { const p = labelById(t.projectId); const subs = t.subtasks || [];
         const dBefore = taskDrop && taskDrop.taskId === t.id && !taskDrop.after;
         const dAfter = taskDrop && taskDrop.taskId === t.id && taskDrop.after;
@@ -95,14 +84,12 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
               </button>
             )}
             {subs.length > 0 && !folded.has(t.id) && (
-              <ul className="subs" data-subtasklist={t.id}>{subs.map((s) => {
-                const sBefore = subDrop && subDrop.taskId === t.id && subDrop.subId === s.id && !subDrop.after;
-                const sAfter = subDrop && subDrop.taskId === t.id && subDrop.subId === s.id && subDrop.after;
-                return (
-                <li key={s.id} data-subid={s.id} className={`sub ${s.done ? 'done' : ''} ${draggingSubId === s.id ? 'dragging' : ''} ${sBefore ? 'drop-before' : ''} ${sAfter ? 'drop-after' : ''}`}>
+              <ul className="subs">{subs.map((s) => (
+                <li key={s.id} className={`sub ${s.done ? 'done' : ''}`}>
                   <button className="subcheck" onClick={() => onToggleSub(t.id, s.id)}>{s.done ? <CheckCircle2 size={13} /> : <Circle size={13} />}</button>
-                  <span className="sub-drag" onPointerDown={(e) => onSubDragStart && onSubDragStart(e, t.id, s)} title={tx('Drag to reorder', 'اسحب لإعادة الترتيب')}>{s.title}</span>
-                </li>); })}</ul>
+                  <span>{s.title}</span>
+                </li>
+              ))}</ul>
             )}
           </div>
           </div>); })}
@@ -234,12 +221,65 @@ function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labe
 /* ------------------------------------------------------------------ */
 /*  Shared subtasks + notes editors                                    */
 /* ------------------------------------------------------------------ */
-function SubtaskEditor({ subtasks, onAdd, onToggle, onDel }) {
+/* Move `id` to sit before/after `targetId` in a list of {id} items. */
+function moveById(list, id, targetId, after) {
+  const dragged = list.find((x) => x.id === id);
+  if (!dragged) return list;
+  const rest = list.filter((x) => x.id !== id);
+  const ti = rest.findIndex((x) => x.id === targetId);
+  const idx = ti < 0 ? rest.length : ti + (after ? 1 : 0);
+  return [...rest.slice(0, idx), dragged, ...rest.slice(idx)];
+}
+
+/* Subtasks reorder by dragging their text. Self-contained pointer handling —
+   the modal is outside the timeline's drag system, and keeping it local means
+   the two never contend for the same pointer stream. */
+function SubtaskEditor({ subtasks, onAdd, onToggle, onDel, onMove }) {
   const [val, setVal] = useState('');
+  const [drag, setDrag] = useState(null); // { id, overId, after }
+  const dragRef = useRef(null);
   const add = () => { if (val.trim()) { onAdd(val.trim()); setVal(''); } };
+  const start = (e, id) => {
+    if (!onMove) return;
+    e.preventDefault();
+    dragRef.current = { id, overId: null, after: false };
+    setDrag({ ...dragRef.current });
+  };
+  useEffect(() => {
+    if (!drag) return;
+    const move = (e) => {
+      e.preventDefault();
+      let el = document.elementFromPoint(e.clientX, e.clientY);
+      let row = null;
+      while (el) { if (el.dataset && el.dataset.subrow) { row = el; break; } el = el.parentElement; }
+      if (row) {
+        const r = row.getBoundingClientRect();
+        dragRef.current = { ...dragRef.current, overId: row.dataset.subrow, after: e.clientY > r.top + r.height / 2 };
+      } else dragRef.current = { ...dragRef.current, overId: null };
+      setDrag({ ...dragRef.current });
+    };
+    const up = () => {
+      const d = dragRef.current; dragRef.current = null; setDrag(null);
+      if (d && d.overId && d.overId !== d.id) onMove(d.id, d.overId, d.after);
+    };
+    window.addEventListener('pointermove', move, { passive: false });
+    window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); };
+  }, [drag, onMove]);
   return (<div className="sect">
     <div className="sect-h">{tx('Subtasks', 'المهام الفرعية')}</div>
-    {subtasks.map((s) => (<div key={s.id} className={`subrow ${s.done ? 'done' : ''}`}><button className="tcheck sm" onClick={() => onToggle(s.id)}>{s.done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</button><span>{s.title}</span><button className="mini-del" onClick={() => onDel(s.id)}><X size={13} /></button></div>))}
+    {subtasks.map((s) => {
+      const isOver = drag && drag.overId === s.id && drag.id !== s.id;
+      return (
+        <div key={s.id} data-subrow={s.id}
+          className={`subrow ${s.done ? 'done' : ''} ${drag && drag.id === s.id ? 'dragging' : ''} ${isOver && !drag.after ? 'drop-before' : ''} ${isOver && drag.after ? 'drop-after' : ''}`}>
+          <button className="tcheck sm" onClick={() => onToggle(s.id)}>{s.done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</button>
+          <span className={onMove ? 'sub-drag' : ''} onPointerDown={(e) => start(e, s.id)} title={onMove ? tx('Drag to reorder', 'اسحب لإعادة الترتيب') : undefined}>{s.title}</span>
+          <button className="mini-del" onClick={() => onDel(s.id)}><X size={13} /></button>
+        </div>
+      );
+    })}
+    {subtasks.length > 1 && onMove && <p className="hint-text" style={{ marginTop: 2 }}>{tx('Drag a step by its text to reorder — this is the order Now walks through.', 'اسحب أي خطوة من نصّها لإعادة ترتيبها — هذا هو الترتيب الذي تتبعه صفحة الآن.')}</p>}
     <div className="inline-add"><input value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder={tx('Add a subtask…', 'أضف مهمة فرعية…')} /><button className="ghost sm" onClick={add}><Plus size={14} /></button></div>
   </div>);
 }
@@ -311,7 +351,7 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, onMo
               {tEndMin(task) != null && <button className="ghost sm focus-whole" onClick={() => onFocus(null, true)}>{tx('Until end', 'حتى النهاية')} ({timeLabel(task).split('–')[1] || fmtTime(task.end)})</button>}
             </div>
           </div>
-          <SubtaskEditor subtasks={task.subtasks} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...t.subtasks, { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.filter((s) => s.id !== id) }))} />
+          <SubtaskEditor subtasks={task.subtasks} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...t.subtasks, { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.filter((s) => s.id !== id) }))} onMove={(id, targetId, after) => onChange((t) => ({ ...t, subtasks: moveById(t.subtasks || [], id, targetId, after) }))} />
           <NotesEditor notes={task.notes || []} onAdd={(n) => onChange((t) => ({ ...t, notes: [...(t.notes || []), n] }))} onUpdate={(id, c) => onChange((t) => ({ ...t, notes: (t.notes || []).map((x) => x.id === id ? { ...x, content: c } : x) }))} onDel={(id) => onChange((t) => ({ ...t, notes: (t.notes || []).filter((x) => x.id !== id) }))} />
         </div>
         <div className="modal-foot"><button className="danger" onClick={onDelete}><Trash2 size={14} /> {tx('Delete', 'حذف')}</button><button className="primary" onClick={onClose}>{tx('Done', 'تم')}</button></div>
@@ -342,7 +382,7 @@ function PoolEditor({ item, projects, allProjects = [], onClose, onChange, onDel
             <button className="primary sm" onClick={onToDay}><CornerUpRight size={14} /> {tx('Schedule on a day', 'جدولة في يوم')}</button>
             <button className="ghost sm" onClick={onSaveTemplate}><Repeat size={14} /> {tx('Save as recurring', 'حفظ كمتكررة')}</button>
           </div>
-          <SubtaskEditor subtasks={item.subtasks || []} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...(t.subtasks || []), { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).filter((s) => s.id !== id) }))} />
+          <SubtaskEditor subtasks={item.subtasks || []} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...(t.subtasks || []), { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).filter((s) => s.id !== id) }))} onMove={(id, targetId, after) => onChange((t) => ({ ...t, subtasks: moveById(t.subtasks || [], id, targetId, after) }))} />
           <NotesEditor notes={item.notes || []} onAdd={(n) => onChange((t) => ({ ...t, notes: [...(t.notes || []), n] }))} onUpdate={(id, c) => onChange((t) => ({ ...t, notes: (t.notes || []).map((x) => x.id === id ? { ...x, content: c } : x) }))} onDel={(id) => onChange((t) => ({ ...t, notes: (t.notes || []).filter((x) => x.id !== id) }))} />
         </div>
         <div className="modal-foot"><button className="danger" onClick={onDelete}><Trash2 size={14} /> {tx('Delete', 'حذف')}</button><button className="primary" onClick={onClose}>{tx('Done', 'تم')}</button></div>

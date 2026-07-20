@@ -60,73 +60,35 @@ sorting** (stored only on this device):
 When you use the sorter, your dump text is sent to the chosen provider — an
 opt-in exception to local-only; the rest of the app never touches the network.
 
-## Cross-device sync (optional)
+## Cross-device sync
 
-Off by default. When enabled, your planner is copied to a **Supabase project
-you own**, and your other devices pull from it. Conflicts resolve per item by
-most-recent edit — right for one person on a few devices, not for teams.
+**No backend is connected right now.** The Supabase backend (and the Google
+Calendar integration that depended on its Google sign-in) were removed; the app
+is fully local again. Export a backup from Settings to move data between
+devices in the meantime.
 
-One-time setup (~10 minutes):
+The sync *engine* is still here and still tested — only the transport is gone.
+`src/sync.js` keeps the per-key last-write-wins merge, the dirty queue and the
+scheduling; it takes an injected `transport`:
 
-1. Create a free project at supabase.com. Note the **Project URL** and **anon
-   public key** (Settings → API in the Supabase dashboard).
-2. In the Supabase **SQL Editor**, run:
+```js
+{ list()       -> [{ key, value, updated_at }]
+  upsert(rows) -> void }
+```
 
-   ```sql
-   create table if not exists kv (
-     user_id uuid not null default auth.uid(),
-     key text not null,
-     value text not null,
-     updated_at timestamptz not null default now(),
-     primary key (user_id, key)
-   );
-   alter table kv enable row level security;
-   create policy "own rows" on kv
-     for all using (auth.uid() = user_id)
-     with check (auth.uid() = user_id);
-   ```
+`createSync({ getTransport })` returning `null` means "no backend", and every
+sync is a clean no-op. Wiring a new backend is one function — see
+`getTransport` in `src/App.jsx`.
 
-3. (Recommended) In **Authentication → Providers → Email**, turn OFF "Confirm
-   email" — otherwise account creation requires clicking a confirmation link
-   before sign-in works.
-4. In Rhythm: **Settings → Sync** → paste the URL and anon key → **Create
-   account** with an email + password → it syncs immediately, seeding the
-   account with this device's data.
-5. On your other device: same URL/key → **Sign in** with the same account →
-   everything pulls down.
+**Cadence.** Automatic sync runs at most **twice a day** (`AUTO_EVERY_MS`,
+12 hours). A static PWA has no background scheduler, so "twice a day" means the
+first app launch or foreground return past each 12-hour mark. **Settings →
+Sync → "Sync now"** always runs immediately and resets that clock.
 
-### Google sign-in (optional, ~10 minutes once)
-
-Email + password works with zero extra setup. To sign in with your Google
-account instead:
-
-1. In **Google Cloud Console** (console.cloud.google.com) → APIs & Services →
-   Credentials → **Create OAuth client ID** (type: Web application). If asked,
-   configure the consent screen first (External, just app name + your email;
-   "Testing" status is fine for personal use — add yourself as a test user).
-2. Under **Authorized redirect URIs**, add your Supabase callback:
-   `https://<your-project>.supabase.co/auth/v1/callback`
-3. Copy the client ID and secret into **Supabase → Authentication → Providers
-   → Google** and enable it.
-4. In **Supabase → Authentication → URL Configuration**, set the Site URL to
-   your deployed app URL (and add it to the redirect allowlist).
-5. In Rhythm → Settings → Sync → **Continue with Google**. The app redirects
-   to Google and back, then syncs.
-
-Note: use the same account method consistently — an email/password account and
-a Google account with the same address are separate users in Supabase, with
-separate data.
-
-Afterwards it's automatic: local edits push a couple of seconds after you make
-them, and the app pulls on launch, on returning to it, and on regaining
-network. "Sync now" in Settings forces a round trip.
-
-What sync changes about the privacy story: your data now lives in your Supabase
-project as plain JSON, protected by your account and row-level security — no
-longer device-only. The anon key is designed to be public; RLS is what keeps
-rows private. Deletes don't propagate (old weeks pruned locally linger
-remotely, harmlessly). Device clocks decide conflicts; for one person this is
-fine.
+When a backend is connected, conflicts resolve per item by most-recent edit —
+right for one person on a few devices, not for teams. Deletes don't propagate
+(old weeks pruned locally linger remotely, harmlessly), and device clocks
+decide conflicts.
 
 ## Project layout
 
@@ -137,8 +99,10 @@ src/storage.js      async localStorage adapter (get/set/delete/list)
 src/components.jsx  scene, flame glyph, habit line, block row, sidebar, editors
 src/views.jsx       Habits, Projects, Settings, PIN screen
 src/App.jsx         the main component: state, handlers, wizard, gate, routing
+src/sync.js         backend-agnostic merge engine + twice-a-day cadence
 src/styles.css      the full stylesheet (extracted from the artifact)
 tests/core.test.js  unit tests for the pure functions
+tests/sync.test.js  merge + cadence tests against a mock transport
 scripts/gen-icons.mjs  PWA icon generator (pngjs)
 ```
 
@@ -147,35 +111,39 @@ Notes for future work:
   callbacks can never shadow it again. Keep it that way.
 - All stored weeks are preloaded into the session cache at startup, so
   cross-week features (tasks under a Project, overdue) are complete.
-- `npm test` covers pace math, streaks, and block resolution (including the
-  overnight-Isha window). Extend it when touching `core.jsx`.
+- `npm test` covers pace math, streaks, block resolution, and the sync merge and
+  cadence. Extend it when touching `core.jsx` or `sync.js`.
+- Careful with `.sub > span` in CSS: it also matches `.sub-bullet` and will
+  stretch that 5px dot into a bar (this shipped as a visual bug once).
 
-## Google Calendar (read-only, optional)
+## The day, and the Now page
 
-Show your Google Calendar events inside the Plan day, each in its prayer
-period, with all-day events pinned at the top. **Read-only** — Rhythm never
-writes to or changes your calendar.
+**The day runs Fajr → next Fajr.** Between midnight and Fajr you are still in
+*yesterday's* day: nothing rolls over to overdue, the Plan page still highlights
+yesterday, and the Now queue keeps serving that day. One helper — `logicalDayMid`
+in `App.jsx` — decides this, and everything meaning "today" goes through it.
+Don't reintroduce a calendar-midnight `new Date()` for "today".
 
-Setup (builds on the Google sign-in above):
+**Now shows one thing at a time.** The queue is the whole day, every block
+top-to-bottom in exactly the Plan page's order, with prayers, habits and a
+task's subtasks folded in — so nothing left behind earlier in the day gets
+skipped. Checking the card slides it out to the left and the next one in from
+the right (skipped under `prefers-reduced-motion`).
 
-1. In **Google Cloud Console → APIs & Services → Library**, enable the
-   **Google Calendar API** for the project you used for sign-in.
-2. In **OAuth consent screen → Scopes**, add
-   `.../auth/calendar.readonly` (a "sensitive" scope). For personal/newsroom
-   use, keep the app in **Testing** and add your users as test users — no
-   Google verification review needed. Public distribution would require that
-   review.
-3. In the app: **Settings → Sync → Connect Google Calendar**. This re-runs
-   Google sign-in requesting calendar access, then **Load my calendars** and
-   tick the ones you want shown. Events appear on the Plan day.
+Two things sit outside that queue:
 
-How it works and its limits:
-- The Google access token comes from your Supabase Google sign-in and is
-  **short-lived (~1 hour)**; Supabase doesn't refresh provider tokens, so the
-  calendar section will occasionally ask you to **Reconnect**. Everything else
-  in the app is unaffected when it lapses — the events just stop showing until
-  you reconnect.
-- The token is stored only on this device and is never synced.
-- Events are fetched per viewed day from the calendars you ticked, expanded
-  from recurrences, and placed in the prayer block their start time falls in.
+- **Caught up.** When the head of the queue belongs to a *later* block,
+  everything through the current period is clear: Now says *"You're all caught
+  up."* and shows that item under **Next** as a muted look-ahead until its
+  period arrives.
+- **Timed tasks.** A task with **both a start and an end** is a commitment to a
+  slot, not a queue item. While the clock is inside its window it surfaces on
+  its own under **Happening now**, wherever it falls in the order. Outside that
+  window it rejoins the queue so it can't quietly disappear.
+
+Ordering is manual and drag-only: tasks reorder by dragging their grip in the
+Plan timeline (which also moves them between prayer blocks); subtasks reorder by
+dragging their text **inside the task's editor** — deliberately not in the
+timeline, which stays a calm read/check surface. `tasksFor` sorts by `order`
+alone, never by start time, so Plan and Now can't drift apart.
 

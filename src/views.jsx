@@ -293,9 +293,7 @@ function PinScreen({ onVerify, onSuccess }) {
 /* ------------------------------------------------------------------ */
 /*  Settings                                                           */
 /* ------------------------------------------------------------------ */
-function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncSignIn, onSyncSignOut, onSyncGoogle, onSyncNow, gcal, onCalConnect, onCalDisconnect, onCalLoad, onCalToggle, storageOk, onClose, onClearDay, dayLabel, onLang }) {
-  const [syncEmail, setSyncEmail] = useState('');
-  const [syncPass, setSyncPass] = useState('');
+function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncNow, storageOk, onClose, onClearDay, dayLabel, onLang }) {
   const [local, setLocal] = useState(settings);
   const [tab, setTab] = useState('general');
   // Keep the local editing copy in sync when the parent persists settings from
@@ -431,65 +429,14 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
 
           {tab === 'sync' && (
             <div className="sect">
-              <div className="sect-h"><Repeat size={13} /> {tx('Cross-device sync (optional)', 'المزامنة بين الأجهزة (اختياري)')}</div>
-              <div className="security-note"><Shield size={15} /><p>{tx('Sync copies your planner to a Supabase project you own, so your other devices can pull it. Turning this on means your data leaves the device — protected by your account, resolved per item by most-recent-edit. Leave it off to stay fully local. Setup steps are in the README (one SQL snippet, two values to paste below).', 'تنسخ المزامنة مخططك إلى مشروع Supabase تملكه أنت لتسحبه أجهزتك الأخرى. تفعيلها يعني خروج بياناتك من الجهاز — محمية بحسابك، وتُحسم التعارضات لكل عنصر بالأحدث تعديلًا. اتركها معطّلة لتبقى محليًا بالكامل. خطوات الإعداد في README.')}</p></div>
-              <details className="sync-advanced">
-                <summary>{tx('Advanced: use your own Supabase backend', 'متقدم: استخدم خادم Supabase الخاص بك')}</summary>
-                <p className="hint-text" style={{ marginTop: 6 }}>{tx('Leave empty to use the built-in Rhythm backend. Fill both to point this device at your own project instead (setup in the README).', 'اتركهما فارغين لاستخدام خادم التطبيق المدمج. املأ الحقلين لتوجيه هذا الجهاز إلى مشروعك الخاص (الإعداد في README).')}</p>
-                <div className="pin-set-grid">
-                  <label><span>{tx('Supabase URL', 'عنوان Supabase')}</span><input className="time-input" style={{ letterSpacing: 0, textAlign: 'start' }} value={local.syncUrl || ''} onChange={(e) => patch({ syncUrl: e.target.value.trim() })} placeholder="https://xyz.supabase.co" autoComplete="off" /></label>
-                  <label><span>{tx('Anon key', 'المفتاح العام')}</span><input className="time-input" type="password" style={{ letterSpacing: 0, textAlign: 'start' }} value={local.syncAnonKey || ''} onChange={(e) => patch({ syncAnonKey: e.target.value.trim() })} placeholder="sb_publishable_…" autoComplete="off" /></label>
-                </div>
-              </details>
-              {sync && sync.user ? (
-                <>
-                  <p className="hint-text" style={{ color: 'var(--verdigris)', fontWeight: 700 }}><KeyRound size={12} /> {tx('Signed in as', 'مسجّل باسم')} {sync.user.email}{sync.lastSync ? ` · ${tx('last sync', 'آخر مزامنة')} ${sync.lastSync.toLocaleTimeString()}` : ''}</p>
-                  <div className="io-actions">
-                    <button className="primary" onClick={onSyncNow} disabled={sync.busy}>{sync.busy ? tx('Syncing…', 'جارٍ المزامنة…') : tx('Sync now', 'زامن الآن')}</button>
-                    <button className="ghost sm" onClick={onSyncSignOut} disabled={sync.busy}>{tx('Sign out', 'تسجيل الخروج')}</button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="pin-set-grid" style={{ marginTop: 10 }}>
-                    <label><span>{tx('Email', 'البريد')}</span><input className="time-input" type="email" style={{ letterSpacing: 0, textAlign: 'start' }} value={syncEmail} onChange={(e) => setSyncEmail(e.target.value)} autoComplete="off" /></label>
-                    <label><span>{tx('Password', 'كلمة المرور')}</span><input className="time-input" type="password" style={{ letterSpacing: 0, textAlign: 'start' }} value={syncPass} onChange={(e) => setSyncPass(e.target.value)} autoComplete="off" /></label>
-                  </div>
-                  <div className="io-actions">
-                    <button className="primary" disabled={!syncEmail || !syncPass || (sync && sync.busy)} onClick={() => onSyncSignIn(syncEmail, syncPass, false)}>{tx('Sign in', 'تسجيل الدخول')}</button>
-                    <button className="ghost sm" disabled={!syncEmail || !syncPass || (sync && sync.busy)} onClick={() => onSyncSignIn(syncEmail, syncPass, true)}>{tx('Create account', 'إنشاء حساب')}</button>
-                    <button className="ghost sm" disabled={sync && sync.busy} onClick={onSyncGoogle} title={tx('Requires enabling the Google provider in Supabase — see README', 'يتطلب تفعيل مزوّد Google في Supabase — انظر README')}>{tx('Continue with Google', 'المتابعة بحساب Google')}</button>
-                  </div>
-                  <p className="hint-text" style={{ marginTop: 6 }}>{tx('Google sign-in needs a one-time setup in Supabase (README → Google sign-in). Email + password works with no extra setup.', 'يتطلب دخول Google إعدادًا لمرة واحدة في Supabase (انظر README). البريد وكلمة المرور يعملان دون إعداد إضافي.')}</p>
-                </>
-              )}
+              <div className="sect-h"><Repeat size={13} /> {tx('Cross-device sync', 'المزامنة بين الأجهزة')}</div>
+              <div className="security-note"><Shield size={15} /><p>{tx('No sync backend is connected right now, so Rhythm is fully local — your planner never leaves this device. Export a backup regularly to keep it safe.', 'لا يوجد خادم مزامنة متصل حاليًا، لذا يعمل التطبيق محليًا بالكامل — لا يغادر مخططك هذا الجهاز. صدّر نسخة احتياطية بانتظام للحفاظ عليه.')}</p></div>
+              <p className="hint-text" style={{ marginTop: 10 }}>{tx('When a backend is connected, Rhythm syncs automatically twice a day — checked when you open the app and when you come back to it — and conflicts resolve per item by most-recent-edit. You can always sync on demand below.', 'عند توصيل خادم، يزامن التطبيق تلقائيًا مرتين يوميًا — يُفحص عند فتح التطبيق وعند العودة إليه — وتُحسم التعارضات لكل عنصر بالأحدث تعديلًا. ويمكنك المزامنة يدويًا في أي وقت أدناه.')}</p>
+              <div className="io-actions">
+                <button className="primary" onClick={onSyncNow} disabled={sync && sync.busy}>{sync && sync.busy ? tx('Syncing…', 'جارٍ المزامنة…') : tx('Sync now', 'زامن الآن')}</button>
+              </div>
+              {sync && sync.lastSync && <p className="hint-text" style={{ marginTop: 8, color: 'var(--verdigris)', fontWeight: 700 }}><KeyRound size={12} /> {tx('Last sync', 'آخر مزامنة')} {sync.lastSync.toLocaleTimeString()}</p>}
               {sync && sync.msg && <p className="hint-text" style={{ marginTop: 8 }}>{sync.msg}</p>}
-
-              <div className="sect-h" style={{ marginTop: 20 }}><Calendar size={13} /> {tx('Google Calendar (read-only)', 'تقويم Google (للعرض فقط)')}</div>
-              <p className="hint-text" style={{ marginTop: 0 }}>{tx('Show your Google Calendar events inside the Plan day, in their prayer period. Read-only — Rhythm never changes your calendar. Uses your Google sign-in; the calendar permission is short-lived, so you may need to reconnect from time to time.', 'اعرض أحداث تقويم Google داخل يوم التخطيط ضمن فترة الصلاة. للعرض فقط — لا يغيّر التطبيق تقويمك. يستخدم دخول Google؛ صلاحية التقويم قصيرة العمر، لذا قد تحتاج إلى إعادة الاتصال أحيانًا.')}</p>
-              {!gcal.connected ? (
-                <button className="primary" onClick={onCalConnect}><Calendar size={14} /> {tx('Connect Google Calendar', 'ربط تقويم Google')}</button>
-              ) : (
-                <>
-                  <div className="io-actions">
-                    <button className="ghost sm" onClick={onCalLoad}>{tx('Load my calendars', 'تحميل تقاويمي')}</button>
-                    <button className="ghost sm" onClick={onCalConnect}>{tx('Reconnect', 'إعادة الاتصال')}</button>
-                    <button className="ghost sm" onClick={onCalDisconnect}>{tx('Disconnect', 'فصل')}</button>
-                  </div>
-                  {gcal.calendars.length > 0 && (
-                    <div className="cal-picker">
-                      {gcal.calendars.map((c) => (
-                        <label key={c.id} className="cal-pick-row">
-                          <input type="checkbox" checked={gcal.ids.includes(c.id)} onChange={() => onCalToggle(c.id)} />
-                          <span className="cal-dot" style={{ background: c.color }} />
-                          <span className="cal-pick-name">{c.name}{c.primary ? ` · ${tx('primary', 'الأساسي')}` : ''}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-              {gcal.msg && <p className="hint-text" style={{ marginTop: 8 }}>{gcal.msg}</p>}
             </div>
           )}
 

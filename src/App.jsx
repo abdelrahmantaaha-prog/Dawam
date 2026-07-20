@@ -2,10 +2,8 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
 import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
-import { createSync } from './sync.js';
-import { SYNC_URL, SYNC_KEY } from './config.js';
+import { createSync, AUTO_EVERY_MS } from './sync.js';
 import { ASSISTANT_SYSTEM, buildDaySnapshot, parseAssistantReply, callAssistant } from './assistant.js';
-import { GCAL_SCOPE, saveGcalToken, loadGcalToken, clearGcalToken, gcalConnected, listCalendars, listDayEvents, bucketDayEvents } from './gcal.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
@@ -56,8 +54,21 @@ export default function Rhythm() {
   const [chatBusy, setChatBusy] = useState(false);
   const [chatErr, setChatErr] = useState('');
   const toggleFoldTask = (id) => setFoldedTasks((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  // Checking off the Now card plays it out to the left, THEN commits the change
+  // so the next item slides in from the right. Committing first would swap the
+  // content before the old card had left. Duration matches the CSS `now-out`.
+  const NOW_EXIT_MS = 220;
+  const nowLeavingRef = useRef(false);
+  const advanceNow = (key, commit) => {
+    if (nowLeavingRef.current) return; // ignore double taps mid-flight
+    const still = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (still) { commit(); return; }
+    nowLeavingRef.current = true; setNowLeaving(key);
+    setTimeout(() => { commit(); nowLeavingRef.current = false; setNowLeaving(null); }, NOW_EXIT_MS);
+  };
   const [sideTab, setSideTab] = useState('recurring');  // 'recurring' | 'backlog' — combined plan sidebar
   const [sideOpen, setSideOpen] = useState(true);       // recurring/backlog sidebar collapsed state
+  const [nowLeaving, setNowLeaving] = useState(null);   // key of the Now card playing its exit
   const pendingEditRef = useRef(null);                  // open editor after jumping to an overdue task's week
 
   const weekRef = useRef(week);
@@ -422,13 +433,13 @@ export default function Rhythm() {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
-  /* ---- cross-device sync (optional, Supabase, last-write-wins per key) ---- */
-  const [syncUser, setSyncUser] = useState(null);
+  /* ---- cross-device sync (last-write-wins per key) ----
+     The backend was removed for now, so `getTransport` returns null and every
+     sync is a clean no-op. The merge engine, the dirty queue and the twice-a-day
+     cadence all stay live, so wiring a backend later is one function. */
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
   const [lastSync, setLastSync] = useState(null);
-  const lastAutoSyncRef = useRef(0);
-  const pushTimerRef = useRef(null);
   // Applying a remote key routes into live state WITHOUT re-persisting (the sync
   // engine already wrote storage) — persisting here would echo the key back.
   const applyRemote = useCallback((key, raw) => {
@@ -446,132 +457,44 @@ export default function Rhythm() {
   const syncRef = useRef(null);
   if (!syncRef.current) {
     syncRef.current = createSync({
-      // Baked operator backend by default; per-device override kept under Advanced.
-      getConfig: () => ({ url: settingsRef.current.syncUrl || SYNC_URL, anonKey: settingsRef.current.syncAnonKey || SYNC_KEY }),
+      // No backend wired up yet — returning null keeps the app fully local.
+      getTransport: () => null,
       onRemote: (k, raw) => applyRemoteRef.current(k, raw),
     });
   }
   const applyRemoteRef = useRef(applyRemote);
   useEffect(() => { applyRemoteRef.current = applyRemote; }, [applyRemote]);
-  const syncConfigured = !!((settings.syncUrl || SYNC_URL) && (settings.syncAnonKey || SYNC_KEY));
-  const runSync = useCallback(async (label = '') => {
+  const runSync = useCallback(async ({ auto = false } = {}) => {
     if (!syncRef.current) return;
     setSyncBusy(true); setSyncMsg('');
     try {
-      const r = await syncRef.current.syncNow();
-      if (!r.skipped) { setLastSync(new Date()); if (label === 'manual') setSyncMsg(tx(`Synced — ${r.pulled} pulled, ${r.pushed} pushed.`, `تمت المزامنة — ${r.pulled} وارد، ${r.pushed} صادر.`)); }
-      else if (label === 'manual') setSyncMsg(r.skipped === 'signed out' ? tx('Sign in first.', 'سجّل الدخول أولًا.') : tx('Add the Supabase URL and anon key first.', 'أضف عنوان Supabase والمفتاح أولًا.'));
+      const r = await syncRef.current.syncNow({ auto });
+      if (!r.skipped) {
+        setLastSync(new Date());
+        if (!auto) setSyncMsg(tx(`Synced — ${r.pulled} pulled, ${r.pushed} pushed.`, `تمت المزامنة — ${r.pulled} وارد، ${r.pushed} صادر.`));
+      } else if (!auto && r.skipped === 'not configured') {
+        setSyncMsg(tx('No sync backend is connected yet — your planner stays on this device.', 'لا يوجد خادم مزامنة متصل بعد — يبقى مخططك على هذا الجهاز.'));
+      }
     } catch (e) { setSyncMsg(String(e.message || e)); }
     setSyncBusy(false);
   }, []);
-  // local edits → dirty queue → debounced push (a full sync, so pulls ride along)
+  // Local edits only stamp the dirty queue; they no longer trigger a push.
+  // Uploads happen on the twice-a-day cadence, or when you press Sync now.
   useEffect(() => {
-    setSaveHook((key) => {
-      syncRef.current && syncRef.current.markDirty(key);
-      // Use the EFFECTIVE config (baked backend or per-device override) — not just
-      // settings.syncUrl, which is empty on the built-in backend. Without this the
-      // baked backend never auto-pushes within a session.
-      const url = settingsRef.current.syncUrl || SYNC_URL;
-      const key2 = settingsRef.current.syncAnonKey || SYNC_KEY;
-      if (!url || !key2) return;
-      clearTimeout(pushTimerRef.current);
-      pushTimerRef.current = setTimeout(() => { runSync('auto'); }, 2500);
-    });
-    return () => { setSaveHook(null); clearTimeout(pushTimerRef.current); };
-  }, [runSync]);
-  // Flush pending edits the moment the app is hidden or closed, so tasks added
-  // right before backgrounding aren't stranded until the next launch.
+    setSaveHook((key) => { syncRef.current && syncRef.current.markDirty(key); });
+    return () => setSaveHook(null);
+  }, []);
+  // Automatic sync: at most twice a day. Checked on launch and whenever the app
+  // comes back to the foreground — a static PWA has no background scheduler, so
+  // "twice a day" means the first launch/foreground past each 12-hour mark.
   useEffect(() => {
-    const flush = () => {
-      if (!document.hidden) return;
-      clearTimeout(pushTimerRef.current);
-      runSync('auto');
-    };
-    document.addEventListener('visibilitychange', flush);
-    window.addEventListener('pagehide', flush);
-    return () => { document.removeEventListener('visibilitychange', flush); window.removeEventListener('pagehide', flush); };
-  }, [runSync]);
-  // sync on startup (once signed in), on returning to the app, and on regaining network
-  useEffect(() => {
-    if (!ready || !syncConfigured) return;
-    let stop = false;
-    (async () => { const u = await syncRef.current.getUser(); if (stop) return; setSyncUser(u); if (u) runSync('start'); })();
-    const maybeAuto = () => {
-      if (document.hidden) return;
-      if (Date.now() - lastAutoSyncRef.current < 15000) return;
-      lastAutoSyncRef.current = Date.now();
-      runSync('auto');
-    };
+    if (!ready) return;
+    runSync({ auto: true });
+    const maybeAuto = () => { if (!document.hidden) runSync({ auto: true }); };
     document.addEventListener('visibilitychange', maybeAuto);
     window.addEventListener('online', maybeAuto);
-    return () => { stop = true; document.removeEventListener('visibilitychange', maybeAuto); window.removeEventListener('online', maybeAuto); };
-  }, [ready, syncConfigured, runSync]);
-  const syncSignIn = async (email, pass, create) => {
-    setSyncBusy(true); setSyncMsg('');
-    try {
-      const u = create ? await syncRef.current.signUp(email, pass) : await syncRef.current.signIn(email, pass);
-      setSyncUser(u);
-      if (u) { setSyncMsg(create ? tx('Account created. If sign-in fails, confirm the email Supabase sent you.', 'تم إنشاء الحساب. إذا فشل الدخول، أكّد البريد الذي أرسله Supabase.') : ''); runSync('start'); }
-    } catch (e) { setSyncMsg(String(e.message || e)); }
-    setSyncBusy(false);
-  };
-  const syncSignOut = async () => { await syncRef.current.signOut(); setSyncUser(null); setSyncMsg(tx('Signed out. Data stays on this device.', 'تم تسجيل الخروج. تبقى البيانات على هذا الجهاز.')); };
-  const syncGoogle = async (withCalendar = false) => {
-    setSyncMsg('');
-    try { await syncRef.current.signInWithGoogle(withCalendar ? GCAL_SCOPE : ''); /* redirects away; session is picked up on return */ }
-    catch (e) { setSyncMsg(String(e.message || e)); }
-  };
-
-  /* ---- Google Calendar (read-only, one-way: Google → Rhythm) ---- */
-  const [gcalCalendars, setGcalCalendars] = useState([]); // available calendars to pick from
-  const [gcalConn, setGcalConn] = useState(gcalConnected());
-  const [gcalMsg, setGcalMsg] = useState('');
-  const [gcalByBlock, setGcalByBlock] = useState({}); // events for the selected day, keyed by block
-  const [gcalAllDay, setGcalAllDay] = useState([]);    // all-day events for the selected day
-  // After a Google OAuth return, capture the short-lived provider token for the API.
-  useEffect(() => {
-    if (!ready || !syncConfigured) return;
-    let stop = false;
-    (async () => {
-      const tok = await syncRef.current.getProviderToken();
-      if (stop) return;
-      if (tok) { saveGcalToken(tok); setGcalConn(true); }
-    })();
-    return () => { stop = true; };
-  }, [ready, syncConfigured]);
-  const connectCalendar = () => { setGcalMsg(tx('Redirecting to Google…', 'إعادة توجيه إلى Google…')); syncGoogle(true); };
-  const disconnectCalendar = () => { clearGcalToken(); setGcalConn(false); setGcalCalendars([]); setGcalByBlock({}); setGcalAllDay([]); persistSettings({ ...settings, gcalOn: false }); setGcalMsg(tx('Calendar disconnected.', 'تم فصل التقويم.')); };
-  const loadGcalCalendars = async () => {
-    const tok = loadGcalToken();
-    if (!tok) { setGcalConn(false); setGcalMsg(tx('Reconnect needed — the Google session expired.', 'يلزم إعادة الاتصال — انتهت جلسة Google.')); return; }
-    setGcalMsg(tx('Loading calendars…', 'جارٍ تحميل التقاويم…'));
-    try { const cals = await listCalendars(tok); setGcalCalendars(cals); setGcalMsg(''); }
-    catch (e) { if (e.code === 'auth') { setGcalConn(false); setGcalMsg(tx('Reconnect needed — the Google session expired.', 'يلزم إعادة الاتصال — انتهت جلسة Google.')); } else setGcalMsg(String(e.message || e)); }
-  };
-  const toggleGcalId = (id) => {
-    const ids = settings.gcalIds || [];
-    const next = ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id];
-    persistSettings({ ...settings, gcalOn: next.length > 0, gcalIds: next });
-  };
-  // Fetch the selected day's events whenever the day, enabled calendars, or
-  // connection change. Read-only; failures degrade to showing nothing.
-  useEffect(() => {
-    const ids = settings.gcalIds || [];
-    if (!gcalConn || !settings.gcalOn || ids.length === 0) { setGcalByBlock({}); setGcalAllDay([]); return; }
-    const tok = loadGcalToken();
-    if (!tok) { setGcalConn(false); return; }
-    let stop = false;
-    (async () => {
-      try {
-        const lists = await Promise.all(ids.map((cid) => listDayEvents(tok, cid, selectedDate).catch(() => [])));
-        if (stop) return;
-        const all = lists.flat();
-        const { allDay, byBlock } = bucketDayEvents(all, (min) => activeBlockAt(timings, min));
-        setGcalAllDay(allDay); setGcalByBlock(byBlock);
-      } catch (e) { if (!stop && e.code === 'auth') setGcalConn(false); }
-    })();
-    return () => { stop = true; };
-  }, [gcalConn, settings.gcalOn, settings.gcalIds, selectedDay, weekStart, timings, refresh]);
+    return () => { document.removeEventListener('visibilitychange', maybeAuto); window.removeEventListener('online', maybeAuto); };
+  }, [ready, runSync]);
 
   /* ---- scheduled task ops (operate on the displayed week) ---- */
   // Within a block, order is MANUAL (`order` asc, done last). New tasks get an
@@ -630,15 +553,6 @@ export default function Rhythm() {
     const orderOf = new Map(ordered.map((t, i) => [t.id, i + 1]));
     persistWeek({ ...w, tasks: w.tasks.map((t) => (t.id === id ? { ...t, block: blockId, order: orderOf.get(t.id) } : orderOf.has(t.id) ? { ...t, order: orderOf.get(t.id) } : t)) });
   };
-  // Drag-to-reorder a subtask within its task, before/after `targetSubId`.
-  const moveSubToPosition = (taskId, subId, targetSubId, after) => mutateTask(taskId, (t) => {
-    const subs = t.subtasks || [];
-    const dragged = subs.find((s) => s.id === subId); if (!dragged) return t;
-    const rest = subs.filter((s) => s.id !== subId);
-    let idx = rest.length;
-    if (targetSubId) { const ti = rest.findIndex((s) => s.id === targetSubId); if (ti >= 0) idx = ti + (after ? 1 : 0); }
-    return { ...t, subtasks: [...rest.slice(0, idx), dragged, ...rest.slice(idx)] };
-  });
 
   /* ---- pool (backlog) ops ---- */
   const addPoolItem = (title, extra = {}) => {
@@ -834,30 +748,21 @@ export default function Rhythm() {
   const dragRef = useRef(null);
   const [drag, setDrag] = useState(null);
   const dragActive = !!drag;
-  // Resolve what's under the pointer. Task/pool/template drags look for a block
-  // (and, within it, the specific task being hovered so we can drop before/after
-  // it) or the backlog. Subtask drags look only for a sibling subtask. Which
-  // kind is dragging decides which targets we accept.
+  // Resolve what's under the pointer: a block (and, within it, the specific task
+  // being hovered so we can drop before/after it) or the backlog. Only task
+  // drags get a position — pool/template drops just land in the block.
   const findTarget = (x, y) => {
     const kind = dragRef.current?.kind;
     let el = document.elementFromPoint(x, y);
-    let taskEl = null, subEl = null;
+    let taskEl = null;
     while (el) {
       if (el.dataset) {
-        if (kind === 'subtask') {
-          if (!subEl && el.dataset.subid) subEl = el;
-          if (el.dataset.subtasklist != null) {
-            if (subEl) { const r = subEl.getBoundingClientRect(); return { type: 'subtask', taskId: el.dataset.subtasklist, subId: subEl.dataset.subid, after: y > r.top + r.height / 2 }; }
-            return { type: 'subtask', taskId: el.dataset.subtasklist, subId: null, after: false };
-          }
-        } else {
-          if (!taskEl && el.dataset.taskid) taskEl = el;
-          if (el.dataset.dropblock) {
-            if (kind === 'task' && taskEl) { const r = taskEl.getBoundingClientRect(); return { type: 'block', id: el.dataset.dropblock, taskId: taskEl.dataset.taskid, after: y > r.top + r.height / 2 }; }
-            return { type: 'block', id: el.dataset.dropblock, taskId: null, after: false };
-          }
-          if (el.dataset.droppool != null) return { type: 'pool' };
+        if (!taskEl && el.dataset.taskid) taskEl = el;
+        if (el.dataset.dropblock) {
+          if (kind === 'task' && taskEl) { const r = taskEl.getBoundingClientRect(); return { type: 'block', id: el.dataset.dropblock, taskId: taskEl.dataset.taskid, after: y > r.top + r.height / 2 }; }
+          return { type: 'block', id: el.dataset.dropblock, taskId: null, after: false };
         }
+        if (el.dataset.droppool != null) return { type: 'pool' };
       }
       el = el.parentElement;
     }
@@ -867,11 +772,6 @@ export default function Rhythm() {
     e.preventDefault();
     const color = item.projectId ? (labelById(item.projectId)?.color || null) : null;
     const s = { kind, id: item.id, title: item.title, time: timeLabel(item) || '', color, fromBlock: item.block || null, x: e.clientX, y: e.clientY, over: null };
-    dragRef.current = s; setDrag({ ...s });
-  };
-  const startSubDrag = (e, taskId, sub) => {
-    e.preventDefault();
-    const s = { kind: 'subtask', id: sub.id, taskId, title: sub.title, time: '', color: null, fromBlock: null, x: e.clientX, y: e.clientY, over: null };
     dragRef.current = s; setDrag({ ...s });
   };
   useEffect(() => {
@@ -891,8 +791,6 @@ export default function Rhythm() {
           if (d.over.taskId && d.over.taskId !== d.id) moveTaskToPosition(d.id, d.over.id, d.over.taskId, d.over.after);
           else if (d.over.id !== d.fromBlock) moveTaskToPosition(d.id, d.over.id, null, false);
         } else if (d.over.type === 'pool') taskToPool(d.id);
-      } else if (d.kind === 'subtask') {
-        if (d.over.type === 'subtask' && d.over.taskId === d.taskId && d.over.subId && d.over.subId !== d.id) moveSubToPosition(d.taskId, d.id, d.over.subId, d.over.after);
       } else if (d.kind === 'pool') {
         if (d.over.type === 'block') poolToDay(d.id, selectedDay, d.over.id);
       } else if (d.kind === 'template') {
@@ -1252,22 +1150,87 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {view === 'now' && (() => {
         const activeIdx = blockIdx(activeId);
         const habitsOf = (bid) => (settings.habits || []).filter((h) => (h.block || 'morning') === bid);
+        // A task with BOTH a start and an end is a commitment to a slot, not a
+        // queue item: while the clock sits inside its window it surfaces on its
+        // own, wherever it happens to fall in the order. Outside that window it
+        // rejoins the queue so it can't quietly disappear.
+        const liveNow = nowList.filter((t) => {
+          if (t.done) return false;
+          const st = tStartMin(t), en = tEndMin(t);
+          return st != null && en != null && inWindow(st, en, curMin);
+        });
+        const liveIds = new Set(liveNow.map((t) => t.id));
         const queue = [];
         for (const b of BLOCKS) {
           if (PRAYER_BLOCKS.includes(b.id) && blockIdx(b.id) <= activeIdx && !prayersToday[b.id]) queue.push({ kind: 'prayer', block: b });
           for (const h of habitsOf(b.id)) if (!habitDoneOn(h, nowHabitISO)) queue.push({ kind: 'habit', block: b, h });
-          for (const t of nowList.filter((t) => t.block === b.id && !t.done)) queue.push({ kind: 'task', block: b, t });
+          for (const t of nowList.filter((t) => t.block === b.id && !t.done && !liveIds.has(t.id))) queue.push({ kind: 'task', block: b, t });
         }
         const startedPrayers = PRAYER_BLOCKS.filter((pid) => blockIdx(pid) <= activeIdx).length;
         const totalN = nowList.length + (settings.habits || []).length + startedPrayers;
-        const doneN = totalN - queue.length;
+        const doneN = totalN - queue.length - liveNow.length;
         const next = queue[0] || null;
-        const nextBlock = next ? next.block : activeBlock;
-        const nextTask = next && next.kind === 'task' ? next.t : null;
-        const subs = nextTask ? nextTask.subtasks || [] : [];
-        const nextSub = subs.find((s) => !s.done) || null;
-        const subsDone = subs.filter((s) => s.done).length;
-        const openNext = () => { if (todayInView) setEditing(nextTask.id); else goToday(); };
+        // Everything up to and through the current period is clear when the head
+        // of the queue belongs to a LATER block. Then it stops being "do this
+        // now" and becomes a look-ahead under Next, until its period arrives.
+        const nextIsLater = !!next && blockIdx(next.block.id) > activeIdx;
+        const caughtUp = nextIsLater && liveNow.length === 0;
+        // A key that changes whenever an item changes, so React mounts a fresh
+        // node and the enter animation runs.
+        const itemKeyOf = (it) => {
+          if (!it) return 'none';
+          if (it.kind === 'prayer') return `p:${it.block.id}`;
+          if (it.kind === 'habit') return `h:${it.h.id}`;
+          const s = (it.t.subtasks || []).find((x) => !x.done);
+          return `t:${it.t.id}:${s ? s.id : 'main'}`;
+        };
+        const renderCard = (it, { preview = false, live = false } = {}) => {
+          const k = itemKeyOf(it);
+          const cls = `${preview ? 'preview' : ''} ${live ? 'live' : ''} ${nowLeaving === k ? 'leaving' : ''}`;
+          if (it.kind === 'prayer') return (
+            <div key={k} className={`now-one-card now-item current ${cls}`}>
+              {todayInView
+                ? <button className="tcheck big" onClick={() => advanceNow(k, () => togglePrayer(it.block.id, todayMid))} aria-label={tx('Mark prayer performed', 'تم أداء الصلاة')}><Circle size={22} /></button>
+                : <span className="now-dot" style={{ background: 'var(--verdigris)' }} />}
+              <div className="now-col"><span className="now-item-title">{tx(`${it.block.name} prayer`, `صلاة ${it.block.ar}`)}</span></div>
+            </div>
+          );
+          if (it.kind === 'habit') return (
+            <div key={k} className={`now-one-card ${cls}`}>
+              <HabitLine h={it.h} iso={nowHabitISO} onToggle={(id, iso) => advanceNow(k, () => toggleHabitDay(id, iso))} />
+            </div>
+          );
+          const t = it.t;
+          const tSubs = t.subtasks || [];
+          const sub = tSubs.find((s) => !s.done) || null;
+          const nDone = tSubs.filter((s) => s.done).length;
+          const open = () => { if (todayInView) setEditing(t.id); else goToday(); };
+          return (
+            <div key={k} className={`now-one-card now-item current ${cls}`}>
+              {todayInView
+                ? <button className="tcheck big" onClick={() => advanceNow(k, () => (sub ? toggleSub(t.id, sub.id) : toggleDone(t.id)))} aria-label={sub ? tx('Mark step done', 'إنجاز الخطوة') : tx('Mark done', 'إنجاز')}><Circle size={22} /></button>
+                : <span className="now-dot" style={{ background: 'var(--verdigris)' }} />}
+              <div className="now-col">
+                {sub ? (
+                  <>
+                    <button className="now-one-ctx" onClick={open}>
+                      <span>{t.title}</span>
+                      {timeLabel(t) ? <span className="ttime">{timeLabel(t)}</span> : null}
+                      <span className="now-step-count">{nDone}/{tSubs.length} {tx('steps', 'خطوات')}</span>
+                    </button>
+                    <span className="now-item-title">{sub.title}</span>
+                  </>
+                ) : (
+                  <button className="now-item-main" onClick={open}>
+                    <span className="now-item-title">{t.title}</span>
+                    {timeLabel(t) ? <span className="ttime">{timeLabel(t)}</span> : null}
+                    {tSubs.length > 0 ? <span className="now-step-count">{nDone}/{tSubs.length} {tx('steps', 'خطوات')}</span> : null}
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        };
         return (
         <div className="hero-card">
           <SkyScene sky={sky} stars={stars} light={heroLight}
@@ -1275,54 +1238,39 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             blockName={bName(activeBlock)} blockAr={bSub(activeBlock)}
             range={`${nowStart ? `${fmtTime(nowStart)}${nowEnd ? `–${fmtTime(nowEnd)}` : '+'}` : ''}${totalN ? ` · ${doneN}/${totalN} ${tr.done}` : ''}`} />
           <div className="hero-sheet">
-            {next ? (
+            {/* Scheduled slots that own the clock right now — outside the queue. */}
+            {liveNow.length > 0 && (
+              <div className="now-one now-live">
+                <div className="now-one-top">
+                  <span className="now-one-label">{tx('Happening now', 'يحدث الآن')}</span>
+                  <span className="now-one-block live-tag">{tx('scheduled', 'مجدولة')}</span>
+                </div>
+                {liveNow.map((t) => renderCard({ kind: 'task', block: blockById(t.block), t }, { live: true }))}
+              </div>
+            )}
+            {nextIsLater ? (
+              <div className="now-one">
+                {caughtUp && <div className="now-caught"><CheckCircle2 size={18} /> {tx("You're all caught up.", 'أنجزت كل ما عليك الآن.')}</div>}
+                <div className="now-one-top">
+                  <span className="now-one-label">{tx('Next', 'التالي')}{` · ${tx('when', 'عند')} ${bName(next.block)}`}</span>
+                  <span className="now-one-block" style={{ color: next.block.accentDeep }}>{bName(next.block)}</span>
+                </div>
+                {renderCard(next, { preview: true })}
+              </div>
+            ) : next ? (
               <div className="now-one">
                 <div className="now-one-top">
                   <span className="now-one-label">{tx('One thing at a time', 'شيء واحد في كل مرة')}{queue.length > 1 ? ` · ${queue.length - 1} ${tx('more today', 'أخرى اليوم')}` : ''}</span>
-                  <span className="now-one-block" style={{ color: nextBlock.accentDeep }}>{bName(nextBlock)}</span>
+                  <span className="now-one-block" style={{ color: next.block.accentDeep }}>{bName(next.block)}</span>
                 </div>
-                {next.kind === 'prayer' ? (
-                  <div className="now-one-card now-item current">
-                    {todayInView
-                      ? <button className="tcheck big" onClick={() => togglePrayer(next.block.id, todayMid)} aria-label={tx('Mark prayer performed', 'تم أداء الصلاة')}><Circle size={22} /></button>
-                      : <span className="now-dot" style={{ background: 'var(--verdigris)' }} />}
-                    <div className="now-col"><span className="now-item-title">{tx(`${next.block.name} prayer`, `صلاة ${next.block.ar}`)}</span></div>
-                  </div>
-                ) : next.kind === 'habit' ? (
-                  <div className="now-one-card">
-                    <HabitLine h={next.h} iso={nowHabitISO} onToggle={toggleHabitDay} />
-                  </div>
-                ) : (
-                  <div className="now-one-card now-item current">
-                    {todayInView
-                      ? <button className="tcheck big" onClick={() => (nextSub ? toggleSub(nextTask.id, nextSub.id) : toggleDone(nextTask.id))} aria-label={nextSub ? tx('Mark step done', 'إنجاز الخطوة') : tx('Mark done', 'إنجاز')}><Circle size={22} /></button>
-                      : <span className="now-dot" style={{ background: 'var(--verdigris)' }} />}
-                    <div className="now-col">
-                      {nextSub ? (
-                        <>
-                          <button className="now-one-ctx" onClick={openNext}>
-                            <span>{nextTask.title}</span>
-                            {timeLabel(nextTask) ? <span className="ttime">{timeLabel(nextTask)}</span> : null}
-                            <span className="now-step-count">{subsDone}/{subs.length} {tx('steps', 'خطوات')}</span>
-                          </button>
-                          <span className="now-item-title">{nextSub.title}</span>
-                        </>
-                      ) : (
-                        <button className="now-item-main" onClick={openNext}>
-                          <span className="now-item-title">{nextTask.title}</span>
-                          {timeLabel(nextTask) ? <span className="ttime">{timeLabel(nextTask)}</span> : null}
-                          {subs.length > 0 ? <span className="now-step-count">{subsDone}/{subs.length} {tx('steps', 'خطوات')}</span> : null}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
+                {renderCard(next)}
               </div>
-            ) : totalN > 0 ? (
-              <div className="now-empty all-done"><CheckCircle2 size={22} /> {tx('All done for today. Rest easy.', 'أنجزت كل شيء اليوم. ارتَح.')}</div>
-            ) : (
-              <div className="now-empty">{tx('Nothing scheduled today.', 'لا شيء مجدول اليوم.')} {bHint(activeBlock)}.</div>
-            )}
+            ) : liveNow.length > 0 ? null
+              : totalN > 0 ? (
+                <div className="now-empty all-done"><CheckCircle2 size={22} /> {tx('All done for today. Rest easy.', 'أنجزت كل شيء اليوم. ارتَح.')}</div>
+              ) : (
+                <div className="now-empty">{tx('Nothing scheduled today.', 'لا شيء مجدول اليوم.')} {bHint(activeBlock)}.</div>
+              )}
             {!todayInView && <button className="now-jump" onClick={goToday}>{tx('Jump to today', 'انتقل إلى اليوم')}</button>}
           </div>
         </div>
@@ -1415,33 +1363,20 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         {/* Day timeline (left) + Recurring/Backlog sidebar (right) — kept side by side so both stay visible as drop targets while dragging */}
         <div className="plan-columns">
           <div className="timeline">
-            {gcalAllDay.length > 0 && (
-              <div className="cal-allday">
-                {gcalAllDay.map((ev) => (
-                  <div key={ev.id} className="cal-event allday" title={tx('All-day · Google Calendar (read-only)', 'طوال اليوم · تقويم Google (للعرض فقط)')}>
-                    <Calendar size={13} className="cal-ic" />
-                    <span className="cal-title">{ev.title}</span>
-                    <span className="cal-allday-tag">{tx('all day', 'طوال اليوم')}</span>
-                  </div>
-                ))}
-              </div>
-            )}
             {BLOCKS.map((b) => (
               <BlockRow key={b.id} block={b}
                 start={cleanTime(timings[b.startKey]) || ''} end={b.endKey ? cleanTime(timings[b.endKey]) || '' : ''}
                 tasks={tasksFor(selectedDay, b.id)} labelById={labelById}
                 habits={settings.habits.filter((h) => (h.block || 'morning') === b.id)}
                 habitDate={fmtISO(selectedDate)} onToggleHabit={toggleHabitDay}
-                events={gcalByBlock[b.id] || []}
                 current={isSelectedToday && b.id === activeId}
                 prayer={isSelectedToday && PRAYER_BLOCKS.includes(b.id) ? { done: !!(week.prayers?.[selectedDay]?.[b.id]) } : null}
                 onPrayer={() => togglePrayer(b.id, selectedDate)}
                 onToggle={toggleDone} onToggleSub={toggleSub} onOpen={setEditing}
                 onAdd={(title) => addTask(selectedDay, b.id, title)}
-                onDragStart={startDrag} onSubDragStart={startSubDrag}
+                onDragStart={startDrag}
                 dragActive={dragActive} dragOver={drag && drag.over && drag.over.type === 'block' && drag.over.id === b.id}
                 draggingId={drag && drag.kind === 'task' ? drag.id : null}
-                draggingSubId={drag && drag.kind === 'subtask' ? drag.id : null}
                 over={drag && drag.over ? drag.over : null} />
             ))}
           </div>
@@ -1555,10 +1490,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           templates={templates} onAddTemplate={addTemplate} onUpdTemplate={updTemplate} onDelTemplate={delTemplate}
           onExport={buildExport} onImport={applyImport}
           onSetPin={setPin}
-          sync={{ configured: syncConfigured, user: syncUser, busy: syncBusy, msg: syncMsg, lastSync }}
-          onSyncSignIn={syncSignIn} onSyncSignOut={syncSignOut} onSyncGoogle={syncGoogle} onSyncNow={() => runSync('manual')}
-          gcal={{ connected: gcalConn, calendars: gcalCalendars, ids: settings.gcalIds || [], msg: gcalMsg }}
-          onCalConnect={connectCalendar} onCalDisconnect={disconnectCalendar} onCalLoad={loadGcalCalendars} onCalToggle={toggleGcalId}
+          sync={{ busy: syncBusy, msg: syncMsg, lastSync, everyMs: AUTO_EVERY_MS }}
+          onSyncNow={() => runSync()}
           storageOk={storageOk} onClose={() => setShowSettings(false)}
           onClearDay={() => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.day !== selectedDay) }); flash(tx('Day cleared.', 'تم مسح اليوم.')); }}
           dayLabel={`${wdFull(selectedDate.getDay())} ${selectedDate.getDate()} ${mon(selectedDate.getMonth())}`} />
