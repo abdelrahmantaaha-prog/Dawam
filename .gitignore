@@ -17,6 +17,10 @@ android/capacitor-cordova-android-plugins/
 *.apk
 *.aab
 
+# signing key material — never commit
+*.keystore
+*.jks
+
 # local dev tooling
 .claude/
 

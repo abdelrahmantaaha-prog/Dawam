@@ -128,14 +128,52 @@ It gives you:
 - an **ongoing card** in the notification shade mirroring the Now page, which
   is sticky (not swipe-dismissible).
 
+### Building the APK on GitHub (no local toolchain)
+
+`.github/workflows/android.yml` builds it on GitHub's runners, which already
+have a JDK and the Android SDK. **Actions → Build Android APK → Run workflow**,
+then download the `rhythm-apk` artifact. It also runs on pushes to `main` that
+touch the app, and pushing a `v*` tag additionally attaches the APK to a GitHub
+Release — much easier to download straight onto a phone than a CI artifact.
+
+> **Read this before you rely on it.** With no signing secrets set, CI produces
+> a **debug** APK, and the runner generates a fresh debug keystore on every run.
+> A different signature means Android refuses to install over the previous
+> build — you have to uninstall first, **and uninstalling wipes the WebView
+> storage your entire planner lives in**. So either set up signing below, or
+> **export a backup from Settings before every reinstall**.
+
+To get stable, upgradeable installs, add four repository secrets and CI will
+build a signed release instead:
+
+| Secret | What |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64` | `base64 -w0 release.keystore` |
+| `ANDROID_KEYSTORE_PASSWORD` | store password |
+| `ANDROID_KEY_ALIAS` | key alias |
+| `ANDROID_KEY_PASSWORD` | key password |
+
+Generate the keystore once, on any machine with a JDK:
+
+```bash
+keytool -genkeypair -v -keystore release.keystore -alias rhythm \
+        -keyalg RSA -keysize 2048 -validity 10000
+```
+
+Keep that file safe and out of the repo (`*.keystore` is gitignored). Lose it
+and you can never upgrade an existing install again — only uninstall and
+reinstall, wiping data. Signing is wired through env vars in
+`android/app/build.gradle`, so no key material ever touches the repository.
+
+### Building locally instead
+
 ```bash
 npm run android:sync    # vite build + cap sync
 npm run android:open    # …and open Android Studio
 npm run android:apk     # …and assemble a debug APK
 ```
 
-Needs **JDK 17** and the **Android SDK** (easiest via Android Studio) — neither
-is required for the web build.
+Needs **JDK 17** and the **Android SDK** (easiest via Android Studio).
 
 Then in the app: **Settings → Sync → Enable reminders** (Android 13+ needs the
 runtime notification permission; the request only ever fires from that button,
