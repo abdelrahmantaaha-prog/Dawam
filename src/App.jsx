@@ -57,6 +57,7 @@ export default function Rhythm() {
   const [chatErr, setChatErr] = useState('');
   const toggleFoldTask = (id) => setFoldedTasks((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [sideTab, setSideTab] = useState('recurring');  // 'recurring' | 'backlog' — combined plan sidebar
+  const [sideOpen, setSideOpen] = useState(true);       // recurring/backlog sidebar collapsed state
   const pendingEditRef = useRef(null);                  // open editor after jumping to an overdue task's week
 
   const weekRef = useRef(week);
@@ -552,8 +553,12 @@ export default function Rhythm() {
   }, [gcalConn, settings.gcalOn, settings.gcalIds, selectedDay, weekStart, timings, refresh]);
 
   /* ---- scheduled task ops (operate on the displayed week) ---- */
+  // Within a block, order is MANUAL (`order` asc, done last). New tasks get an
+  // order seeded from their start time, so timed tasks still land in a sane
+  // spot — but the arrows on the Plan page are the source of truth, because
+  // this exact order drives the one-at-a-time Now queue.
   const tasksFor = (dayIdx, blockId) =>
-    week.tasks.filter((t) => t.day === dayIdx && t.block === blockId).sort((a, b) => (a.done - b.done) || ((tStartMin(a) ?? 100000) - (tStartMin(b) ?? 100000)) || (a.order - b.order));
+    week.tasks.filter((t) => t.day === dayIdx && t.block === blockId).sort((a, b) => (a.done - b.done) || (a.order - b.order));
 
   const addTask = (dayIdx, blockId, title, extra = {}) => {
     if (!title.trim()) return;
@@ -590,7 +595,35 @@ export default function Rhythm() {
   const removeTask = (id) => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.id !== id) }); setEditing(null); };
   const toggleDone = (id) => mutateTask(id, (t) => ({ ...t, done: !t.done }));
   const toggleSub = (id, subId) => mutateTask(id, (t) => ({ ...t, subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) }));
+  // Reorder a subtask within its task's not-done subtasks. Rebuilds the array so
+  // the moved pair swaps in place; done subtasks keep their slots. This order is
+  // what the Now page uses to surface the next single step.
+  const reorderSub = (taskId, subId, dir) => mutateTask(taskId, (t) => {
+    const subs = t.subtasks || [];
+    const movable = subs.filter((s) => !s.done);
+    const i = movable.findIndex((s) => s.id === subId);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= movable.length) return t;
+    [movable[i], movable[j]] = [movable[j], movable[i]];
+    let k = 0;
+    const next = subs.map((s) => (s.done ? s : movable[k++]));
+    return { ...t, subtasks: next };
+  });
   const moveTaskToBlock = (id, block) => mutateTask(id, (t) => ({ ...t, block }));
+  // Reorder a task among the not-done tasks of its day+block. Orders are
+  // renumbered 1..n on every move; done tasks keep their old order and sink to
+  // the bottom via the done-first sort key.
+  const reorderTask = (id, dir) => {
+    const w = weekRef.current;
+    const t = w.tasks.find((x) => x.id === id); if (!t) return;
+    const list = w.tasks.filter((x) => x.day === t.day && x.block === t.block && !x.done).sort((a, b) => a.order - b.order);
+    const i = list.findIndex((x) => x.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= list.length) return;
+    [list[i], list[j]] = [list[j], list[i]];
+    const orderOf = new Map(list.map((x, n) => [x.id, n + 1]));
+    persistWeek({ ...w, tasks: w.tasks.map((x) => (orderOf.has(x.id) ? { ...x, order: orderOf.get(x.id) } : x)) });
+  };
 
   /* ---- pool (backlog) ops ---- */
   const addPoolItem = (title, extra = {}) => {
@@ -958,16 +991,13 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const nowDayCol = inOvernightIsha ? todayCol - 1 : todayCol;
   const todayTasks = nowDayCol >= 0 ? nowSrc.filter((t) => t.day === nowDayCol) : [];
   const coversNow = (t) => { const st = tStartMin(t), en = tEndMin(t); return st != null && en != null ? inWindow(st, en, curMin) : false; };
-  const sortKey = (t) => { const st = tStartMin(t); if (st != null) return st; return t.order < 1440 ? t.order : 100000 + (t.order % 1000); };
-  const nowList = todayTasks.filter((t) => t.block === activeId || coversNow(t)).sort((a, b) => sortKey(a) - sortKey(b));
-  const notDone = nowList.filter((t) => !t.done);
-  const anyCovers = nowList.some((t) => !t.done && coversNow(t));
-  let nowTask = null;
-  if (!anyCovers) { const timed = notDone.filter((t) => t.order < 1440); for (const t of timed) if (t.block === activeId && t.order <= curMin) nowTask = t; if (!nowTask) nowTask = timed.find((t) => t.block === activeId) || notDone[0] || null; }
-  const isCurrent = (t) => !t.done && (coversNow(t) || (!anyCovers && t === nowTask));
+  // The Now queue mirrors the Plan page EXACTLY: blocks top-to-bottom, then the
+  // manual within-block order (same key as tasksFor). One item is surfaced at a
+  // time; checking it reveals the next.
+  const blockIdx = (id) => BLOCKS.findIndex((b) => b.id === id);
+  const nowList = todayTasks.filter((t) => t.block === activeId || coversNow(t)).sort((a, b) => (blockIdx(a.block) - blockIdx(b.block)) || (a.done - b.done) || (a.order - b.order));
   const nowStart = cleanTime(todayTimings[activeBlock.startKey]) || '';
   const nowEnd = activeBlock.endKey ? cleanTime(todayTimings[activeBlock.endKey]) || '' : '';
-  const doneCount = nowList.filter((t) => t.done).length;
   const clockLabel = `${((now.getHours() + 11) % 12) + 1}:${pad(now.getMinutes())} ${now.getHours() < 12 ? 'AM' : 'PM'}`;
   const nowHourFloat = now.getHours() + now.getMinutes() / 60;
   const sky = skyAt(nowHourFloat);
@@ -1164,6 +1194,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           <div className="brand-en"><strong>Rhythm <span className="ver-tag">v{APP_VERSION}</span></strong><span>{tx('plan your day around the day', 'خطّط يومك حول اليوم')}</span></div>
         </div>
         <div className="hdr-actions">
+          <button className="icon today-jump" onClick={() => { goToday(); setView('plan'); }} aria-label={tx('Jump to today', 'انتقل إلى اليوم')} title={tx('Jump to today', 'انتقل إلى اليوم')}><Calendar size={16} /><span>{tx('Today', 'اليوم')}</span></button>
           <button className="icon lang-toggle" onClick={() => changeLang(LANG === 'ar' ? 'en' : 'ar')} aria-label={tx('Switch language', 'تبديل اللغة')} title={tx('Switch language', 'تبديل اللغة')}><Languages size={17} /><span>{LANG === 'ar' ? 'EN' : 'ع'}</span></button>
           <button className="icon" onClick={() => setChatOpen(true)} aria-label={tx('Planning assistant', 'مساعد التخطيط')} title={tx('Planning assistant', 'مساعد التخطيط')}><Sparkles size={17} /></button>
           <button className="icon" onClick={() => setShowSettings(true)} aria-label={tx('Settings', 'الإعدادات')}><Settings size={18} /></button>
@@ -1174,50 +1205,70 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         <div className="warn"><AlertCircle size={15} /><span>{tx("This device isn't saving between sessions. Your plan lives only in this view — export it from Settings to keep it.", 'هذا الجهاز لا يحفظ بين الجلسات. خطتك موجودة في هذا العرض فقط — صدّرها من الإعدادات للاحتفاظ بها.')}</span></div>
       )}
 
-      {/* NOW */}
-      {view === 'now' && (
+      {/* NOW — one thing at a time: the first unchecked habit/task of the
+          current period, in exact Plan-page order. Checking it reveals the next. */}
+      {view === 'now' && (() => {
+        const pendingHabits = nowHabits.filter((h) => !habitDoneOn(h, nowHabitISO));
+        const pendingTasks = nowList.filter((t) => !t.done);
+        const queue = [...pendingHabits.map((h) => ({ kind: 'habit', h })), ...pendingTasks.map((t) => ({ kind: 'task', t }))];
+        const totalN = nowList.length + nowHabits.length;
+        const doneN = totalN - queue.length;
+        const next = queue[0] || null;
+        const nextTask = next && next.kind === 'task' ? next.t : null;
+        const subs = nextTask ? nextTask.subtasks || [] : [];
+        const nextSub = subs.find((s) => !s.done) || null;
+        const subsDone = subs.filter((s) => s.done).length;
+        const openNext = () => { if (todayInView) setEditing(nextTask.id); else goToday(); };
+        return (
         <div className="hero-card">
           <SkyScene sky={sky} stars={stars} light={heroLight}
             label={tx('Right now', 'الآن')} time={clockLabel}
             blockName={bName(activeBlock)} blockAr={bSub(activeBlock)}
-            range={`${nowStart ? `${fmtTime(nowStart)}${nowEnd ? `–${fmtTime(nowEnd)}` : '+'}` : ''}${nowList.length ? ` · ${doneCount}/${nowList.length} ${tr.done}` : ''}`} />
+            range={`${nowStart ? `${fmtTime(nowStart)}${nowEnd ? `–${fmtTime(nowEnd)}` : '+'}` : ''}${totalN ? ` · ${doneN}/${totalN} ${tr.done}` : ''}`} />
           <div className="hero-sheet">
-            {nowHabits.length > 0 && (
-              <div className="now-habits">
-                {nowHabits.map((h) => <HabitLine key={h.id} h={h} iso={nowHabitISO} onToggle={toggleHabitDay} />)}
-              </div>
-            )}
-            {nowList.length ? (
-              <ul className="now-list">
-                {nowList.map((t) => (
-                  <li key={t.id} className={`now-item ${t.done ? 'done' : ''} ${isCurrent(t) ? 'current' : ''}`}>
-                    {todayInView ? <button className="tcheck" onClick={() => toggleDone(t.id)} aria-label="Toggle done">{t.done ? <CheckCircle2 size={17} /> : <Circle size={17} />}</button> : <span className="now-dot" style={{ background: t.done ? 'var(--faint)' : 'var(--verdigris)' }} />}
+            {next ? (
+              <div className="now-one">
+                <div className="now-one-label">{tx('One thing at a time', 'شيء واحد في كل مرة')}{queue.length > 1 ? ` · ${queue.length - 1} ${tx('more after this', 'غيره بعده')}` : ''}</div>
+                {next.kind === 'habit' ? (
+                  <div className="now-one-card">
+                    <HabitLine h={next.h} iso={nowHabitISO} onToggle={toggleHabitDay} />
+                  </div>
+                ) : (
+                  <div className="now-one-card now-item current">
+                    {todayInView
+                      ? <button className="tcheck big" onClick={() => (nextSub ? toggleSub(nextTask.id, nextSub.id) : toggleDone(nextTask.id))} aria-label={nextSub ? tx('Mark step done', 'إنجاز الخطوة') : tx('Mark done', 'إنجاز')}><Circle size={22} /></button>
+                      : <span className="now-dot" style={{ background: 'var(--verdigris)' }} />}
                     <div className="now-col">
-                      <button className="now-item-main" onClick={() => { if (todayInView) setEditing(t.id); else goToday(); }}>
-                        <span className="now-item-title">{t.title}</span>
-                        {timeLabel(t) ? <span className="ttime">{timeLabel(t)}</span> : null}
-                        {isCurrent(t) && <span className="now-tag">{tr.now}</span>}
-                      </button>
-                      {t.subtasks && t.subtasks.length > 0 && (
-                        <button className="subs-fold" onClick={() => toggleFoldTask(t.id)} aria-expanded={!foldedTasks.has(t.id)}>
-                          <ChevronDown size={13} style={{ transform: foldedTasks.has(t.id) ? 'rotate(-90deg)' : 'none' }} />
-                          {t.subtasks.filter((s) => s.done).length}/{t.subtasks.length} {tx('steps', 'خطوات')}
+                      {nextSub ? (
+                        <>
+                          <button className="now-one-ctx" onClick={openNext}>
+                            <span>{nextTask.title}</span>
+                            {timeLabel(nextTask) ? <span className="ttime">{timeLabel(nextTask)}</span> : null}
+                            <span className="now-step-count">{subsDone}/{subs.length} {tx('steps', 'خطوات')}</span>
+                          </button>
+                          <span className="now-item-title">{nextSub.title}</span>
+                        </>
+                      ) : (
+                        <button className="now-item-main" onClick={openNext}>
+                          <span className="now-item-title">{nextTask.title}</span>
+                          {timeLabel(nextTask) ? <span className="ttime">{timeLabel(nextTask)}</span> : null}
+                          {subs.length > 0 ? <span className="now-step-count">{subsDone}/{subs.length} {tx('steps', 'خطوات')}</span> : null}
                         </button>
                       )}
-                      {t.subtasks && t.subtasks.length > 0 && !foldedTasks.has(t.id) && (
-                        <ul className="subs">{t.subtasks.map((s) => (
-                          <li key={s.id} className={`sub ${s.done ? 'done' : ''}`}>{todayInView ? <button className="subcheck" onClick={() => toggleSub(t.id, s.id)}>{s.done ? <CheckCircle2 size={13} /> : <Circle size={13} />}</button> : <span className="sub-bullet" />}<span>{s.title}</span></li>
-                        ))}</ul>
-                      )}
                     </div>
-                  </li>
-                ))}
-              </ul>
-            ) : (nowHabits.length ? null : <div className="now-empty">{tx('Nothing scheduled here.', 'لا شيء مجدول هنا.')} {bHint(activeBlock)}.</div>)}
+                  </div>
+                )}
+              </div>
+            ) : totalN > 0 ? (
+              <div className="now-empty all-done"><CheckCircle2 size={22} /> {tx('All done for this period. Breathe.', 'أنجزت كل شيء في هذه الفترة. تنفّس.')}</div>
+            ) : (
+              <div className="now-empty">{tx('Nothing scheduled here.', 'لا شيء مجدول هنا.')} {bHint(activeBlock)}.</div>
+            )}
             {!todayInView && <button className="now-jump" onClick={goToday}>{tx('Jump to today', 'انتقل إلى اليوم')}</button>}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* OVERDUE */}
       {view === 'overdue' && (
@@ -1326,7 +1377,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 current={isSelectedToday && b.id === activeId && !inOvernightIsha}
                 prayer={isSelectedToday && PRAYER_BLOCKS.includes(b.id) ? { done: !!(week.prayers?.[selectedDay]?.[b.id]) } : null}
                 onPrayer={() => togglePrayer(b.id)}
-                onToggle={toggleDone} onToggleSub={toggleSub} onOpen={setEditing}
+                onToggle={toggleDone} onToggleSub={toggleSub} onReorder={reorderTask} onReorderSub={reorderSub} onOpen={setEditing}
                 onAdd={(title) => addTask(selectedDay, b.id, title)}
                 onDragStart={startDrag}
                 dragActive={dragActive} dragOver={drag && drag.over && drag.over.type === 'block' && drag.over.id === b.id} draggingId={drag && drag.kind === 'task' ? drag.id : null} />
@@ -1335,6 +1386,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           <aside className="plan-side">
             <PlanSide
               tab={sideTab} onTab={setSideTab}
+              open={sideOpen} onToggleOpen={() => setSideOpen((v) => !v)}
               templates={templates} pool={pool} labelById={labelById} usedTpl={usedTpl}
               onDragStart={startDrag}
               onTplToPool={templateToPool}

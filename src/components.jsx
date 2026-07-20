@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
+import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, ChevronUp, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
 import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 
@@ -37,12 +37,15 @@ function HabitLine({ h, iso, onToggle }) {
 /* ------------------------------------------------------------------ */
 /*  Block row (drop target for tasks, pool items, templates)           */
 /* ------------------------------------------------------------------ */
-function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, events = [], labelById, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId }) {
+function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, events = [], labelById, current, prayer, onPrayer, onToggle, onToggleSub, onReorder, onReorderSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId }) {
   const [folded, setFolded] = useState(() => new Set()); // collapsed subtask lists, per task id (session-local)
   const toggleFold = (id) => setFolded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [quick, setQuick] = useState('');
   const [adding, setAdding] = useState(false);
   const submit = () => { if (quick.trim()) { onAdd(quick); setQuick(''); } };
+  // Movable tasks are the not-done ones; the arrows reorder within this list,
+  // which is the exact order the Now page walks through one at a time.
+  const movable = tasks.filter((t) => !t.done);
   return (
     <div className={`block ${current ? 'active' : ''} ${dragActive ? 'drop-on' : ''} ${dragOver ? 'dragover' : ''}`} style={{ '--accent': block.accent, '--accent-deep': block.accentDeep, '--tint': block.tint }} data-dropblock={block.id}>
       <div className="block-head">
@@ -72,25 +75,39 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
         </div>
       )}
       {tasks.length === 0 && habits.length === 0 && events.length === 0 && !adding && <button className="empty" onClick={() => setAdding(true)}>{bHint(block)}</button>}
-      {tasks.map((t) => { const p = labelById(t.projectId); return (
+      {tasks.map((t) => { const p = labelById(t.projectId); const mi = t.done ? -1 : movable.findIndex((x) => x.id === t.id); const subs = t.subtasks || []; const subMovable = subs.filter((s) => !s.done); return (
         <div key={t.id} className={`task ${t.done ? 'done' : ''} ${draggingId === t.id ? 'dragging' : ''}`}>
           <span className="grip" onPointerDown={(e) => onDragStart(e, 'task', t)} title="Drag to another slot or the backlog"><GripVertical size={15} /></span>
+          {!t.done && onReorder && movable.length > 1 && (
+            <span className="reorder">
+              <button className="reorder-btn" disabled={mi <= 0} onClick={() => onReorder(t.id, -1)} aria-label={tx('Move up', 'حرّك لأعلى')} title={tx('Move up', 'حرّك لأعلى')}><ChevronUp size={13} /></button>
+              <button className="reorder-btn" disabled={mi < 0 || mi >= movable.length - 1} onClick={() => onReorder(t.id, 1)} aria-label={tx('Move down', 'حرّك لأسفل')} title={tx('Move down', 'حرّك لأسفل')}><ChevronDown size={13} /></button>
+            </span>
+          )}
           <button className="tcheck" onClick={() => onToggle(t.id)} aria-label="Toggle done">{t.done ? <CheckCircle2 size={18} /> : <Circle size={18} />}</button>
           <div className="tcol">
             <button className="tmain" onClick={() => onOpen(t.id)}>
               <span className="ttitle">{t.title}{timeLabel(t) ? <span className="ttime">{timeLabel(t)}</span> : null}</span>
               <span className="tmeta">{p && <span className="pdot" style={{ background: p.color }} />}{p && <span className="pname">{p.name}</span>}{t.notes && t.notes.length > 0 && <span className="badge"><StickyNote size={11} /> {t.notes.length}</span>}</span>
             </button>
-            {t.subtasks && t.subtasks.length > 0 && (
+            {subs.length > 0 && (
               <button className="subs-fold" onClick={() => toggleFold(t.id)} aria-expanded={!folded.has(t.id)}>
                 <ChevronDown size={13} style={{ transform: folded.has(t.id) ? 'rotate(-90deg)' : 'none' }} />
-                {t.subtasks.filter((s) => s.done).length}/{t.subtasks.length} {tx('steps', 'خطوات')}
+                {subs.filter((s) => s.done).length}/{subs.length} {tx('steps', 'خطوات')}
               </button>
             )}
-            {t.subtasks && t.subtasks.length > 0 && !folded.has(t.id) && (
-              <ul className="subs">{t.subtasks.map((s) => (
-                <li key={s.id} className={`sub ${s.done ? 'done' : ''}`}><button className="subcheck" onClick={() => onToggleSub(t.id, s.id)}>{s.done ? <CheckCircle2 size={13} /> : <Circle size={13} />}</button><span>{s.title}</span></li>
-              ))}</ul>
+            {subs.length > 0 && !folded.has(t.id) && (
+              <ul className="subs">{subs.map((s) => { const si = s.done ? -1 : subMovable.findIndex((x) => x.id === s.id); return (
+                <li key={s.id} className={`sub ${s.done ? 'done' : ''}`}>
+                  <button className="subcheck" onClick={() => onToggleSub(t.id, s.id)}>{s.done ? <CheckCircle2 size={13} /> : <Circle size={13} />}</button>
+                  <span>{s.title}</span>
+                  {!s.done && onReorderSub && subMovable.length > 1 && (
+                    <span className="reorder sub-reorder">
+                      <button className="reorder-btn" disabled={si <= 0} onClick={() => onReorderSub(t.id, s.id, -1)} aria-label={tx('Move up', 'حرّك لأعلى')}><ChevronUp size={12} /></button>
+                      <button className="reorder-btn" disabled={si < 0 || si >= subMovable.length - 1} onClick={() => onReorderSub(t.id, s.id, 1)} aria-label={tx('Move down', 'حرّك لأسفل')}><ChevronDown size={12} /></button>
+                    </span>
+                  )}
+                </li>); })}</ul>
             )}
           </div>
           </div>); })}
@@ -167,18 +184,19 @@ function SkyScene({ sky, stars, light, label, time, blockName, blockAr, range })
 /* ------------------------------------------------------------------ */
 /*  Plan sidebar — Recurring + Backlog in one box, switchable          */
 /* ------------------------------------------------------------------ */
-function PlanSide({ tab, onTab, templates, pool, labelById, usedTpl = {}, onDragStart, onTplToPool, onTplToDay, onAddTpl, onManage, onEditTpl, onAddPool, onOpenPool, onTogglePoolDone, onPoolToDay, poolDropActive, poolDropOver }) {
+function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labelById, usedTpl = {}, onDragStart, onTplToPool, onTplToDay, onAddTpl, onManage, onEditTpl, onAddPool, onOpenPool, onTogglePoolDone, onPoolToDay, poolDropActive, poolDropOver }) {
   const [val, setVal] = useState('');
   const submitPool = () => { if (val.trim()) { onAddPool(val); setVal(''); } };
   const isBacklog = tab === 'backlog';
   return (
-    <section className={`side-card ${isBacklog && poolDropActive ? 'drop-on' : ''} ${isBacklog && poolDropOver ? 'dragover' : ''}`} data-droppool={isBacklog ? '1' : undefined}>
+    <section className={`side-card ${!open ? 'collapsed' : ''} ${isBacklog && poolDropActive ? 'drop-on' : ''} ${isBacklog && poolDropOver ? 'dragover' : ''}`} data-droppool={isBacklog && open ? '1' : undefined}>
       <div className="side-tabs">
-        <button className={`side-tab ${!isBacklog ? 'on' : ''}`} onClick={() => onTab('recurring')}><Repeat size={13} /> {tx('Recurring', 'المتكررة')}{templates.length > 0 && <span className="side-count">{templates.length}</span>}</button>
-        <button className={`side-tab ${isBacklog ? 'on' : ''}`} onClick={() => onTab('backlog')}><Inbox size={13} /> {tx('Backlog', 'الانتظار')}{pool.length > 0 && <span className="side-count">{pool.length}</span>}</button>
+        <button className={`side-tab ${!isBacklog ? 'on' : ''}`} onClick={() => { if (!open) onToggleOpen && onToggleOpen(); onTab('recurring'); }}><Repeat size={13} /> {tx('Recurring', 'المتكررة')}{templates.length > 0 && <span className="side-count">{templates.length}</span>}</button>
+        <button className={`side-tab ${isBacklog ? 'on' : ''}`} onClick={() => { if (!open) onToggleOpen && onToggleOpen(); onTab('backlog'); }}><Inbox size={13} /> {tx('Backlog', 'الانتظار')}{pool.length > 0 && <span className="side-count">{pool.length}</span>}</button>
+        {onToggleOpen && <button className="side-collapse" onClick={onToggleOpen} aria-expanded={open} aria-label={open ? tx('Collapse', 'طيّ') : tx('Expand', 'توسيع')} title={open ? tx('Collapse', 'طيّ') : tx('Expand', 'توسيع')}><ChevronDown size={15} style={{ transform: open ? 'none' : 'rotate(-90deg)' }} /></button>}
       </div>
 
-      {!isBacklog ? (
+      {!open ? null : !isBacklog ? (
         <div className="tpl-rail">
           <div className="side-subhead"><button className="tpl-manage" onClick={onManage}>{tx('manage', 'إدارة')}</button></div>
           {templates.length === 0 && <button className="tpl-empty" onClick={onAddTpl}>{tx('No recurring tasks yet — add one', 'لا مهام متكررة بعد — أضف واحدة')}</button>}
@@ -221,12 +239,22 @@ function PlanSide({ tab, onTab, templates, pool, labelById, usedTpl = {}, onDrag
 /* ------------------------------------------------------------------ */
 /*  Shared subtasks + notes editors                                    */
 /* ------------------------------------------------------------------ */
-function SubtaskEditor({ subtasks, onAdd, onToggle, onDel }) {
+function SubtaskEditor({ subtasks, onAdd, onToggle, onDel, onMove }) {
   const [val, setVal] = useState('');
   const add = () => { if (val.trim()) { onAdd(val.trim()); setVal(''); } };
   return (<div className="sect">
     <div className="sect-h">{tx('Subtasks', 'المهام الفرعية')}</div>
-    {subtasks.map((s) => (<div key={s.id} className={`subrow ${s.done ? 'done' : ''}`}><button className="tcheck sm" onClick={() => onToggle(s.id)}>{s.done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</button><span>{s.title}</span><button className="mini-del" onClick={() => onDel(s.id)}><X size={13} /></button></div>))}
+    {subtasks.map((s, i) => (<div key={s.id} className={`subrow ${s.done ? 'done' : ''}`}>
+      <button className="tcheck sm" onClick={() => onToggle(s.id)}>{s.done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</button>
+      <span>{s.title}</span>
+      {onMove && subtasks.length > 1 && (
+        <span className="reorder">
+          <button className="reorder-btn" disabled={i === 0} onClick={() => onMove(s.id, -1)} aria-label={tx('Move up', 'حرّك لأعلى')}><ChevronUp size={13} /></button>
+          <button className="reorder-btn" disabled={i === subtasks.length - 1} onClick={() => onMove(s.id, 1)} aria-label={tx('Move down', 'حرّك لأسفل')}><ChevronDown size={13} /></button>
+        </span>
+      )}
+      <button className="mini-del" onClick={() => onDel(s.id)}><X size={13} /></button>
+    </div>))}
     <div className="inline-add"><input value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && add()} placeholder={tx('Add a subtask…', 'أضف مهمة فرعية…')} /><button className="ghost sm" onClick={add}><Plus size={14} /></button></div>
   </div>);
 }
@@ -298,7 +326,7 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, onMo
               {tEndMin(task) != null && <button className="ghost sm focus-whole" onClick={() => onFocus(null, true)}>{tx('Until end', 'حتى النهاية')} ({timeLabel(task).split('–')[1] || fmtTime(task.end)})</button>}
             </div>
           </div>
-          <SubtaskEditor subtasks={task.subtasks} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...t.subtasks, { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.filter((s) => s.id !== id) }))} />
+          <SubtaskEditor subtasks={task.subtasks} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...t.subtasks, { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.filter((s) => s.id !== id) }))} onMove={(id, dir) => onChange((t) => { const arr = [...t.subtasks]; const i = arr.findIndex((s) => s.id === id); const j = i + dir; if (i < 0 || j < 0 || j >= arr.length) return t; [arr[i], arr[j]] = [arr[j], arr[i]]; return { ...t, subtasks: arr }; })} />
           <NotesEditor notes={task.notes || []} onAdd={(n) => onChange((t) => ({ ...t, notes: [...(t.notes || []), n] }))} onUpdate={(id, c) => onChange((t) => ({ ...t, notes: (t.notes || []).map((x) => x.id === id ? { ...x, content: c } : x) }))} onDel={(id) => onChange((t) => ({ ...t, notes: (t.notes || []).filter((x) => x.id !== id) }))} />
         </div>
         <div className="modal-foot"><button className="danger" onClick={onDelete}><Trash2 size={14} /> {tx('Delete', 'حذف')}</button><button className="primary" onClick={onClose}>{tx('Done', 'تم')}</button></div>
@@ -329,7 +357,7 @@ function PoolEditor({ item, projects, allProjects = [], onClose, onChange, onDel
             <button className="primary sm" onClick={onToDay}><CornerUpRight size={14} /> {tx('Schedule on a day', 'جدولة في يوم')}</button>
             <button className="ghost sm" onClick={onSaveTemplate}><Repeat size={14} /> {tx('Save as recurring', 'حفظ كمتكررة')}</button>
           </div>
-          <SubtaskEditor subtasks={item.subtasks || []} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...(t.subtasks || []), { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).filter((s) => s.id !== id) }))} />
+          <SubtaskEditor subtasks={item.subtasks || []} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...(t.subtasks || []), { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).filter((s) => s.id !== id) }))} onMove={(id, dir) => onChange((t) => { const arr = [...(t.subtasks || [])]; const i = arr.findIndex((s) => s.id === id); const j = i + dir; if (i < 0 || j < 0 || j >= arr.length) return t; [arr[i], arr[j]] = [arr[j], arr[i]]; return { ...t, subtasks: arr }; })} />
           <NotesEditor notes={item.notes || []} onAdd={(n) => onChange((t) => ({ ...t, notes: [...(t.notes || []), n] }))} onUpdate={(id, c) => onChange((t) => ({ ...t, notes: (t.notes || []).map((x) => x.id === id ? { ...x, content: c } : x) }))} onDel={(id) => onChange((t) => ({ ...t, notes: (t.notes || []).filter((x) => x.id !== id) }))} />
         </div>
         <div className="modal-foot"><button className="danger" onClick={onDelete}><Trash2 size={14} /> {tx('Delete', 'حذف')}</button><button className="primary" onClick={onClose}>{tx('Done', 'تم')}</button></div>
