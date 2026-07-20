@@ -1191,9 +1191,13 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       const nat = await nativeShell();
       if (stop) return;
       if (!nat) { setNotifyState({ supported: false, state: 'unsupported' }); return; }
-      // Deliberately no intermediate 'checking' state: if anything below threw
-      // or hung, the panel used to sit on it forever. Land on a real answer or
-      // on the error itself — never in between.
+      // Mark it supported IMMEDIATELY, before the slow bridge calls below.
+      // Otherwise `supported` stays false for their whole duration and the
+      // section is hidden — and if the effect re-runs in that window, the
+      // `stop` guard skips the final update and it never appears at all.
+      // Keep any state we already knew so a refresh doesn't flash 'checking';
+      // the calls below are timeout-bounded, so this always resolves.
+      setNotifyState((p) => ({ ...p, supported: true, state: p.state && p.state !== 'unsupported' ? p.state : 'checking' }));
       let st, pend = null;
       try {
         st = await permissionState();

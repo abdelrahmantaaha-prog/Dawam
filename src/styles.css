@@ -109,8 +109,13 @@
 .chip.sel{border-color:var(--verdigris);background:var(--verdigris)} .chip.sel .chip-d,.chip.sel .chip-n,.chip.sel .chip-count{color:#F6FBF8}
 
 /* templates rail */
-.plan-columns{display:grid;grid-template-columns:1fr 280px;gap:16px;align-items:start}
-.plan-side{display:flex;flex-direction:column;gap:12px;position:sticky;top:12px}
+/* minmax(0,…) not 1fr: a bare `1fr` is minmax(auto,1fr), and that auto floor
+   refuses to shrink below the content's min-content width — the nowrap
+   recurring titles then push the whole grid wider than the screen. Same reason
+   the tracks need min-width:0; grid items default to min-width:auto. */
+.plan-columns{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:16px;align-items:start}
+.plan-columns>*{min-width:0}
+.plan-side{display:flex;flex-direction:column;gap:12px;position:sticky;top:12px;min-width:0}
 
 .tpl-card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:10px 12px}
 .tpl-head{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;cursor:pointer}
@@ -330,7 +335,7 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .toast{animation:fadeUp .25s ease both}
 .toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);background:var(--ink);color:#F6FBF8;padding:9px 18px;border-radius:30px;font-size:13px;font-weight:600;box-shadow:0 6px 20px rgba(23,48,39,.3);z-index:60}
 
-@media (max-width:760px){ .plan-columns{grid-template-columns:1fr} .plan-side{position:static} }
+@media (max-width:760px){ .plan-columns{grid-template-columns:minmax(0,1fr)} .plan-side{position:static} }
 @media (max-width:560px){ .row2{grid-template-columns:1fr 1fr} .times-grid{grid-template-columns:1fr 1fr} .brand-en span{display:none} .chooser-grid{grid-template-columns:1fr 1fr} }
 
 /* ---- v1.1 additions ---- */

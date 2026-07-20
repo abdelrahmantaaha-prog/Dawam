@@ -40,7 +40,16 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 /* Are we inside the Android shell? False in any browser, including an
    installed PWA — which is exactly what keeps the web build untouched. */
 export async function isNative() {
-  try { return Capacitor.isNativePlatform(); } catch { return false; }
+  try {
+    // Consult the injected global FIRST. @capacitor/core resolves the platform
+    // when its module is evaluated, and a static import runs that as early as
+    // possible — if the native bridge weren't installed yet it would cache
+    // "web" forever. The global that Android injects is authoritative.
+    const g = typeof window !== 'undefined' ? window.Capacitor : null;
+    if (g && typeof g.isNativePlatform === 'function') return g.isNativePlatform();
+    if (g && typeof g.getPlatform === 'function') return g.getPlatform() !== 'web';
+    return Capacitor.isNativePlatform();
+  } catch { return false; }
 }
 
 async function get() {
