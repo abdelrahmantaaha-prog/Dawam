@@ -26,7 +26,7 @@ function HabitsView({ habits, sky, stars, heroLight, onAdd, onUpd, onDel, onTogg
           if (!group.length) return null;
           return (
             <div key={b.id} className="habit-group">
-              <div className="habit-group-h" style={{ color: b.accentDeep }}>{bName(b)}{bSub(b) ? ` · ${bSub(b)}` : ''}</div>
+              <div className="habit-group-h blk-ink" style={{ '--bi-light': b.accentDeep, '--bi-dark': b.accent }}>{bName(b)}{bSub(b) ? ` · ${bSub(b)}` : ''}</div>
               {group.map((h) => (
                 <HabitCard key={h.id} h={h} todayISO={todayISO} open={openId === h.id}
                   onOpen={() => setOpenId(openId === h.id ? null : h.id)}

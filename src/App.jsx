@@ -1389,7 +1389,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 {caughtUp && <div className="now-caught"><CheckCircle2 size={18} /> {tx("You're all caught up.", 'أنجزت كل ما عليك الآن.')}</div>}
                 <div className="now-one-top">
                   <span className="now-one-label">{tx('Next', 'التالي')}{` · ${tx('when', 'عند')} ${bName(next.block)}`}</span>
-                  <span className="now-one-block" style={{ color: next.block.accentDeep }}>{bName(next.block)}</span>
+                  <span className="now-one-block blk-ink" style={{ '--bi-light': next.block.accentDeep, '--bi-dark': next.block.accent }}>{bName(next.block)}</span>
                 </div>
                 {renderCard(next, { preview: true })}
               </div>
@@ -1397,7 +1397,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               <div className="now-one">
                 <div className="now-one-top">
                   <span className="now-one-label">{tx('One thing at a time', 'شيء واحد في كل مرة')}{queue.length > 1 ? ` · ${queue.length - 1} ${tx('more today', 'أخرى اليوم')}` : ''}</span>
-                  <span className="now-one-block" style={{ color: next.block.accentDeep }}>{bName(next.block)}</span>
+                  <span className="now-one-block blk-ink" style={{ '--bi-light': next.block.accentDeep, '--bi-dark': next.block.accent }}>{bName(next.block)}</span>
                 </div>
                 {renderCard(next)}
               </div>
@@ -1436,7 +1436,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                   <div className="od-col">
                     <button className="od-main" onClick={() => editOverdue(it)}>
                       <span className="od-title">{it.t.title}{timeLabel(it.t) ? <span className="ttime">{timeLabel(it.t)}</span> : null}</span>
-                      <span className="od-meta"><span className="od-date">{wd(it.date.getDay())} {it.date.getDate()} {mon(it.date.getMonth())}</span><span className="od-block" style={{ color: b.accentDeep }}>{bName(b)}</span>{p && <span className="pdot" style={{ background: p.color }} />}{p && <span className="pname">{p.name}</span>}</span>
+                      <span className="od-meta"><span className="od-date">{wd(it.date.getDay())} {it.date.getDate()} {mon(it.date.getMonth())}</span><span className="od-block blk-ink" style={{ '--bi-light': b.accentDeep, '--bi-dark': b.accent }}>{bName(b)}</span>{p && <span className="pdot" style={{ background: p.color }} />}{p && <span className="pname">{p.name}</span>}</span>
                     </button>
                     {it.t.subtasks && it.t.subtasks.length > 0 && (
                       <button className="subs-fold" onClick={() => toggleFoldTask(it.t.id)} aria-expanded={!foldedTasks.has(it.t.id)}>
@@ -1461,7 +1461,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                     <button className="tcheck" style={{ color: '#B23A3A' }} onClick={() => toggleAnyHabitDay(h.id, iso)} aria-label={tx('Mark kept', 'تم الالتزام')}><Circle size={18} /></button>
                     <div className="od-col">
                       <span className="od-title" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><FlameGlyph level={glowLevel(habitStreak(h, iso))} size={12} /> {h.name}</span>
-                      <span className="od-meta"><span className="od-date">{wd(date.getDay())} {date.getDate()} {mon(date.getMonth())}</span><span className="od-block" style={{ color: blockById(h.block || 'morning').accentDeep }}>{bName(blockById(h.block || 'morning'))}</span></span>
+                      <span className="od-meta"><span className="od-date">{wd(date.getDay())} {date.getDate()} {mon(date.getMonth())}</span><span className="od-block blk-ink" style={{ '--bi-light': blockById(h.block || 'morning').accentDeep, '--bi-dark': blockById(h.block || 'morning').accent }}>{bName(blockById(h.block || 'morning'))}</span></span>
                     </div>
                   </li>
                 ))}</ul>
@@ -1711,7 +1711,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 <div className="wiz-progress">{wizard.idx + 1} {tx('of', 'من')} {wizard.items.length} · {stageLabel}</div>
                 <div className="wiz-title">{obj.title}</div>
                 <div className="wiz-meta">
-                  {b && <span style={{ color: b.accentDeep, fontWeight: 700 }}>{bName(b)}</span>}
+                  {b && <span className="blk-ink" style={{ '--bi-light': b.accentDeep, '--bi-dark': b.accent, fontWeight: 700 }}>{bName(b)}</span>}
                   {timeLabel(obj) && <span>{timeLabel(obj)}</span>}
                   {obj.subtasks && obj.subtasks.length > 0 && <span>{tr.steps(obj.subtasks.length)}</span>}
                   {usedN > 0 && <span className="tpl-used">{tx('already added', 'أُضيفت')} ×{usedN}</span>}

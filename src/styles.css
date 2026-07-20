@@ -617,7 +617,11 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 
 /* ---- Dark mode (auto at night, Settings → General to disable) ---- */
 .rhythm.dark{
-  --ink:#E7ECF3; --muted:#A3AFBF; --faint:#5D697A; --line:#2A323E;
+  /* --faint was #5D697A: only 3.07:1 on the dark panel, under the 4.5 minimum,
+     and it carries real content here (hint text, section headings, the
+     diagnostics values, nav labels) — so those all read as barely-there grey.
+     #8A97A8 lands at ~5.8:1 and still reads as de-emphasised. */
+  --ink:#E7ECF3; --muted:#A3AFBF; --faint:#8A97A8; --line:#2A323E;
   --panel:#161C25; --soft:rgba(163,175,191,.10); --surface:#0D1219;
   background:var(--surface); color-scheme:dark;
 }
@@ -633,6 +637,12 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .rhythm.dark .task,.rhythm.dark .now-item{background:transparent}
 .rhythm.dark .chip{background:var(--panel);border-color:var(--line);color:var(--muted)}
 .rhythm.dark .navbar,.rhythm.dark nav.nav{background:rgba(13,18,25,.92);border-color:var(--line)}
+/* The header and bottom bar hardcode a near-white background (they predate
+   dark mode and it isn't a token, so nothing overrode it). In dark mode the
+   text turned light while the bars stayed pale — light-on-light, ~2:1. These
+   restate them as translucent dark so the whole chrome flips together. */
+.rhythm.dark .hdr{background:rgba(22,28,37,.9)}
+.rhythm.dark .bottomnav{background:rgba(22,28,37,.94);box-shadow:0 -6px 18px rgba(0,0,0,.35)}
 .rhythm.dark .navbtn{color:var(--muted)}
 .rhythm.dark .navbtn.on{color:#8FD3B8}
 .rhythm.dark .primary{background:#2F6F51;border-color:#2F6F51}
@@ -743,6 +753,16 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .now-one-card.live{border-color:var(--verdigris);box-shadow:0 0 0 2px rgba(62,138,108,.12)}
 .live-tag{color:var(--verdigris)}
 .rhythm[dir="rtl"] .now-one-ctx{text-align:right}
+
+/* Block-tinted text. accentDeep is darkened for light backgrounds and goes
+   near-invisible on the dark panel, so both tints are handed in as custom
+   properties inline and CSS picks — which also keeps `color` out of the inline
+   style, so these rules can win without !important. */
+.blk-ink{color:var(--bi-light)}
+.rhythm.dark .blk-ink{color:var(--bi-dark)}
+
+/* Values in the Settings diagnostics readout had no styling at all. */
+.hint-text code{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;background:var(--soft);color:var(--ink);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
 
 /* ---- drag-to-reorder ---- */
 /* Tasks reorder in the timeline; subtasks reorder only inside the task editor.
