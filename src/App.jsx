@@ -1191,9 +1191,16 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       const nat = await nativeShell();
       if (stop) return;
       if (!nat) { setNotifyState({ supported: false, state: 'unsupported' }); return; }
-      setNotifyState((p) => ({ ...p, supported: true, state: 'checking' }));
-      const st = await permissionState();
-      const pend = await pendingCount();
+      // Deliberately no intermediate 'checking' state: if anything below threw
+      // or hung, the panel used to sit on it forever. Land on a real answer or
+      // on the error itself — never in between.
+      let st, pend = null;
+      try {
+        st = await permissionState();
+        pend = await pendingCount();
+      } catch (e) {
+        st = `error: ${e && e.message ? e.message : e}`;
+      }
       if (stop) return;
       setNotifyState((p) => ({ ...p, supported: true, state: st, pending: pend }));
     })();

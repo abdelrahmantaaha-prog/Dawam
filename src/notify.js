@@ -28,26 +28,32 @@ const REMINDER_BASE = 1000;      // task reminders live above this
 const CH_REMIND = 'rhythm-reminders-v2';
 const CH_ONGOING = 'rhythm-now-v2';
 
-let plugin = null;               // resolved LocalNotifications, native only
-let native = null;               // cached platform check
+/* Imported STATICALLY on purpose. These were behind dynamic import() to keep
+   them out of the web bundle, but a failed chunk load then rejected out of
+   get() — which callers awaited outside their try/catch — and the UI hung on
+   "checking" forever with only an unhandled rejection to show for it. A few kB
+   in the web bundle is a fair price for removing that whole failure class;
+   isNative() still gates every call, so nothing here ever runs in a browser. */
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 
 /* Are we inside the Android shell? False in any browser, including an
    installed PWA — which is exactly what keeps the web build untouched. */
 export async function isNative() {
-  if (native != null) return native;
-  try {
-    const { Capacitor } = await import('@capacitor/core');
-    native = Capacitor.isNativePlatform();
-  } catch { native = false; }
-  return native;
+  try { return Capacitor.isNativePlatform(); } catch { return false; }
 }
 
 async function get() {
-  if (plugin) return plugin;
-  if (!(await isNative())) return null;
-  const mod = await import('@capacitor/local-notifications');
-  plugin = mod.LocalNotifications;
-  return plugin;
+  return (await isNative()) ? LocalNotifications : null;
+}
+
+/* No bridge call may hang the UI. If the native side never answers we resolve
+   to a marker instead of leaving a promise (and the caller) pending forever. */
+function withTimeout(promise, ms, onTimeout) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => setTimeout(() => resolve(onTimeout), ms)),
+  ]);
 }
 
 /* Stable positive 32-bit id from a task id — Android wants integers, and the
@@ -61,9 +67,15 @@ function idFor(taskId) {
 /* Check WITHOUT prompting — used by the scheduling effects, which must never
    pop a system dialog on their own. Returns 'granted' | 'denied' | 'prompt'. */
 export async function permissionState() {
-  const ln = await get();
-  if (!ln) return 'unsupported';
-  try { return (await ln.checkPermissions()).display; } catch { return 'denied'; }
+  try {
+    const ln = await get();
+    if (!ln) return 'unsupported';
+    const r = await withTimeout(ln.checkPermissions(), 4000, null);
+    return r ? r.display : 'timeout';
+  } catch (e) {
+    // Surface it rather than swallowing — this string is shown in Settings.
+    return `error: ${e && e.message ? e.message : e}`;
+  }
 }
 
 /* Create the channels. MUST run before anything is posted: on Android 8+ a
@@ -140,10 +152,11 @@ export async function syncReminders(items) {
 /* How many reminders Android currently holds for us — the honest answer to
    "is anything actually scheduled?". */
 export async function pendingCount() {
-  const ln = await get();
-  if (!ln) return null;
   try {
-    const p = await ln.getPending();
+    const ln = await get();
+    if (!ln) return null;
+    const p = await withTimeout(ln.getPending(), 4000, null);
+    if (!p) return null;
     return (p.notifications || []).filter((n) => n.id >= REMINDER_BASE).length;
   } catch { return null; }
 }
