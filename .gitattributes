@@ -1,0 +1,15 @@
+# Files that MUST stay LF or they break on the Linux CI runner:
+#  - gradlew with CRLF fails as "bad interpreter: /bin/sh^M"
+#  - a CRLF `run:` block leaks \r into $GITHUB_OUTPUT, so a value written as
+#    "true" compares as "true\r" and every `if:` on it silently goes false
+# Committing from Windows would otherwise introduce CRLF via core.autocrlf.
+gradlew     text eol=lf
+*.sh        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+
+# Keep binaries out of any line-ending conversion.
+*.png       binary
+*.jar       binary
+*.keystore  binary
+*.jks       binary
