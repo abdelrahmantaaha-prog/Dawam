@@ -468,6 +468,7 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                   {notify.pending != null ? <> · {tx('scheduled', 'مجدولة')}: <code>{notify.pending}</code></> : null}
                   {' · '}{tx('checks', 'الفحوص')}: <code>{notify.probes || 0}</code>
                   {notify.test ? <><br />{tx('test', 'الاختبار')}: <code>{notify.test}</code></> : null}
+                  {notify.lastErr ? <><br />{tx('last error', 'آخر خطأ')}: <code>{notify.lastErr}</code></> : null}
                 </p>
               </>)}
             </div>

@@ -52,8 +52,24 @@ export async function isNative() {
   } catch { return false; }
 }
 
+/* Prefer the plugin proxy registered on the INJECTED runtime. On device,
+   window.Capacitor is created by the native bridge before any page script; if
+   the bundled @capacitor/core ever fails to bind to it (dual-instance), calls
+   made through the static import would go nowhere — while this object is, by
+   construction, the one the bridge services. Falls back to the static import.
+   Bonus: a browser test can stub window.Capacitor.Plugins and exercise this
+   exact path end-to-end. */
+function resolvePlugin() {
+  try {
+    const g = typeof window !== 'undefined' ? window.Capacitor : null;
+    const p = g && g.Plugins && g.Plugins.LocalNotifications;
+    if (p && typeof p.checkPermissions === 'function') return p;
+  } catch { /* fall through */ }
+  return LocalNotifications;
+}
+
 async function get() {
-  return (await isNative()) ? LocalNotifications : null;
+  return (await isNative()) ? resolvePlugin() : null;
 }
 
 /* No bridge call may hang the UI. If the native side never answers we resolve

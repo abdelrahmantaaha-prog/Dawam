@@ -1152,7 +1152,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       : next
         ? { title: next.kind === 'task' ? next.t.title : next.kind === 'habit' ? next.h.name : tx(`${next.block.name} prayer`, `صلاة ${next.block.ar}`), body: `${bName(next.block)}${queue.length > 1 ? ` · ${queue.length - 1} ${tx('more today', 'أخرى اليوم')}` : ''}` }
         : totalN > 0 ? { title: tx('All done for today. Rest easy.', 'أنجزت كل شيء اليوم. ارتَح.'), body: '' } : null;
-  const ongoingKey = ongoingText ? `${ongoingText.title} ${ongoingText.body}` : '';
+  const ongoingKey = ongoingText ? `${ongoingText.title} ${ongoingText.body}` : '';
 
   useEffect(() => {
     if (!ready) return;
@@ -1192,21 +1192,44 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   // a stranded UI is not. `probes` counts completions so the panel can show
   // whether this is actually running.
   const probeNotify = useCallback(async () => {
+    const stamp = (patch) => setNotifyState((p) => ({ ...p, ...patch }));
     const info = platformInfo();
-    const nat = await nativeShell();
-    setNotifyState((p) => ({ ...p, ...info }));
-    if (!nat) { setNotifyState((p) => ({ ...p, ...info, supported: false, state: 'unsupported', probes: (p.probes || 0) + 1 })); return; }
-    setNotifyState((p) => ({ ...p, supported: true, state: p.state === 'unsupported' ? 'checking' : p.state }));
-    let st, pend = null;
+    stamp(info);
+    // Step tracing: the state is stamped SYNCHRONOUSLY before each await, so
+    // if any bridge call never settles — even if timers were dead, defeating
+    // the withTimeout guards — the readout freezes on the step's name instead
+    // of an ambiguous "checking". A watchdog names the stall explicitly when
+    // timers do work.
+    let step = '@native';
+    let finished = false;
+    const dog = setTimeout(() => { if (!finished) stamp({ state: `stuck${step}` }); }, 12000);
     try {
-      st = await permissionState();
-      pend = await pendingCount();
+      stamp({ state: step });
+      const nat = await nativeShell();
+      if (!nat) { finished = true; setNotifyState((p) => ({ ...p, ...info, supported: false, state: 'unsupported', probes: (p.probes || 0) + 1 })); return; }
+      step = '@permission'; stamp({ supported: true, state: step });
+      const st = await permissionState();
+      step = '@pending'; stamp({ state: step });
+      const pend = await pendingCount();
+      finished = true;
+      setNotifyState((p) => ({ ...p, supported: true, state: st, pending: pend, probes: (p.probes || 0) + 1 }));
     } catch (e) {
-      st = `error: ${e && e.message ? e.message : e}`;
+      finished = true;
+      setNotifyState((p) => ({ ...p, supported: true, state: `error${step}: ${e && e.message ? e.message : e}`, probes: (p.probes || 0) + 1 }));
+    } finally {
+      clearTimeout(dog);
     }
-    setNotifyState((p) => ({ ...p, supported: true, state: st, pending: pend, probes: (p.probes || 0) + 1 }));
-  }, []);
+  }, []); // eslint-disable-line
   useEffect(() => { probeNotify(); }, [ready, reminderPlan, probeNotify]);
+  // Trap invisible failures: an uncaught error or unhandled rejection anywhere
+  // lands in the readout instead of dying silently in the WebView console
+  // nobody can see.
+  useEffect(() => {
+    const onErr = (ev) => setNotifyState((p) => ({ ...p, lastErr: String(ev.message || ev.reason || ev).slice(0, 140) }));
+    window.addEventListener('error', onErr);
+    window.addEventListener('unhandledrejection', onErr);
+    return () => { window.removeEventListener('error', onErr); window.removeEventListener('unhandledrejection', onErr); };
+  }, []);
   // Re-probe on resume: permission can be changed in Android settings while
   // we're backgrounded, and it self-heals a probe that failed earlier.
   useEffect(() => {
