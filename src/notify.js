@@ -39,7 +39,7 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 
 /* Are we inside the Android shell? False in any browser, including an
    installed PWA — which is exactly what keeps the web build untouched. */
-export async function isNative() {
+function nativeNow() {
   try {
     // Consult the injected global FIRST. @capacitor/core resolves the platform
     // when its module is evaluated, and a static import runs that as early as
@@ -51,6 +51,7 @@ export async function isNative() {
     return Capacitor.isNativePlatform();
   } catch { return false; }
 }
+export async function isNative() { return nativeNow(); }
 
 /* Prefer the plugin proxy registered on the INJECTED runtime. On device,
    window.Capacitor is created by the native bridge before any page script; if
@@ -68,8 +69,18 @@ function resolvePlugin() {
   return LocalNotifications;
 }
 
-async function get() {
-  return (await isNative()) ? resolvePlugin() : null;
+/* THE hard-won rule of this file: the plugin proxy must NEVER pass through
+   promise machinery — not returned from an async function, not resolved, not
+   awaited. Awaiting it makes the engine probe `.then` to see if it's a
+   thenable; Capacitor's registerPlugin proxy answers EVERY property with a
+   native-method invoker, so the engine calls proxy.then(resolve, reject),
+   the native side rejects a method literally named "then" ("not implemented
+   on android"), and — since that bogus then never invokes resolve/reject —
+   the awaiting promise NEVER SETTLES. That silent forever-hang, upstream of
+   every timeout guard, was why no notification ever appeared and the probe
+   sat on "checking". Hence: get() is synchronous, and stays synchronous. */
+function get() {
+  return nativeNow() ? resolvePlugin() : null;
 }
 
 /* No bridge call may hang the UI. If the native side never answers we resolve
@@ -93,7 +104,7 @@ function idFor(taskId) {
    pop a system dialog on their own. Returns 'granted' | 'denied' | 'prompt'. */
 export async function permissionState() {
   try {
-    const ln = await get();
+    const ln = get();
     if (!ln) return 'unsupported';
     const r = await withTimeout(ln.checkPermissions(), 4000, null);
     return r ? r.display : 'timeout';
@@ -125,7 +136,7 @@ async function ensureChannels(ln) {
 /* Ask — call this from a real user gesture (the Settings button).
    Returns true when we may post notifications. */
 export async function ensurePermission() {
-  const ln = await get();
+  const ln = get();
   if (!ln) return false;
   let s = await ln.checkPermissions();
   if (s.display === 'prompt' || s.display === 'prompt-with-rationale') s = await ln.requestPermissions();
@@ -138,7 +149,7 @@ export async function ensurePermission() {
    screen — if this doesn't appear, the problem is permission/channels/OS, not
    the scheduling logic. Returns a short string describing what happened. */
 export async function testNotification() {
-  const ln = await get();
+  const ln = get();
   if (!ln) return 'not the Android app';
   const state = (await ln.checkPermissions()).display;
   if (state !== 'granted') return `permission is "${state}"`;
@@ -152,7 +163,7 @@ export async function testNotification() {
 /* Replace all pending task reminders with the given set.
    `items`: [{ id, title, at: Date }] — only future times are scheduled. */
 export async function syncReminders(items) {
-  const ln = await get();
+  const ln = get();
   if (!ln) return;
   await ensureChannels(ln);
   try {
@@ -194,7 +205,7 @@ export function platformInfo() {
 
 export async function pendingCount() {
   try {
-    const ln = await get();
+    const ln = get();
     if (!ln) return null;
     const p = await withTimeout(ln.getPending(), 4000, null);
     if (!p) return null;
@@ -204,7 +215,7 @@ export async function pendingCount() {
 
 /* Post/refresh the ongoing "what's on Now" card. `null` clears it. */
 export async function setOngoing(text) {
-  const ln = await get();
+  const ln = get();
   if (!ln) return;
   await ensureChannels(ln);
   try {
