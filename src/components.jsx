@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
-import { hasVault,vaultUnlocked,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { hasVault,vaultWindowed,vaultUnlocked,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 
 function FlameGlyph({ level = 0, size = 14 }) {
@@ -328,6 +328,13 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaul
   const [vaultEditing, setVaultEditing] = useState(false);
   const [vaultCopied, setVaultCopied] = useState(false);
   const vaultReady = tStartMin(task) != null && tEndMin(task) != null;
+  // A vault's window is fixed once set: you can only change the times while the
+  // window is actually open, so the times are effectively chosen at creation.
+  // Without this you could simply move the window to now and read the secret,
+  // which would make the whole lock decorative. `vaultWindowed` is required in
+  // the condition so a secret saved BEFORE any times were set stays editable —
+  // otherwise it could never be given a window, and so could never unlock.
+  const vaultLocksTime = hasVault(task) && vaultWindowed(task) && !vaultOpen;
   const saveVault = () => { setField('secret', vaultDraft); setVaultDraft(''); setVaultEditing(false); };
   const clearVault = () => { setField('secret', ''); setVaultDraft(''); setVaultEditing(false); };
   const copyVault = async () => {
@@ -347,8 +354,8 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaul
             <label><span>{tx('Project', 'المشروع')}</span><select value={task.projectRef || ''} onChange={(e) => setField('projectRef', e.target.value || null)}><option value="">{tx('— none —', '— بدون —')}</option>{allProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
             <label><span>{tx('Date', 'التاريخ')}</span><input className="time-input" type="date" value={dateISO} onChange={(e) => e.target.value && onMoveDate(e.target.value)} /></label>
             <label><span>{tx('Block', 'الفترة')}</span><select value={task.block} onChange={(e) => setField('block', e.target.value)}>{BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}</select></label>
-            <label><span>{tx('Start', 'البداية')}</span><input className="time-input" type="time" value={task.start || ''} onChange={(e) => setField('start', e.target.value)} /></label>
-            <label><span>{tx('End', 'النهاية')}</span><input className="time-input" type="time" value={task.end || ''} onChange={(e) => setField('end', e.target.value)} /></label>
+            <label><span>{tx('Start', 'البداية')}</span><input className="time-input" type="time" value={task.start || ''} disabled={vaultLocksTime} onChange={(e) => setField('start', e.target.value)} /></label>
+            <label><span>{tx('End', 'النهاية')}</span><input className="time-input" type="time" value={task.end || ''} disabled={vaultLocksTime} onChange={(e) => setField('end', e.target.value)} /></label>
           </div>
           <div className="editor-actions">
             <button className="ghost sm" onClick={onToPool}><Inbox size={14} /> {tx('Move to backlog', 'نقل إلى قائمة الانتظار')}</button>
@@ -370,6 +377,9 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaul
             </p>
             {!vaultReady && (
               <p className="hint-text vault-warn" style={{ marginTop: 0 }}><AlertCircle size={12} /> {tx('Set both a start and an end time above, or it can never unlock.', 'حدّد وقت بداية ونهاية أعلاه، وإلا فلن تُفتح أبدًا.')}</p>
+            )}
+            {vaultLocksTime && (
+              <p className="hint-text vault-warn" style={{ marginTop: 0 }}><Lock size={12} /> {tx('The times are locked while this is shut — you can only change them during the window itself. The date is always free to move.', 'الأوقات مقفلة أثناء إغلاق الخزنة — لا يمكنك تغييرها إلا خلال وقتها. أما التاريخ فيمكن تغييره دائمًا.')}</p>
             )}
             {!hasVault(task) || vaultEditing ? (
               <div className="inline-add vault-add">

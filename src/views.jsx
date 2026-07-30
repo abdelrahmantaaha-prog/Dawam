@@ -4,9 +4,13 @@ import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFA
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
-function HabitsView({ habits, sky, stars, heroLight, onAdd, onUpd, onDel, onToggleDay, onFocus }) {
+import { saveJson } from './files.js';
+function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, onAdd, onUpd, onDel, onToggleDay, onFocus }) {
   const [openId, setOpenId] = useState(null);
-  const todayISO = fmtISO(new Date());
+  // The day runs Fajr → next Fajr, so "today" comes from the caller, which
+  // knows the boundary. Falling back to the calendar date would mean that
+  // before dawn every habit looked unkept and every streak looked broken.
+  const todayISO = todayISOProp || fmtISO(new Date());
   const doneToday = habits.filter((h) => habitDoneOn(h, todayISO)).length;
   return (
     <div className="hero-card wide">
@@ -307,8 +311,43 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
   const [exp, setExp] = useState(''); const [imp, setImp] = useState(''); const [busy, setBusy] = useState(false); const [status, setStatus] = useState('');
   const doExport = async () => { setBusy(true); setStatus(tx('Preparing…', 'جارٍ التحضير…')); try { setExp(await onExport()); setStatus(''); } catch { setStatus(tx('Export failed.', 'فشل التصدير.')); } setBusy(false); };
   const doCopy = async () => { try { await navigator.clipboard.writeText(exp); setStatus(tx('Copied.', 'تم النسخ.')); } catch { setStatus(tx('Copy blocked — select the text manually.', 'تعذّر النسخ — حدّد النص يدويًا.')); } };
-  const doDownload = () => { try { const blob = new Blob([exp], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `rhythm-backup-${new Date().toISOString().slice(0, 10)}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); } catch { setStatus(tx('Download blocked — copy the text instead.', 'تعذّر التنزيل — انسخ النص بدلًا من ذلك.')); } };
-  const onFile = (e) => { const f = e.target.files && e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => setImp(String(r.result || '')); r.readAsText(f); };
+  /* One step: build the export and save it. Two buttons (generate, then
+     download) meant the common case took two taps and looked broken if you
+     only pressed the first. Routed through saveJson so it also works in the
+     APK, where a blob download silently does nothing. */
+  const doDownload = async () => {
+    setBusy(true); setStatus(tx('Preparing…', 'جارٍ التحضير…'));
+    try {
+      const text = exp || await onExport();
+      if (!exp) setExp(text);
+      const name = `rhythm-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      const r = await saveJson(name, text);
+      if (r === 'downloaded') setStatus(tx(`Saved ${name}`, `تم حفظ ${name}`));
+      else if (r === 'shared') setStatus(tx('Backup ready — pick where to keep it.', 'النسخة جاهزة — اختر مكان حفظها.'));
+      else if (String(r).startsWith('saved:')) setStatus(tx(`Saved to ${String(r).slice(6)}`, `تم الحفظ في ${String(r).slice(6)}`));
+      else setStatus(tx(`Couldn't save the file (${r}). Use "Show text" and copy it instead.`, `تعذّر حفظ الملف (${r}). استخدم «إظهار النص» وانسخه بدلًا من ذلك.`));
+    } catch (e) { setStatus(tx('Export failed.', 'فشل التصدير.')); }
+    setBusy(false);
+  };
+  /* Picking a file imports immediately — the old flow only filled a textarea,
+     so it looked like nothing happened until you found the Import button. */
+  const onFile = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    setBusy(true); setStatus(tx('Reading the file…', 'جارٍ قراءة الملف…'));
+    const r = new FileReader();
+    r.onload = async () => {
+      const text = String(r.result || '');
+      setImp(text);
+      const res = await onImport(text);
+      setStatus(res.msg);
+      if (res.ok) setImp('');
+      setBusy(false);
+    };
+    r.onerror = () => { setStatus(tx("Couldn't read that file.", 'تعذّر قراءة الملف.')); setBusy(false); };
+    r.readAsText(f);
+    e.target.value = ''; // let the same file be picked again after a failure
+  };
   const doImport = async () => { setBusy(true); setStatus(tx('Importing…', 'جارٍ الاستيراد…')); const res = await onImport(imp); setStatus(res.msg); if (res.ok) setImp(''); setBusy(false); };
   const updLabel = (id, p) => patch({ labels: localRef.current.labels.map((x) => x.id === id ? { ...x, ...p } : x) });
   const addLabel = () => patch({ labels: [...localRef.current.labels, { id: uid(), name: tx('New label', 'وسم جديد'), color: LABEL_SWATCHES[localRef.current.labels.length % LABEL_SWATCHES.length] }] });
@@ -487,10 +526,28 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                 </div>
                 <p className="hint-text" style={{ margin: 0 }}>{local.aiProvider === 'gemini' ? tx('Free keys: aistudio.google.com/apikey. Note: on the free tier Google may use prompts to improve its products.', 'مفاتيح مجانية: aistudio.google.com/apikey. ملاحظة: قد تستخدم Google المدخلات في الخطة المجانية لتحسين منتجاتها.') : tx('Keys: console.anthropic.com (paid).', 'المفاتيح: console.anthropic.com (مدفوع).')}</p>
               </div>
-              <p className="hint-text" style={{ marginTop: 14 }}>{tx('Export a backup file, and import it here (or on a new device/browser) to restore.', 'صدّر ملف نسخة احتياطية، واستورده هنا (أو على جهاز/متصفح جديد) للاستعادة.')}</p>
-              <div className="io-actions"><button className="ghost sm" onClick={doExport} disabled={busy}>{tx('Generate export', 'إنشاء نسخة للتصدير')}</button>{exp && <button className="ghost sm" onClick={doCopy}>{tx('Copy', 'نسخ')}</button>}{exp && <button className="ghost sm" onClick={doDownload}>{tx('Download .json', 'تنزيل .json')}</button>}</div>
-              {exp && <textarea className="io-text" readOnly value={exp} onFocus={(e) => e.target.select()} rows={4} />}
-              <div className="io-import"><input type="file" accept="application/json,.json" onChange={onFile} className="file-in" /><textarea className="io-text" placeholder={tx('…or paste a backup to import', '…أو الصق نسخة احتياطية للاستيراد')} value={imp} onChange={(e) => setImp(e.target.value)} rows={3} /><button className="primary" disabled={busy || !imp.trim()} onClick={doImport}>{tx('Import & replace', 'استيراد واستبدال')}</button></div>
+              <div className="sect-h" style={{ marginTop: 16 }}><Copy size={13} /> {tx('Save a backup', 'حفظ نسخة احتياطية')}</div>
+              <p className="hint-text" style={{ marginTop: 0 }}>{tx('Downloads a .json file holding your whole planner. Keep it somewhere safe — it is the only copy.', 'ينزّل ملف .json يحتوي مخططك بالكامل. احفظه في مكان آمن — فهو النسخة الوحيدة.')}</p>
+              <div className="io-actions">
+                <button className="primary" onClick={doDownload} disabled={busy}><Copy size={14} /> {tx('Download backup (.json)', 'تنزيل النسخة (.json)')}</button>
+              </div>
+
+              <div className="sect-h" style={{ marginTop: 18 }}><CornerUpRight size={13} /> {tx('Restore from a backup', 'الاستعادة من نسخة')}</div>
+              <p className="hint-text" style={{ marginTop: 0 }}>{tx('Pick a .json file you exported before. This REPLACES what is on this device.', 'اختر ملف .json صدّرته سابقًا. سيؤدي هذا إلى استبدال ما على هذا الجهاز.')}</p>
+              <label className="file-drop">
+                <input type="file" accept="application/json,.json" onChange={onFile} disabled={busy} />
+                <span><CornerUpRight size={15} /> {tx('Choose a backup file…', 'اختر ملف نسخة احتياطية…')}</span>
+              </label>
+
+              <details className="sync-advanced" style={{ marginTop: 12 }}>
+                <summary>{tx('Advanced: copy or paste the raw text', 'متقدم: انسخ أو الصق النص الخام')}</summary>
+                <div className="io-actions" style={{ marginTop: 8 }}>
+                  <button className="ghost sm" onClick={doExport} disabled={busy}>{tx('Show text', 'إظهار النص')}</button>
+                  {exp && <button className="ghost sm" onClick={doCopy}>{tx('Copy', 'نسخ')}</button>}
+                </div>
+                {exp && <textarea className="io-text" readOnly value={exp} onFocus={(e) => e.target.select()} rows={4} />}
+                <div className="io-import"><textarea className="io-text" placeholder={tx('…or paste a backup to import', '…أو الصق نسخة احتياطية للاستيراد')} value={imp} onChange={(e) => setImp(e.target.value)} rows={3} /><button className="primary" disabled={busy || !imp.trim()} onClick={doImport}>{tx('Import & replace', 'استيراد واستبدال')}</button></div>
+              </details>
               {status && <p className="hint-text" style={{ marginTop: 8 }}>{status}</p>}
             </div>
           )}

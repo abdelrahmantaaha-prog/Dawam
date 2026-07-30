@@ -213,8 +213,21 @@ export async function pendingCount() {
   } catch { return null; }
 }
 
-/* Post/refresh the ongoing "what's on Now" card. `null` clears it. */
+/* Post/refresh the ongoing "what's on Now" card. `null` clears it.
+
+   How persistent this really is, honestly: `ongoing: true` + `autoCancel:
+   false` makes Android treat it as an ongoing event, so it cannot be swiped
+   away and survives "clear all" — through Android 13. On Android 14+ Google
+   deliberately let users dismiss ongoing notifications, and the ONLY way to
+   outrank that is a foreground service (native Java, a persistent
+   "Rhythm is running" entry, and battery implications). Short of that, the
+   strongest available approach is what we do here: post it sticky, keep the
+   last text cached, and re-post on every resume and on every tap so a
+   dismissal heals the moment the app is touched. */
+let lastOngoing = null;
+
 export async function setOngoing(text) {
+  lastOngoing = text || null;   // cache for repostOngoing()
   const ln = get();
   if (!ln) return;
   await ensureChannels(ln);
@@ -226,9 +239,30 @@ export async function setOngoing(text) {
         title: text.title,
         body: text.body || '',
         channelId: CH_ONGOING,
-        ongoing: true,      // sticky: not swipe-dismissible
-        autoCancel: false,  // tapping it opens the app without clearing it
+        ongoing: true,       // sticky: not swipe-dismissible (pre-Android 14)
+        autoCancel: false,   // tapping opens the app without clearing it
+        silent: true,        // it re-posts often; it must never buzz
       }],
     });
   } catch (e) { console.warn('ongoing notification failed', e); }
+}
+
+/* Re-assert the card from the cached text. Cheap and idempotent: the fixed id
+   means Android replaces in place rather than stacking duplicates. */
+export async function repostOngoing() {
+  if (!lastOngoing) return;
+  await setOngoing(lastOngoing);
+}
+
+/* Re-post whenever the notification is tapped, so tapping can never be the
+   thing that makes it disappear. Registered once. */
+let tapHooked = false;
+export function hookOngoingPersistence() {
+  if (tapHooked) return;
+  const ln = get();
+  if (!ln || typeof ln.addListener !== 'function') return;
+  tapHooked = true;
+  try {
+    ln.addListener('localNotificationActionPerformed', () => { repostOngoing(); });
+  } catch { /* listener support is best-effort */ }
 }

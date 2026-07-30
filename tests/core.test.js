@@ -181,3 +181,34 @@ describe('time vault', () => {
     expect(vaultUnlocked(vault('19:00', ''), at(19, 30))).toBe(false);
   });
 });
+
+/* The vault's window is fixed once set: times may only be changed while the
+   window is open, so they are effectively chosen at creation. This mirrors
+   TaskEditor's `vaultLocksTime`. */
+describe('time vault — window is fixed once set', () => {
+  const locksTime = (t, curMin) => hasVault(t) && vaultWindowed(t) && !vaultUnlocked(t, curMin);
+  const v = { start: '22:00', end: '22:30', secret: 's' };
+  const at = (h, m = 0) => h * 60 + m;
+
+  it('locks the times while shut', () => {
+    expect(locksTime(v, at(15))).toBe(true);
+    expect(locksTime(v, at(21, 59))).toBe(true);
+  });
+
+  it('frees the times only inside the window', () => {
+    expect(locksTime(v, at(22, 0))).toBe(false);
+    expect(locksTime(v, at(22, 15))).toBe(false);
+    expect(locksTime(v, at(22, 30))).toBe(true); // window closed again
+  });
+
+  it('a task with no secret is never time-locked', () => {
+    expect(locksTime({ start: '22:00', end: '22:30' }, at(15))).toBe(false);
+  });
+
+  it('a secret with no window stays editable, or it could never be given one', () => {
+    // The trap this guards: lock on hasVault alone and a secret saved before
+    // any times were set can never get a window, so it can never unlock.
+    expect(locksTime({ secret: 's', start: '', end: '' }, at(15))).toBe(false);
+    expect(locksTime({ secret: 's', start: '22:00', end: '' }, at(15))).toBe(false);
+  });
+});

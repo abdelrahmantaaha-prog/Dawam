@@ -3,7 +3,7 @@ import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, 
 import { hasVault,vaultUnlocked,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { createSync, AUTO_EVERY_MS } from './sync.js';
-import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing } from './notify.js';
+import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence } from './notify.js';
 import { ASSISTANT_SYSTEM, buildDaySnapshot, parseAssistantReply, callAssistant } from './assistant.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
@@ -1078,8 +1078,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const prayerHabits = PRAYER_BLOCKS.map((pid) => {
     const b = blockById(pid);
     const log = {};
-    const today0 = new Date(); today0.setHours(0, 0, 0, 0);
-    for (let i = 0; i < 366; i++) { const iso = fmtISO(addDays(today0, -i)); if (prayerDoneOn(pid, iso)) log[iso] = 1; }
+    // Walk back from the LOGICAL day (Fajr→Fajr), not calendar midnight, so
+    // before dawn the log still ends on the day that is currently running.
+    for (let i = 0; i < 366; i++) { const iso = fmtISO(addDays(todayMid, -i)); if (prayerDoneOn(pid, iso)) log[iso] = 1; }
     return { id: `prayer:${pid}`, name: tx(`${b.name} prayer`, `صلاة ${b.ar}`), color: b.accentDeep || '#3E8A6C', block: pid, prayer: true, createdAt: '', log };
   });
   const toggleAnyHabitDay = (id, iso) => {
@@ -1231,12 +1232,15 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     return () => { window.removeEventListener('error', onErr); window.removeEventListener('unhandledrejection', onErr); };
   }, []);
   // Re-probe on resume: permission can be changed in Android settings while
-  // we're backgrounded, and it self-heals a probe that failed earlier.
+  // we're backgrounded, and it self-heals a probe that failed earlier. Also
+  // re-assert the ongoing card, so if Android 14+ let it be dismissed it comes
+  // straight back the moment the app is touched.
   useEffect(() => {
-    const onVis = () => { if (!document.hidden) probeNotify(); };
+    const onVis = () => { if (!document.hidden) { probeNotify(); repostOngoing(); } };
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   }, [probeNotify]);
+  useEffect(() => { if (ready) hookOngoingPersistence(); }, [ready]);
   const enableNotify = async () => {
     const ok = await ensurePermission();
     const st = ok ? 'granted' : await permissionState();
@@ -1581,7 +1585,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {/* HABITS */}
       {view === 'habits' && (
         <HabitsView
-          habits={[...prayerHabits, ...settings.habits]} sky={sky} stars={stars} heroLight={heroLight}
+          habits={[...prayerHabits, ...settings.habits]} sky={sky} stars={stars} heroLight={heroLight} todayISO={nowHabitISO}
           onAdd={addHabit} onUpd={updHabit} onDel={delHabit} onToggleDay={toggleAnyHabitDay}
           onFocus={(h, mins) => startFocus({ id: h.id, title: h.name }, mins)}
         />
