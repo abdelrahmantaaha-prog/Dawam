@@ -4,4 +4,9 @@
     <string name="title_activity_main">Rhythm</string>
     <string name="package_name">app.rhythm.planner</string>
     <string name="custom_url_scheme">app.rhythm.planner</string>
+    <string name="widget_eyebrow">RIGHT NOW</string>
+    <string name="widget_description">The one thing Rhythm is pointing at right now.</string>
+    <string name="widget_empty_title">Open Rhythm</string>
+    <string name="widget_empty_body">It will fill in once the app has run.</string>
+    <string name="widget_clear_title">Nothing right now.</string>
 </resources>

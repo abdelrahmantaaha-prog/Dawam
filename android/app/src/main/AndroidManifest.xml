@@ -24,6 +24,20 @@
 
         </activity>
 
+        <!-- Home-screen widget. exported=true is required: the launcher is a
+             different process and has to be able to bind it. It carries no
+             data of its own — it renders a summary the app pushes in. -->
+        <receiver
+            android:name=".RhythmWidget"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_now_info" />
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

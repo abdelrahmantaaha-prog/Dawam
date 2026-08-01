@@ -3,6 +3,7 @@ import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, 
 import { hasVault,vaultUnlocked,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { useSync, markDirty, markDeleted } from './sync.js';
+import { updateWidget } from './widget.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence } from './notify.js';
 import { ASSISTANT_SYSTEM, buildDaySnapshot, parseAssistantReply, callAssistant } from './assistant.js';
 
@@ -1129,6 +1130,20 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         ? { title: next.kind === 'task' ? next.t.title : next.kind === 'habit' ? next.h.name : tx(`${next.block.name} prayer`, `صلاة ${next.block.ar}`), body: `${bName(next.block)}${queue.length > 1 ? ` · ${queue.length - 1} ${tx('more today', 'أخرى اليوم')}` : ''}` }
         : totalN > 0 ? { title: tx('All done for today. Rest easy.', 'أنجزت كل شيء اليوم. ارتَح.'), body: '' } : null;
   const ongoingKey = ongoingText ? `${ongoingText.title} ${ongoingText.body}` : '';
+
+  /* Home-screen widget. Same headline as the ongoing notification, plus the
+     next couple of items so the widget answers "and then what?" at a glance
+     without becoming the full list the Now page deliberately refuses to be. */
+  const widgetLabel = (it) => (it.kind === 'task' ? it.t.title : it.kind === 'habit' ? it.h.name : tx(`${it.block.name} prayer`, `صلاة ${it.block.ar}`));
+  const widgetUpcoming = queue.slice(1, 3).map(widgetLabel);
+  const widgetPayload = ongoingText
+    ? { title: ongoingText.title, body: ongoingText.body, upcoming: widgetUpcoming.length ? `${tx('then', 'ثم')}: ${widgetUpcoming.join(' · ')}` : '' }
+    : null;
+  const widgetKey = widgetPayload ? `${widgetPayload.title}|${widgetPayload.body}|${widgetPayload.upcoming}` : '';
+  useEffect(() => {
+    if (!ready) return;
+    updateWidget(widgetPayload);
+  }, [ready, widgetKey]); // eslint-disable-line
 
   useEffect(() => {
     if (!ready) return;
