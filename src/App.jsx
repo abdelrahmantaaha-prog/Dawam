@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
 import { hasVault,vaultUnlocked,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
-import { createSync, AUTO_EVERY_MS } from './sync.js';
+import { useSync, markDirty, markDeleted } from './sync.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence } from './notify.js';
 import { ASSISTANT_SYSTEM, buildDaySnapshot, parseAssistantReply, callAssistant } from './assistant.js';
 
@@ -326,7 +326,7 @@ export default function Rhythm() {
     const winStartWeek = monthWin < fourBack ? monthWin : fourBack;
     for (const k of await rawList('planner:')) {
       if (k.startsWith('planner:prayers:')) { const d = new Date(k.slice('planner:prayers:'.length) + 'T00:00:00'); if (isNaN(d) || d < addDays(today, -2)) await rawDelete(k); }
-      else if (k.startsWith('planner:week:')) { const d = new Date(k.slice(13) + 'T00:00:00'); if (!isNaN(d) && d < winStartWeek) await rawDelete(k); }
+      else if (k.startsWith("planner:week:")) { const d = new Date(k.slice(13) + "T00:00:00"); if (!isNaN(d) && d < winStartWeek) { await rawDelete(k); markDeleted(k); } }
     }
   };
 
@@ -435,68 +435,43 @@ export default function Rhythm() {
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
-  /* ---- cross-device sync (last-write-wins per key) ----
-     The backend was removed for now, so `getTransport` returns null and every
-     sync is a clean no-op. The merge engine, the dirty queue and the twice-a-day
-     cadence all stay live, so wiring a backend later is one function. */
-  const [syncBusy, setSyncBusy] = useState(false);
-  const [syncMsg, setSyncMsg] = useState('');
-  const [lastSync, setLastSync] = useState(null);
-  // Applying a remote key routes into live state WITHOUT re-persisting (the sync
-  // engine already wrote storage) — persisting here would echo the key back.
-  const applyRemote = useCallback((key, raw) => {
-    let v; try { v = JSON.parse(raw); } catch { return; }
-    if (key === 'planner:settings') { const m = migrateSettings(v); setLang(m.lang); setSettings(m); if (!m.pin) setLocked(false); }
-    else if (key === 'planner:pool') { const arr = Array.isArray(v) ? v : []; poolRef.current = arr; setPool(arr); }
-    else if (key === 'planner:templates') { setTemplates(Array.isArray(v) ? v : []); }
-    else if (key.startsWith('planner:week:')) {
-      const iso = key.slice('planner:week:'.length);
-      weeksRef.current[iso] = v;
-      if (iso === fmtISO(weekStart)) { weekRef.current = v; setWeek(v); }
+  /* ---- cross-device sync ----
+     Optional and invisible unless the deployment has one: useSync probes
+     /api/me on boot and reports `unavailable` when there is no backend, which
+     is the normal case for the Android shell and a plain `vite dev`.
+
+     Every local write stamps a timestamp in the sync meta; the hook decides on
+     its own when to push. `localVersion` just tells it something changed —
+     the actual "is anything owed?" test is a fingerprint comparison inside the
+     hook, never JSON.stringify. */
+  const [localVersion, setLocalVersion] = useState(0);
+  useEffect(() => {
+    setSaveHook((key) => { markDirty(key); setLocalVersion((n) => n + 1); });
+    return () => setSaveHook(null);
+  }, []);
+
+  /* Sync writes straight to storage, so after it applies keys we re-read the
+     ones it touched into live state. Deliberately NOT re-persisting: the bytes
+     are already saved, and saving again would stamp a fresh timestamp and push
+     the same content back — the echo that turns a sync into a loop. */
+  const adoptKeys = useCallback(async (keys) => {
+    for (const key of keys) {
+      const v = await loadKey(key);
+      if (key === 'planner:settings') {
+        if (!v) continue;
+        const m = migrateSettings(v); setLang(m.lang); setSettings(m); if (!m.pin) setLocked(false);
+      } else if (key === 'planner:pool') { const arr = Array.isArray(v) ? v : []; poolRef.current = arr; setPool(arr); }
+      else if (key === 'planner:templates') { setTemplates(Array.isArray(v) ? v : []); }
+      else if (key.startsWith('planner:week:')) {
+        const iso = key.slice('planner:week:'.length);
+        if (v == null) delete weeksRef.current[iso]; else weeksRef.current[iso] = v;
+        if (iso === fmtISO(weekStart)) { const w = v || { tasks: [] }; weekRef.current = w; setWeek(w); }
+      }
     }
     bumpRefresh();
   }, [weekStart]);
-  const syncRef = useRef(null);
-  if (!syncRef.current) {
-    syncRef.current = createSync({
-      // No backend wired up yet — returning null keeps the app fully local.
-      getTransport: () => null,
-      onRemote: (k, raw) => applyRemoteRef.current(k, raw),
-    });
-  }
-  const applyRemoteRef = useRef(applyRemote);
-  useEffect(() => { applyRemoteRef.current = applyRemote; }, [applyRemote]);
-  const runSync = useCallback(async ({ auto = false } = {}) => {
-    if (!syncRef.current) return;
-    setSyncBusy(true); setSyncMsg('');
-    try {
-      const r = await syncRef.current.syncNow({ auto });
-      if (!r.skipped) {
-        setLastSync(new Date());
-        if (!auto) setSyncMsg(tx(`Synced — ${r.pulled} pulled, ${r.pushed} pushed.`, `تمت المزامنة — ${r.pulled} وارد، ${r.pushed} صادر.`));
-      } else if (!auto && r.skipped === 'not configured') {
-        setSyncMsg(tx('No sync backend is connected yet — your planner stays on this device.', 'لا يوجد خادم مزامنة متصل بعد — يبقى مخططك على هذا الجهاز.'));
-      }
-    } catch (e) { setSyncMsg(String(e.message || e)); }
-    setSyncBusy(false);
-  }, []);
-  // Local edits only stamp the dirty queue; they no longer trigger a push.
-  // Uploads happen on the twice-a-day cadence, or when you press Sync now.
-  useEffect(() => {
-    setSaveHook((key) => { syncRef.current && syncRef.current.markDirty(key); });
-    return () => setSaveHook(null);
-  }, []);
-  // Automatic sync: at most twice a day. Checked on launch and whenever the app
-  // comes back to the foreground — a static PWA has no background scheduler, so
-  // "twice a day" means the first launch/foreground past each 12-hour mark.
-  useEffect(() => {
-    if (!ready) return;
-    runSync({ auto: true });
-    const maybeAuto = () => { if (!document.hidden) runSync({ auto: true }); };
-    document.addEventListener('visibilitychange', maybeAuto);
-    window.addEventListener('online', maybeAuto);
-    return () => { document.removeEventListener('visibilitychange', maybeAuto); window.removeEventListener('online', maybeAuto); };
-  }, [ready, runSync]);
+
+  const sync = useSync({ localVersion, onApplied: adoptKeys, loaded: ready });
 
   /* ---- scheduled task ops (operate on the displayed week) ---- */
   // Within a block, order is MANUAL (`order` asc, done last). New tasks get an
@@ -1631,8 +1606,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           templates={templates} onAddTemplate={addTemplate} onUpdTemplate={updTemplate} onDelTemplate={delTemplate}
           onExport={buildExport} onImport={applyImport}
           onSetPin={setPin}
-          sync={{ busy: syncBusy, msg: syncMsg, lastSync, everyMs: AUTO_EVERY_MS }}
-          onSyncNow={() => runSync()}
+          sync={sync}
           notify={notifyState} onEnableNotify={enableNotify} onTestNotify={testNotify} onRecheck={probeNotify}
           storageOk={storageOk} onClose={() => setShowSettings(false)}
           onClearDay={() => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.day !== selectedDay) }); flash(tx('Day cleared.', 'تم مسح اليوم.')); }}

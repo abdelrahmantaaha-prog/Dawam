@@ -297,7 +297,7 @@ function PinScreen({ onVerify, onSuccess }) {
 /* ------------------------------------------------------------------ */
 /*  Settings                                                           */
 /* ------------------------------------------------------------------ */
-function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, onSyncNow, notify, onEnableNotify, onTestNotify, onRecheck, storageOk, onClose, onClearDay, dayLabel, onLang }) {
+function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, notify, onEnableNotify, onTestNotify, onRecheck, storageOk, onClose, onClearDay, dayLabel, onLang }) {
   const [local, setLocal] = useState(settings);
   const [tab, setTab] = useState('general');
   // Keep the local editing copy in sync when the parent persists settings from
@@ -469,13 +469,30 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
           {tab === 'sync' && (
             <div className="sect">
               <div className="sect-h"><Repeat size={13} /> {tx('Cross-device sync', 'المزامنة بين الأجهزة')}</div>
-              <div className="security-note"><Shield size={15} /><p>{tx('No sync backend is connected right now, so Rhythm is fully local — your planner never leaves this device. Export a backup regularly to keep it safe.', 'لا يوجد خادم مزامنة متصل حاليًا، لذا يعمل التطبيق محليًا بالكامل — لا يغادر مخططك هذا الجهاز. صدّر نسخة احتياطية بانتظام للحفاظ عليه.')}</p></div>
-              <p className="hint-text" style={{ marginTop: 10 }}>{tx('When a backend is connected, Rhythm syncs automatically twice a day — checked when you open the app and when you come back to it — and conflicts resolve per item by most-recent-edit. You can always sync on demand below.', 'عند توصيل خادم، يزامن التطبيق تلقائيًا مرتين يوميًا — يُفحص عند فتح التطبيق وعند العودة إليه — وتُحسم التعارضات لكل عنصر بالأحدث تعديلًا. ويمكنك المزامنة يدويًا في أي وقت أدناه.')}</p>
-              <div className="io-actions">
-                <button className="primary" onClick={onSyncNow} disabled={sync && sync.busy}>{sync && sync.busy ? tx('Syncing…', 'جارٍ المزامنة…') : tx('Sync now', 'زامن الآن')}</button>
-              </div>
-              {sync && sync.lastSync && <p className="hint-text" style={{ marginTop: 8, color: 'var(--verdigris)', fontWeight: 700 }}><KeyRound size={12} /> {tx('Last sync', 'آخر مزامنة')} {sync.lastSync.toLocaleTimeString()}</p>}
-              {sync && sync.msg && <p className="hint-text" style={{ marginTop: 8 }}>{sync.msg}</p>}
+              {!sync || !sync.capability.sync ? (<>
+                <div className="security-note"><Shield size={15} /><p>{tx('This copy of Rhythm has no sync backend, so it is fully local — your planner never leaves this device. Export a backup regularly to keep it safe.', 'هذه النسخة بلا خادم مزامنة، لذا تعمل محليًا بالكامل — لا يغادر مخططك هذا الجهاز. صدّر نسخة احتياطية بانتظام للحفاظ عليه.')}</p></div>
+                <p className="hint-text" style={{ marginTop: 10 }}>{tx('Sync appears here automatically on a deployment that has one configured.', 'تظهر المزامنة هنا تلقائيًا في أي نسخة مُهيّأة لها.')}</p>
+              </>) : !sync.user ? (<>
+                <div className="security-note"><Shield size={15} /><p>{tx('Sign in to keep your planner on your other devices. Your data is stored under your account and merged per item by most-recent-edit — nothing is shared with anyone else.', 'سجّل الدخول للحفاظ على مخططك على أجهزتك الأخرى. تُحفظ بياناتك ضمن حسابك وتُدمج لكل عنصر بالأحدث تعديلًا — ولا تُشارك مع أي شخص آخر.')}</p></div>
+                <div className="io-actions" style={{ marginTop: 10 }}>
+                  <button className="primary" onClick={sync.signIn}><KeyRound size={14} /> {tx('Continue with Google', 'المتابعة بحساب Google')}</button>
+                </div>
+                <p className="hint-text" style={{ marginTop: 8 }}>{tx('Staying signed out keeps Rhythm exactly as it is: local-only.', 'البقاء دون تسجيل دخول يُبقي التطبيق كما هو: محلي بالكامل.')}</p>
+              </>) : (<>
+                <p className="hint-text" style={{ color: 'var(--verdigris)', fontWeight: 700 }}><KeyRound size={12} /> {tx('Signed in as', 'مسجّل باسم')} {sync.user.email || sync.user.name}</p>
+                <p className="hint-text" style={{ marginTop: 4 }}>
+                  {tx('Status', 'الحالة')}: <code>{sync.status}</code>
+                  {sync.lastSync ? <> · {tx('last sync', 'آخر مزامنة')} {new Date(sync.lastSync).toLocaleTimeString()}</> : null}
+                </p>
+                <p className="hint-text" style={{ marginTop: 4 }}>{tx('Syncs on its own when you open the app, come back to it, and a few seconds after an edit. It never syncs while an editor is open, so it cannot overwrite something you are in the middle of.', 'تتم المزامنة تلقائيًا عند فتح التطبيق والعودة إليه وبعد ثوانٍ من أي تعديل. ولا تتم أبدًا أثناء فتح نافذة تحرير، فلا يمكن أن تستبدل ما تعمل عليه.')}</p>
+                <div className="io-actions" style={{ marginTop: 8 }}>
+                  <button className="primary" onClick={sync.syncNow} disabled={sync.status === 'syncing'}>{sync.status === 'syncing' ? tx('Syncing…', 'جارٍ المزامنة…') : tx('Sync now', 'زامن الآن')}</button>
+                  <button className="ghost sm" onClick={sync.signOut}>{tx('Sign out', 'تسجيل الخروج')}</button>
+                  <button className="danger sm" onClick={sync.stopSync}>{tx('Stop syncing & remove cloud copy', 'إيقاف المزامنة وحذف النسخة السحابية')}</button>
+                </div>
+                <p className="hint-text" style={{ marginTop: 6 }}>{tx('Stopping deletes the cloud copy only — this device keeps everything.', 'الإيقاف يحذف النسخة السحابية فقط — يحتفظ هذا الجهاز بكل شيء.')}</p>
+              </>)}
+              {sync && sync.error && <p className="hint-text vault-warn" style={{ marginTop: 8 }}><AlertCircle size={12} /> {sync.error}</p>}
 
               {/* Never gated on `supported`. Gating it meant that whenever the
                   platform probe came back false — for any reason — the whole
