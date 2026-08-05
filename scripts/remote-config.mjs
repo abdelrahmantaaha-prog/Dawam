@@ -41,8 +41,22 @@ if (!existsSync(TARGET)) {
   process.exit(1);
 }
 
+/* Sign-in leaves the app's own origin. Capacitor hands any navigation it does
+   not recognise to the system browser, and Google's callback would then land
+   there — setting the session cookie in Chrome's jar, not the WebView's, so the
+   app would come back still signed out. Listing the OAuth hosts keeps the whole
+   round trip inside the WebView, where the cookie lands somewhere useful. */
+const OAUTH_HOSTS = ['accounts.google.com', 'accounts.youtube.com'];
+
 const cfg = JSON.parse(readFileSync(TARGET, 'utf8'));
-cfg.server = { ...(cfg.server || {}), url, androidScheme: 'https', cleartext: false };
+cfg.server = {
+  ...(cfg.server || {}),
+  url,
+  androidScheme: 'https',
+  cleartext: false,
+  allowNavigation: [...new Set([...(cfg.server?.allowNavigation || []), ...OAUTH_HOSTS])],
+};
 writeFileSync(TARGET, JSON.stringify(cfg, null, 2));
 console.log(`remote-config: APK will load ${url}`);
 console.log('remote-config: reminder — different origin, so export a backup before installing and import after.');
+console.log('remote-config: if Google answers "disallowed_useragent", sign-in needs a token handoff — see README → Sync in the APK.');

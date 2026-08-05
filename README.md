@@ -119,6 +119,21 @@ written by a `https://localhost` install. Export a backup before installing,
 import after. First launch needs the network; the service worker covers later
 ones.
 
+The script also lists Google's OAuth hosts under `server.allowNavigation`.
+Without that, Capacitor sends the sign-in navigation to the system browser, the
+callback sets the session cookie in *Chrome's* cookie jar, and the app comes
+back still signed out. **Google may refuse the flow anyway**: it blocks OAuth
+from embedded WebViews with `disallowed_useragent`, and Android's WebView is
+identifiable. If that happens, don't spoof the user agent — it's Google's
+anti-phishing control and faking it is against their terms. Sign-in then needs
+a real token handoff: open the flow in a Custom Tab, finish it in the browser,
+and hand a short-lived token back to the app through a deep link, which the app
+exchanges for its own session. That is unbuilt, and it is the same work
+option B needs.
+
+Nothing above affects reminders, the widget or the vault — those are native and
+origin-independent. Only account sync depends on sign-in.
+
 **Keep the bundle local and point only the API elsewhere.** `VITE_API_BASE`
 prefixes the data calls at build time, so on-device data and offline start
 survive. Cookie sign-in from a different origin does not — `SameSite=Lax`
