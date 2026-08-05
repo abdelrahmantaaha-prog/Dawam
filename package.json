@@ -11,7 +11,8 @@
     "icons": "node scripts/gen-icons.mjs",
     "android:sync": "vite build && cap sync android",
     "android:open": "npm run android:sync && cap open android",
-    "android:apk": "npm run android:sync && cd android && gradlew.bat assembleDebug"
+    "android:apk": "npm run android:sync && cd android && gradlew.bat assembleDebug",
+    "android:remote": "npm run android:sync && node scripts/remote-config.mjs"
   },
   "dependencies": {
     "@auth/express": "^0.10.1",

@@ -20,12 +20,25 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { mergeState, fingerprint, sameDoc, migrate, isSyncable, DOC_VERSION } from '../shared/model.js';
 import { rawList, rawGet, rawSet, rawDelete } from './storage.js';
 
+/* Where the API lives.
+
+   On the web this is same-origin and empty is right. Inside the Android shell
+   the page is served from https://localhost — the WebView's own asset server —
+   so a relative "/api/me" never leaves the phone, and sync silently reports
+   "no backend" no matter what the deployment has configured. VITE_API_BASE
+   points the calls at a real deployment for builds that need it.
+
+   Note this only fixes the data calls. Cookie-based sign-in from a different
+   origin is a separate problem (see README → Sync in the APK). */
+const BASE = (import.meta.env && import.meta.env.VITE_API_BASE) || '';
+export const apiBase = () => BASE;
+
 const API = {
-  me: '/api/me',
-  sync: '/api/sync',
-  csrf: '/api/auth/csrf',
-  signIn: '/api/auth/signin/google',
-  signOut: '/api/auth/signout',
+  me: `${BASE}/api/me`,
+  sync: `${BASE}/api/sync`,
+  csrf: `${BASE}/api/auth/csrf`,
+  signIn: `${BASE}/api/auth/signin/google`,
+  signOut: `${BASE}/api/auth/signout`,
 };
 
 /* Local bookkeeping. `meta` is when this device last wrote each key, and it is
@@ -207,19 +220,22 @@ export function useSync({ localVersion, onApplied, loaded }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      const url = new URL(API.me, window.location.href).href;
       try {
-        const r = await fetch(API.me, { credentials: 'same-origin' });
-        if (!r.ok) throw new Error('me-' + r.status);
+        const r = await fetch(API.me, { credentials: BASE ? 'include' : 'same-origin' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
         const j = await r.json();
         if (cancelled) return;
-        setCapability({ checked: true, sync: !!j.sync, auth: !!j.auth, db: !!j.db });
+        setCapability({ checked: true, sync: !!j.sync, auth: !!j.auth, db: !!j.db, probe: url,
+          why: j.sync ? '' : `deployment reports auth=${!!j.auth} db=${!!j.db}` });
         setUser(j.user || null);
         setStatus(!j.sync ? 'unavailable' : j.user ? 'idle' : 'signed-out');
-      } catch {
-        // No backend at all (plain `vite dev`, the static build, or the Android
-        // shell, where the origin is the bundled app). That is a supported way
-        // to run Rhythm, so it is not an error state.
-        if (!cancelled) setCapability({ checked: true, sync: false, auth: false, db: false });
+      } catch (e) {
+        // Running without a backend is a supported way to use Rhythm, so this
+        // is not an error state — but it must not be SILENT either. Reporting
+        // the URL that was actually tried is what distinguishes "this build has
+        // no backend" from "this build is asking its own WebView for /api".
+        if (!cancelled) setCapability({ checked: true, sync: false, auth: false, db: false, probe: url, why: String(e.message || e) });
       }
     })();
     return () => { cancelled = true; };

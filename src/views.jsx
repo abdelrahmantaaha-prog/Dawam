@@ -472,6 +472,12 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
               {!sync || !sync.capability.sync ? (<>
                 <div className="security-note"><Shield size={15} /><p>{tx('This copy of Rhythm has no sync backend, so it is fully local — your planner never leaves this device. Export a backup regularly to keep it safe.', 'هذه النسخة بلا خادم مزامنة، لذا تعمل محليًا بالكامل — لا يغادر مخططك هذا الجهاز. صدّر نسخة احتياطية بانتظام للحفاظ عليه.')}</p></div>
                 <p className="hint-text" style={{ marginTop: 10 }}>{tx('Sync appears here automatically on a deployment that has one configured.', 'تظهر المزامنة هنا تلقائيًا في أي نسخة مُهيّأة لها.')}</p>
+                {sync && sync.capability.probe && (
+                  <p className="hint-text" style={{ marginTop: 6, overflowWrap: 'anywhere' }}>
+                    {tx('Checked', 'تم الفحص')}: <code>{sync.capability.probe}</code>
+                    {sync.capability.why ? <><br />{tx('Result', 'النتيجة')}: <code>{sync.capability.why}</code></> : null}
+                  </p>
+                )}
               </>) : !sync.user ? (<>
                 <div className="security-note"><Shield size={15} /><p>{tx('Sign in to keep your planner on your other devices. Your data is stored under your account and merged per item by most-recent-edit — nothing is shared with anyone else.', 'سجّل الدخول للحفاظ على مخططك على أجهزتك الأخرى. تُحفظ بياناتك ضمن حسابك وتُدمج لكل عنصر بالأحدث تعديلًا — ولا تُشارك مع أي شخص آخر.')}</p></div>
                 <div className="io-actions" style={{ marginTop: 10 }}>

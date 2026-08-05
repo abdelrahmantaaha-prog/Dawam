@@ -62,33 +62,68 @@ opt-in exception to local-only; the rest of the app never touches the network.
 
 ## Cross-device sync
 
-**No backend is connected right now.** The Supabase backend (and the Google
-Calendar integration that depended on its Google sign-in) were removed; the app
-is fully local again. Export a backup from Settings to move data between
-devices in the meantime.
+Optional, and off unless a deployment configures it. localStorage stays the
+source of truth: the app works with no account and no network, and sync is a
+background reconciliation — pull, merge, adopt, push — that never blocks a
+render and never makes you wait to tick something off.
 
-The sync *engine* is still here and still tested — only the transport is gone.
-`src/sync.js` keeps the per-key last-write-wins merge, the dirty queue and the
-scheduling; it takes an injected `transport`:
+Sign in with Google (Auth.js), and the whole planner is stored as one document
+per account in Postgres. Conflicts resolve **per key by most-recent edit** —
+right for one person on a few devices, not for teams — and deleted keys carry
+tombstones so pruning an old week isn't undone by the next pull. Device clocks
+decide ties.
 
-```js
-{ list()       -> [{ key, value, updated_at }]
-  upsert(rows) -> void }
-```
+**Where it runs.** One Express function (`api/index.js`) on Vercel, Neon for
+Postgres. Four environment variables, all server-side:
 
-`createSync({ getTransport })` returning `null` means "no backend", and every
-sync is a clean no-op. Wiring a new backend is one function — see
-`getTransport` in `src/App.jsx`.
+| Variable | What |
+| --- | --- |
+| `AUTH_SECRET` | `openssl rand -base64 32` |
+| `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Google OAuth client; callback `https://your-app/api/auth/callback/google` |
+| `DATABASE_URL` | Neon connection string |
 
-**Cadence.** Automatic sync runs at most **twice a day** (`AUTO_EVERY_MS`,
-12 hours). A static PWA has no background scheduler, so "twice a day" means the
-first app launch or foreground return past each 12-hour mark. **Settings →
-Sync → "Sync now"** always runs immediately and resets that clock.
+`GET /api/me` reports `{ auth, db, sync, user }`. With any of them missing it
+answers `sync: false`, the Settings panel says so, and every sync is a clean
+no-op — that is the supported local-only mode, not an error.
 
-When a backend is connected, conflicts resolve per item by most-recent edit —
-right for one person on a few devices, not for teams. Deletes don't propagate
-(old weeks pruned locally linger remotely, harmlessly), and device clocks
-decide conflicts.
+**Cadence.** There is no fixed timer. A sync runs on launch, ~4s after your
+edits stop (`PUSH_DEBOUNCE`), when the app is brought back to the foreground,
+and when the network returns. **Settings → Sync → "Sync now"** always runs
+immediately.
+
+**The bug this is built around.** Deciding "has anything changed?" with
+`JSON.stringify` compares key *order*, which is an artefact of how an object
+was built — the server builds the merged document one way and `migrate()`
+rebuilds it another. An unchanged document then compares unequal on every round
+trip, so the client pushes, adopts, sees a difference, and pushes again,
+forever. Every comparison goes through `fingerprint()` in `shared/model.js`,
+which sorts keys; **none use `JSON.stringify`.** Keep it that way.
+
+### Sync in the APK
+
+The APK serves the bundled build from `https://localhost` — the WebView's own
+asset server. That is what makes Rhythm work with no network at all, but it
+also means a relative `/api/me` never leaves the phone. Sync then reports "no
+backend" however the deployment is configured, and no amount of rebuilding
+changes it. Settings shows the URL it actually probed, which is how you tell
+that case apart from a genuinely backend-less build.
+
+Two ways out, and they trade against each other:
+
+**Load the deployment directly.** `RHYTHM_REMOTE_URL=https://your-app npm run
+android:remote` patches the synced (gitignored) `capacitor.config.json` with a
+`server.url`. The origin becomes your domain, so the API, the session cookie
+and the Google round trip all line up with no CORS and no cross-site cookies.
+But **localStorage is per origin**: an install built this way cannot see data
+written by a `https://localhost` install. Export a backup before installing,
+import after. First launch needs the network; the service worker covers later
+ones.
+
+**Keep the bundle local and point only the API elsewhere.** `VITE_API_BASE`
+prefixes the data calls at build time, so on-device data and offline start
+survive. Cookie sign-in from a different origin does not — `SameSite=Lax`
+session cookies aren't sent from `https://localhost`, so this needs token-based
+auth and a deep link back from the browser. Not built.
 
 ## Project layout
 
@@ -171,6 +206,7 @@ reinstall, wiping data. Signing is wired through env vars in
 npm run android:sync    # vite build + cap sync
 npm run android:open    # …and open Android Studio
 npm run android:apk     # …and assemble a debug APK
+npm run android:remote  # …and point the WebView at RHYTHM_REMOTE_URL (see above)
 ```
 
 Needs **JDK 17** and the **Android SDK** (easiest via Android Studio).
