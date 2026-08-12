@@ -521,6 +521,43 @@ export default function Rhythm() {
     setEditing(null);
     flash(`${tx('Moved to', 'نُقلت إلى')} ${wd(target.getDay())} ${target.getDate()} ${mon(target.getMonth())}.`);
   };
+  /* Which week document owns a date, and the day index inside it. Tasks are
+     stored per week with a 0–6 index, so a bare index is only meaningful next
+     to the week it belongs to — this is the pair that makes it absolute. */
+  const slotForDate = (dateISO) => {
+    const target = parseISO(dateISO);
+    if (!target || Number.isNaN(target.getTime())) return null;
+    const ws = startOfWeek(target, settings.weekStartDay);
+    return { wsISO: fmtISO(ws), day: Math.round((target - ws) / 86400000) };
+  };
+  /* Append a task to whichever week owns `dateISO`, which may not be the one on
+     screen. */
+  const putTaskOnDate = async (dateISO, task) => {
+    const slot = slotForDate(dateISO);
+    if (!slot) return null;
+    const placed = { ...task, day: slot.day };
+    if (slot.wsISO === fmtISO(weekStart)) { const w = weekRef.current; persistWeek({ ...w, tasks: [...w.tasks, placed] }); return placed; }
+    const dest = await readWeek(slot.wsISO);
+    await writeWeek(slot.wsISO, { ...dest, tasks: [...(dest.tasks || []), placed] });
+    return placed;
+  };
+  const addTaskOnDate = async (dateISO, blockId, title, extra = {}) => {
+    if (!title || !title.trim()) return;
+    await putTaskOnDate(dateISO, {
+      id: uid(), title: title.trim(), day: 0, block: blockId,
+      projectId: extra.projectId || null, time: extra.time || '', start: extra.start || '', end: extra.end || '',
+      templateId: extra.templateId || null, done: false,
+      subtasks: extra.subtasks ? mkSubs(extra.subtasks.map((s) => (typeof s === 'string' ? s : s.title))) : [],
+      notes: extra.notes || [], order: extra.order != null ? extra.order : (timeOrder(extra.time) + Date.now() % 1000),
+    });
+  };
+  const poolToDayOnDate = async (poolId, dateISO, blockId) => {
+    const it = poolRef.current.find((p) => p.id === poolId);
+    if (!it || !slotForDate(dateISO)) return; // don't drop it from the backlog if it has nowhere to land
+    persistPool(poolRef.current.filter((p) => p.id !== poolId));
+    await putTaskOnDate(dateISO, { id: uid(), title: it.title, day: 0, block: blockId, projectId: it.projectId || null, projectRef: it.projectRef || null, time: '', done: false, subtasks: it.subtasks || [], notes: it.notes || [], order: Date.now() });
+  };
+
   const removeTask = (id) => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.id !== id) }); setEditing(null); };
   // The task's own calendar date, needed to tell an on-time finish from a late
   // one. Tasks in the displayed week carry a day index off that week's start.
@@ -1114,7 +1151,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const gatePenaltyLeft = gatePenaltyTs ? Math.ceil((PRAYER_HARD_MIN * 60000 - (Date.now() - gatePenaltyTs)) / 60000) : 0;
   const gateHardLeft = Math.max(gateArrivalLeft, gatePenaltyLeft > 0 ? gatePenaltyLeft : 0);
   /* ---- planning assistant (chat; proposes, never writes) ---- */
-  const chatIds = () => ({ taskIds: (weekRef.current.tasks || []).map((t) => t.id), poolIds: (poolRef.current || []).map((p) => p.id) });
+  const chatIds = () => ({ taskIds: (weekRef.current.tasks || []).map((t) => t.id), poolIds: (poolRef.current || []).map((p) => p.id), todayISO: fmtISO(todayMid) });
   const buildSnapshot = () => {
     const todayISO = fmtISO(todayMid);
     const projName = (t) => (settings.projects.find((p) => p.id === t.projectRef) || {}).name || (labelById(t.projectId) || {}).name || '';
@@ -1122,6 +1159,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       dateLabel: `${wdFull(selectedDate.getDay())} ${selectedDate.getDate()} ${mon(selectedDate.getMonth())}`,
       dayIdx: selectedDay,
       dayNames: Array.from({ length: 7 }, (_, i) => wdFull(addDays(weekStart, i).getDay())),
+      dayDates: Array.from({ length: 7 }, (_, i) => fmtISO(addDays(weekStart, i))),
+      todayISO,
       timings, activeBlock: activeId,
       tasks: (week.tasks || []).filter((t) => t.day === selectedDay).map((t) => ({ id: t.id, block: t.block, time: timeLabel(t), done: t.done, title: t.title, project: projName(t), subtasks: (t.subtasks || []).length })),
       pool: (pool || []).map((p) => ({ id: p.id, title: p.title, done: !!p.done })),
@@ -1159,26 +1198,33 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   // Applying is always a deliberate, per-proposal act by the person.
   const applyProposal = (msgIdx, pIdx) => {
     const p = chatMsgs[msgIdx]?.proposals?.[pIdx]; if (!p) return;
-    if (p.kind === 'add_task') addTask(p.day, p.block, p.title, { start: p.start || '', end: p.end || '' });
-    else if (p.kind === 'move_task') mutateTask(p.taskId, (t) => ({ ...t, day: p.day, block: p.block }));
+    // Every date here is absolute and may land outside the week on screen —
+    // "move it to Saturday" on a Friday means NEXT Saturday, a different week
+    // document. Routing through the date-aware helpers is what makes that work;
+    // a bare day index could only ever address the displayed week, and 0 would
+    // silently mean the Saturday six days BEHIND.
+    if (p.kind === 'add_task') addTaskOnDate(p.date, p.block, p.title, { start: p.start || '', end: p.end || '' });
+    else if (p.kind === 'move_task') { mutateTask(p.taskId, (t) => ({ ...t, block: p.block })); moveTaskToDate(p.taskId, p.date); }
     else if (p.kind === 'complete_task') mutateTask(p.taskId, (t) => ({ ...t, done: true }));
     else if (p.kind === 'task_to_backlog') taskToPool(p.taskId);
-    else if (p.kind === 'backlog_to_day') poolToDay(p.poolId, p.day, p.block);
+    else if (p.kind === 'backlog_to_day') poolToDayOnDate(p.poolId, p.date, p.block);
     setChatMsgs((prev) => prev.map((m, i) => (i === msgIdx ? { ...m, applied: { ...(m.applied || {}), [pIdx]: 'done' } } : m)));
     flash(tx('Applied.', 'تم التطبيق.'));
   };
   const dismissProposal = (msgIdx, pIdx) => setChatMsgs((prev) => prev.map((m, i) => (i === msgIdx ? { ...m, applied: { ...(m.applied || {}), [pIdx]: 'skip' } } : m)));
   const describeProposal = (p) => {
     const bn = (id) => bName(blockById(id));
-    const dn = (d) => wdFull(addDays(weekStart, d).getDay());
+    // Name the date, not just the weekday: the target may be in another week,
+    // and "Saturday" alone would read as the Saturday already on screen.
+    const dn = (iso) => { const d = parseISO(iso); return d && !Number.isNaN(d.getTime()) ? `${wdFull(d.getDay())} ${d.getDate()} ${mon(d.getMonth())}` : '?'; };
     const tTitle = (id) => ((weekRef.current.tasks || []).find((t) => t.id === id) || {}).title || '?';
     const pTitle = (id) => ((poolRef.current || []).find((x) => x.id === id) || {}).title || '?';
     switch (p.kind) {
-      case 'add_task': return `${tx('Add', 'أضف')} “${p.title}” → ${dn(p.day)} · ${bn(p.block)}${p.start ? ` · ${fmtTime(p.start)}` : ''}`;
-      case 'move_task': return `${tx('Move', 'انقل')} “${tTitle(p.taskId)}” → ${dn(p.day)} · ${bn(p.block)}`;
+      case 'add_task': return `${tx('Add', 'أضف')} “${p.title}” → ${dn(p.date)} · ${bn(p.block)}${p.start ? ` · ${fmtTime(p.start)}` : ''}`;
+      case 'move_task': return `${tx('Move', 'انقل')} “${tTitle(p.taskId)}” → ${dn(p.date)} · ${bn(p.block)}`;
       case 'complete_task': return `${tx('Mark done', 'علّم كمنجز')}: “${tTitle(p.taskId)}”`;
       case 'task_to_backlog': return `${tx('To backlog', 'إلى قائمة الانتظار')}: “${tTitle(p.taskId)}”`;
-      case 'backlog_to_day': return `${tx('Schedule', 'جدولة')} “${pTitle(p.poolId)}” → ${dn(p.day)} · ${bn(p.block)}`;
+      case 'backlog_to_day': return `${tx('Schedule', 'جدولة')} “${pTitle(p.poolId)}” → ${dn(p.date)} · ${bn(p.block)}`;
       default: return p.kind;
     }
   };

@@ -3,34 +3,51 @@
 import { describe, it, expect } from 'vitest';
 import { parseAssistantReply, validateProposal, buildDaySnapshot } from '../src/assistant.js';
 
-const IDS = { taskIds: ['t1', 't2'], poolIds: ['p1'] };
+const IDS = { taskIds: ['t1', 't2'], poolIds: ['p1'], todayISO: '2026-08-14' };
 
 describe('validateProposal', () => {
   it('accepts a well-formed add_task', () => {
-    expect(validateProposal({ kind: 'add_task', title: 'Write column', block: 'dhuhr', day: 2, start: '13:00', end: '14:00', why: 'free slot' }, IDS))
-      .toEqual({ kind: 'add_task', title: 'Write column', block: 'dhuhr', day: 2, start: '13:00', end: '14:00', why: 'free slot' });
+    expect(validateProposal({ kind: 'add_task', title: 'Write column', block: 'dhuhr', date: '2026-08-16', start: '13:00', end: '14:00', why: 'free slot' }, IDS))
+      .toEqual({ kind: 'add_task', title: 'Write column', block: 'dhuhr', date: '2026-08-16', start: '13:00', end: '14:00', why: 'free slot' });
   });
   it('rejects an unknown block', () => {
-    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'brunch', day: 1 }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'brunch', date: '2026-08-15' }, IDS)).toBe(null);
   });
-  it('rejects an out-of-range day', () => {
-    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', day: 9 }, IDS)).toBe(null);
-    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', day: -1 }, IDS)).toBe(null);
+  it('rejects a date that is not a real day', () => {
+    // '2026-02-31' parses to March 3rd in JavaScript, so the round trip is what
+    // catches it; without that the task silently lands on the wrong date.
+    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', date: '2026-02-31' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', date: '15-08-2026' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', date: 'tomorrow' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr' }, IDS)).toBe(null);
+  });
+
+  it('rejects a date far outside the window a planner would ever mean', () => {
+    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', date: '2087-01-01' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', date: '1999-01-01' }, IDS)).toBe(null);
+  });
+
+  it('accepts a date in the NEXT week — the Friday-to-Saturday case', () => {
+    // The bug this replaced: the contract could only say 'day 0-6 of the shown
+    // week', so pushing a Friday task to Saturday meant the Saturday six days
+    // BEHIND it. An absolute date is the only way to say the one ahead.
+    expect(validateProposal({ kind: 'move_task', taskId: 't1', block: 'morning', date: '2026-08-15', why: 'next day' }, IDS))
+      .toEqual({ kind: 'move_task', taskId: 't1', block: 'morning', date: '2026-08-15', why: 'next day' });
   });
   it('rejects a hallucinated task id', () => {
-    expect(validateProposal({ kind: 'move_task', taskId: 'nope', block: 'asr', day: 1 }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'move_task', taskId: 'nope', block: 'asr', date: '2026-08-15' }, IDS)).toBe(null);
     expect(validateProposal({ kind: 'complete_task', taskId: 'ghost' }, IDS)).toBe(null);
   });
   it('accepts ids that exist', () => {
     expect(validateProposal({ kind: 'complete_task', taskId: 't1', why: 'done' }, IDS)).toMatchObject({ kind: 'complete_task', taskId: 't1' });
-    expect(validateProposal({ kind: 'backlog_to_day', poolId: 'p1', block: 'morning', day: 0 }, IDS)).toMatchObject({ poolId: 'p1' });
+    expect(validateProposal({ kind: 'backlog_to_day', poolId: 'p1', block: 'morning', date: '2026-08-15' }, IDS)).toMatchObject({ poolId: 'p1' });
   });
   it('rejects an unknown action kind outright', () => {
     expect(validateProposal({ kind: 'delete_everything', taskId: 't1' }, IDS)).toBe(null);
     expect(validateProposal({ kind: 'send_email', to: 'x@y.z' }, IDS)).toBe(null);
   });
   it('rejects malformed times', () => {
-    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', day: 1, start: 'half past' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', date: '2026-08-15', start: 'half past' }, IDS)).toBe(null);
   });
   it('rejects junk input', () => {
     expect(validateProposal(null, IDS)).toBe(null);
@@ -53,7 +70,7 @@ describe('parseAssistantReply', () => {
   it('drops invalid proposals but keeps the good ones', () => {
     const txt = JSON.stringify({ reply: 'r', proposals: [
       { kind: 'complete_task', taskId: 't1' },
-      { kind: 'move_task', taskId: 'hallucinated', block: 'asr', day: 1 },
+      { kind: 'move_task', taskId: 'hallucinated', block: 'asr', date: '2026-08-15' },
       { kind: 'nuke', taskId: 't2' },
     ] });
     const r = parseAssistantReply(txt, IDS);

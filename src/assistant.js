@@ -24,15 +24,17 @@ Schema:
 }
 
 proposal types (all fields required unless marked optional):
-- {"kind":"add_task","title":string,"block":blockId,"day":0-6,"start":"HH:MM"|null,"end":"HH:MM"|null,"why":string}
-- {"kind":"move_task","taskId":string,"block":blockId,"day":0-6,"why":string}
+- {"kind":"add_task","title":string,"block":blockId,"date":"YYYY-MM-DD","start":"HH:MM"|null,"end":"HH:MM"|null,"why":string}
+- {"kind":"move_task","taskId":string,"block":blockId,"date":"YYYY-MM-DD","why":string}
 - {"kind":"complete_task","taskId":string,"why":string}
 - {"kind":"task_to_backlog","taskId":string,"why":string}
-- {"kind":"backlog_to_day","poolId":string,"block":blockId,"day":0-6,"why":string}
+- {"kind":"backlog_to_day","poolId":string,"block":blockId,"date":"YYYY-MM-DD","why":string}
 
 Rules:
 - blockId is one of: fajr, morning, dhuhr, asr, maghrib, isha.
-- day is the index within the shown week (0=first day of their week).
+- date is an absolute calendar date. It does NOT have to fall inside the shown
+  week: to move something to the day after the last day listed, give the next
+  day's date. WEEK DAYS in the snapshot gives you each shown day's date.
 - Use ONLY ids that appear in the snapshot. Never invent an id.
 - "why" is a short phrase (<= 10 words) explaining the change.
 - Propose nothing unless it clearly helps. An empty "proposals" array is normal and good.
@@ -41,10 +43,13 @@ Rules:
 
 /* A compact, token-cheap snapshot. Deliberately terse: the model needs facts,
    not prose. */
-export function buildDaySnapshot({ dateLabel, dayIdx, dayNames, timings, activeBlock, tasks, pool, habits, prayersDone, overdue, projects, labels }) {
+export function buildDaySnapshot({ dateLabel, dayIdx, dayNames, dayDates, todayISO, timings, activeBlock, tasks, pool, habits, prayersDone, overdue, projects, labels }) {
   const L = [];
-  L.push(`TODAY: ${dateLabel} (day index ${dayIdx} of the shown week)`);
-  L.push(`WEEK DAYS: ${(dayNames || []).map((n, i) => `${i}=${n}`).join(', ')}`);
+  L.push(`TODAY: ${dateLabel}${todayISO ? ` (${todayISO})` : ''}`);
+  // Each shown day with its real date. Without the dates the model can only
+  // name days inside this week, so "move it to Saturday" on the last day of the
+  // week has no way to mean NEXT Saturday.
+  L.push(`WEEK DAYS: ${(dayNames || []).map((n, i) => `${n}${dayDates && dayDates[i] ? ` ${dayDates[i]}` : ''}`).join(', ')}`);
   L.push(`NOW IN PERIOD: ${activeBlock}`);
   if (timings) L.push(`PRAYER TIMES: ${Object.entries(timings).map(([k, v]) => `${k} ${v}`).join(', ')}`);
   L.push(`PRAYERS DONE TODAY: ${(prayersDone || []).length ? prayersDone.join(', ') : 'none'}`);
@@ -73,21 +78,42 @@ export function buildDaySnapshot({ dateLabel, dayIdx, dayNames, timings, activeB
 const isHM = (s) => s == null || s === '' || /^\d{1,2}:\d{2}$/.test(String(s));
 const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
 
+/* A real calendar date, and a real one — "2026-02-31" parses as March 3rd in
+   JavaScript, so the round trip through Date is what actually rejects it.
+
+   Bounded to roughly a year either side of the week on screen. The model has
+   no business scheduling something in 2087, and an unbounded date is how a
+   hallucinated year silently creates a week document nothing will ever show. */
+const DATE_WINDOW_DAYS = 400;
+function validDate(v, anchorISO) {
+  const s = str(v);
+  if (!s || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  const [y, m, d] = s.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  if (anchorISO && /^\d{4}-\d{2}-\d{2}$/.test(anchorISO)) {
+    const [ay, am, ad] = anchorISO.split('-').map(Number);
+    const anchor = new Date(ay, am - 1, ad);
+    if (Math.abs(dt - anchor) > DATE_WINDOW_DAYS * 86400000) return null;
+  }
+  return s;
+}
+
 /* Validate one proposal. Returns the cleaned object or null (dropped). */
-export function validateProposal(p, { taskIds = [], poolIds = [] } = {}) {
+export function validateProposal(p, { taskIds = [], poolIds = [], todayISO = null } = {}) {
   if (!p || typeof p !== 'object') return null;
   const why = str(p.why) || '';
   const block = BLOCK_IDS.includes(p.block) ? p.block : null;
-  const day = Number.isInteger(p.day) && p.day >= 0 && p.day <= 6 ? p.day : null;
+  const date = validDate(p.date, todayISO);
   switch (p.kind) {
     case 'add_task': {
-      const title = str(p.title); if (!title || !block || day == null) return null;
+      const title = str(p.title); if (!title || !block || !date) return null;
       if (!isHM(p.start) || !isHM(p.end)) return null;
-      return { kind: 'add_task', title, block, day, start: str(p.start) || '', end: str(p.end) || '', why };
+      return { kind: 'add_task', title, block, date, start: str(p.start) || '', end: str(p.end) || '', why };
     }
     case 'move_task': {
-      const taskId = str(p.taskId); if (!taskId || !taskIds.includes(taskId) || !block || day == null) return null;
-      return { kind: 'move_task', taskId, block, day, why };
+      const taskId = str(p.taskId); if (!taskId || !taskIds.includes(taskId) || !block || !date) return null;
+      return { kind: 'move_task', taskId, block, date, why };
     }
     case 'complete_task': {
       const taskId = str(p.taskId); if (!taskId || !taskIds.includes(taskId)) return null;
@@ -98,8 +124,8 @@ export function validateProposal(p, { taskIds = [], poolIds = [] } = {}) {
       return { kind: 'task_to_backlog', taskId, why };
     }
     case 'backlog_to_day': {
-      const poolId = str(p.poolId); if (!poolId || !poolIds.includes(poolId) || !block || day == null) return null;
-      return { kind: 'backlog_to_day', poolId, block, day, why };
+      const poolId = str(p.poolId); if (!poolId || !poolIds.includes(poolId) || !block || !date) return null;
+      return { kind: 'backlog_to_day', poolId, block, date, why };
     }
     default: return null;
   }
