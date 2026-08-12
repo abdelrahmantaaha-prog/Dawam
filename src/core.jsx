@@ -404,4 +404,35 @@ const hasVault = (t) => !!(t && typeof t.secret === 'string' && t.secret.length 
 const vaultWindowed = (t) => hasVault(t) && tStartMin(t) != null && tEndMin(t) != null;
 const vaultUnlocked = (t, curMin) => vaultWindowed(t) && inWindow(tStartMin(t), tEndMin(t), curMin);
 
-export { hasVault,vaultWindowed,vaultUnlocked,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
+/* ------------------------------------------------------------------ */
+/*  Rescheduling an overdue task onto today.                           */
+/* ------------------------------------------------------------------ */
+/* Moving the date alone isn't enough. A task parked in Fajr that is
+   dragged to a today whose Fajr ended nine hours ago is overdue the
+   instant it lands, so the button would look like it did nothing. A
+   block already behind us therefore moves to the block in progress; a
+   block still ahead is left where it is, because the plan for later
+   today is still the plan.
+
+   A fixed start/end is a stronger claim than a block, and one that has
+   already passed today is simply wrong, so it is dropped and the task
+   becomes an ordinary block task. Vault windows are the exception —
+   there the window IS the feature, and clearing it would leave a secret
+   hanging open that was meant to stay shut. A vault task keeps its
+   window and only changes day, which is the one thing the vault has
+   always allowed. */
+function pushToToday(t, { activeBlock, curSinceFajr, sinceFajr }) {
+  const next = { ...t };
+  const st = tStartMin(t), en = tEndMin(t);
+  const windowEnd = en != null ? en : st;
+  if (!hasVault(t) && windowEnd != null && sinceFajr(windowEnd) <= curSinceFajr) {
+    next.start = ''; next.end = ''; next.time = '';
+  }
+  // BLOCKS is in Fajr→Isha order, which is the logical day's own order.
+  const from = BLOCKS.findIndex((b) => b.id === vBlock(next.block));
+  const now = BLOCKS.findIndex((b) => b.id === activeBlock);
+  if (from >= 0 && now >= 0 && from < now) next.block = activeBlock;
+  return next;
+}
+
+export { hasVault,vaultWindowed,vaultUnlocked,pushToToday,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
-import { hasVault,vaultUnlocked,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { hasVault,vaultUnlocked,pushToToday,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { useSync, markDirty, markDeleted } from './sync.js';
 import { updateWidget } from './widget.js';
@@ -608,6 +608,51 @@ export default function Rhythm() {
       await writeWeek(wsISO, { ...cur, tasks: (cur.tasks || []).filter((x) => !ids.has(x.id)) });
     }
     setOverdue([]); setOdBusy(false); setConfirmDelete(false); bumpRefresh(); flash(tx('Overdue cleared.', 'تم مسح المتأخرات.'));
+  };
+  /* Pull everything overdue onto today, keeping the order it is listed in
+     (oldest first) and landing it after whatever today already holds. */
+  const moveAllOverdueToToday = async () => {
+    if (!overdue.length || odBusy) return; setOdBusy(true);
+    const wsd = settings.weekStartDay;
+    const today = logicalDayMid();
+    const destISO = fmtISO(startOfWeek(today, wsd));
+    const destDay = Math.round((today - startOfWeek(today, wsd)) / 86400000);
+
+    const n = new Date(); const curMin = n.getHours() * 60 + n.getMinutes();
+    const fajrM = minutesOf(todayTimings.Fajr);
+    const sinceFajr = (m) => (fajrM == null ? m : (((m - fajrM) % 1440) + 1440) % 1440);
+    const ctx = { activeBlock: activeBlockAt(todayTimings, curMin), curSinceFajr: sinceFajr(curMin), sinceFajr };
+
+    const byWeek = {}; for (const it of overdue) (byWeek[fmtISO(it.ws)] = byWeek[fmtISO(it.ws)] || []).push(it);
+    // Read every source week before writing any of it — today is often both a
+    // source and the destination, and re-reading mid-flight would pick up the
+    // half-finished version.
+    const weeks = {}; for (const wsISO of Object.keys(byWeek)) weeks[wsISO] = await readWeek(wsISO);
+    // Take the live copies in the order they are shown, not the snapshot the
+    // scan captured, so an edit made since then travels with the task.
+    const moving = [];
+    for (const it of overdue) {
+      const found = ((weeks[fmtISO(it.ws)] || {}).tasks || []).find((x) => x.id === it.t.id);
+      if (found) moving.push(found);
+    }
+    for (const [wsISO, list] of Object.entries(byWeek)) {
+      const ids = new Set(list.map((x) => x.t.id));
+      await writeWeek(wsISO, { ...weeks[wsISO], tasks: (weeks[wsISO].tasks || []).filter((x) => !ids.has(x.id)) });
+    }
+
+    const dest = await readWeek(destISO);
+    const kept = dest.tasks || [];
+    // One base for the whole day rather than per block: order values come from
+    // several eras of this code and aren't on a common scale, so the only safe
+    // claim is "after everything already here".
+    const base = kept.reduce((m, x) => (x.day === destDay ? Math.max(m, Number(x.order) || 0) : m), 0) + 1;
+    const added = moving.map((t, i) => ({ ...pushToToday(t, ctx), day: destDay, order: base + i }));
+    await writeWeek(destISO, { ...dest, tasks: [...kept, ...added] });
+
+    setOverdue([]); setOdBusy(false); bumpRefresh();
+    flash(added.length === 1
+      ? tx('Moved to today.', 'تم النقل لليوم.')
+      : tx(`${added.length} tasks moved to today.`, `تم نقل ${added.length} مهام لليوم.`));
   };
   const jumpToTask = (item) => {
     const ws = startOfWeek(item.date, settings.weekStartDay);
@@ -1420,6 +1465,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               <div className="od-bar">
                 <span className="od-bar-count">{overdue.length} {tr.overdue}</span>
                 <div className="od-bar-actions">
+                  <button className="ghost sm" onClick={moveAllOverdueToToday} disabled={odBusy}><CornerUpRight size={14} /> {tx('Move all to today', 'نقل الكل لليوم')}</button>
                   <button className="ghost sm" onClick={completeAllOverdue} disabled={odBusy}><CheckCircle2 size={14} /> {tx('Complete all', 'إنجاز الكل')}</button>
                   {confirmDelete ? (<span className="od-confirm">{tx('Delete all?', 'حذف الكل؟')}<button className="danger sm" onClick={deleteAllOverdue} disabled={odBusy}>{tx('Yes', 'نعم')}</button><button className="ghost sm" onClick={() => setConfirmDelete(false)} disabled={odBusy}>{tx('Cancel', 'إلغاء')}</button></span>) : (<button className="danger sm" onClick={() => setConfirmDelete(true)} disabled={odBusy}><Trash2 size={14} /> {tx('Delete all', 'حذف الكل')}</button>)}
                 </div>

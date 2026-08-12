@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   activeBlockAt, projectPace, habitStreak, habitDoneOn, glowLevel,
   fmtISO, addDays, startOfWeek, DEFAULT_TIMINGS, migrateSettings, inWindow,
-  hasVault, vaultWindowed, vaultUnlocked,
+  hasVault, vaultWindowed, vaultUnlocked, pushToToday,
 } from '../src/core.jsx';
 
 const T = DEFAULT_TIMINGS; // Fajr 04:15, Sunrise 05:50, Dhuhr 12:55, Asr 16:30, Maghrib 19:45, Isha 21:15
@@ -210,5 +210,69 @@ describe('time vault — window is fixed once set', () => {
     // any times were set can never get a window, so it can never unlock.
     expect(locksTime({ secret: 's', start: '', end: '' }, at(15))).toBe(false);
     expect(locksTime({ secret: 's', start: '22:00', end: '' }, at(15))).toBe(false);
+  });
+});
+
+describe('pushToToday — where an overdue task lands', () => {
+  // Fajr 04:15. The scan measures the day from Fajr, so these tests speak the
+  // same language: minutes since Fajr, wrapping past midnight.
+  const fajr = min(4, 15);
+  const sinceFajr = (m) => (((m - fajr) % 1440) + 1440) % 1440;
+  const ctx = (activeBlock, curMin) => ({ activeBlock, curSinceFajr: sinceFajr(curMin), sinceFajr });
+
+  it('drags a block that has already passed up to the one in progress', () => {
+    const t = { block: 'fajr', title: 'x' };
+    expect(pushToToday(t, ctx('asr', min(17))).block).toBe('asr');
+  });
+
+  it('leaves a block that is still ahead alone', () => {
+    // The plan for tonight is still the plan — only the date was wrong.
+    expect(pushToToday({ block: 'isha' }, ctx('asr', min(17))).block).toBe('isha');
+    expect(pushToToday({ block: 'asr' }, ctx('asr', min(17))).block).toBe('asr');
+  });
+
+  it('clears a start/end window that today has already gone past', () => {
+    const out = pushToToday({ block: 'morning', start: '09:00', end: '10:00' }, ctx('asr', min(17)));
+    expect(out.start).toBe('');
+    expect(out.end).toBe('');
+    expect(out.time).toBe('');
+    expect(out.block).toBe('asr');
+  });
+
+  it('keeps a window that is still to come today', () => {
+    const out = pushToToday({ block: 'isha', start: '22:00', end: '23:00' }, ctx('asr', min(17)));
+    expect(out.start).toBe('22:00');
+    expect(out.end).toBe('23:00');
+  });
+
+  it('clears a passed start-only time too', () => {
+    expect(pushToToday({ block: 'morning', start: '09:00' }, ctx('asr', min(17))).start).toBe('');
+  });
+
+  it('also clears a passed window written in the old free-text field', () => {
+    expect(pushToToday({ block: 'morning', time: '9:00-10:00am' }, ctx('asr', min(17))).time).toBe('');
+  });
+
+  it('never strips a vault window, however long past it is', () => {
+    // Clearing it would leave the secret readable at any hour, which is the
+    // one thing the vault exists to prevent.
+    const v = { block: 'maghrib', start: '19:00', end: '20:00', secret: 'hunter2' };
+    const out = pushToToday(v, ctx('fajr', min(5)));
+    expect(out.start).toBe('19:00');
+    expect(out.end).toBe('20:00');
+    expect(out.secret).toBe('hunter2');
+  });
+
+  it('treats the pre-dawn hours as the end of the day that is finishing', () => {
+    // 01:00 is Isha on the Fajr-anchored clock — nearly 21 hours in, not 1.
+    const out = pushToToday({ block: 'morning', start: '09:00', end: '10:00' }, ctx('isha', min(1)));
+    expect(out.start).toBe('');
+    expect(out.block).toBe('isha');
+  });
+
+  it('does not mutate the task it is given', () => {
+    const t = { block: 'fajr', start: '09:00', end: '10:00' };
+    pushToToday(t, ctx('asr', min(17)));
+    expect(t).toEqual({ block: 'fajr', start: '09:00', end: '10:00' });
   });
 });
