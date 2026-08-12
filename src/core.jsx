@@ -276,6 +276,7 @@ const DEFAULT_SETTINGS = {
   apiKey: '',          // optional API key for the brain-dump sorter (stored locally only)
   aiProvider: 'anthropic', // 'anthropic' (paid) or 'gemini' (free tier)
   autoDark: true,      // switch the interface to dark at night (Maghrib→Sunrise)
+  rewards: [],         // what points buy — you set the prices, which is what makes them mean anything
   weekStartDay: 6,
   prayerGate: true,
   time24: false,
@@ -365,6 +366,7 @@ function migrateSettings(s) {
   base.apiKey = typeof s.apiKey === 'string' ? s.apiKey : '';
   base.aiProvider = s.aiProvider === 'gemini' ? 'gemini' : 'anthropic';
   base.autoDark = s.autoDark !== false;
+  base.rewards = Array.isArray(s.rewards) ? s.rewards : [];
   return base;
 }
 // SHA-256 hex of pin+salt. This is a soft lock (deters casual access); it is not
@@ -421,6 +423,117 @@ const vaultUnlocked = (t, curMin) => vaultWindowed(t) && inWindow(tStartMin(t), 
    hanging open that was meant to stay shut. A vault task keeps its
    window and only changes day, which is the one thing the vault has
    always allowed. */
+/* Has this task's slot already gone by? A day before today is wholly
+   past; within today it turns on the task's own end time, or its block's
+   if it has none. Measured on the Fajr-anchored clock, so the pre-dawn
+   hours belong to the day that is ending rather than the one starting.
+
+   The overdue scan and the points ledger both ask this question, and if
+   they ever answered differently you would see a task listed as overdue
+   and still paid in full. One function, one answer. */
+function slotPassed(t, taskDate, today, { timings, sinceFajr, curSinceFajr }) {
+  if (taskDate < today) return true;
+  if (fmtISO(taskDate) !== fmtISO(today)) return false;
+  const st = tStartMin(t), en = tEndMin(t);
+  let endMin = null;
+  if (en != null) endMin = (st != null && en <= st) ? en + 1440 : en;
+  else { const ek = blockById(t.block).endKey; endMin = ek ? minutesOf(timings[ek]) : null; }
+  return endMin != null && sinceFajr(endMin) <= curSinceFajr;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Points — what a thing is worth.                                    */
+/* ------------------------------------------------------------------ */
+/* The weight is read off signals the task already carries, because
+   asking for a rating on every task is itself an executive-function
+   tax — it is the step that gets skipped, and it is the knob that gets
+   inflated when you want something.
+
+   `dread` is the interesting one: a task you have pushed to a later day
+   four times is, by revealed preference, the hardest thing on your
+   list, and that is exactly the avoidance loop points exist to break.
+   It only ever pays out on completion, so pushing something forever
+   earns nothing.
+
+   Decomposition paying more is deliberate, not a leak: breaking a task
+   into subtasks is the behaviour worth reinforcing, so it should be the
+   profitable move. */
+const POINTS = {
+  base: 10,
+  perQuarterHour: 1, sizeCap: 20, untimed: 5,
+  perSubtask: 5, subtaskCap: 25,
+  perPush: 5, pushCap: 20,
+  project: 5,
+  habit: 10, streakStep: 0.2, streakCap: 2, streakWindow: 30,
+};
+
+function autoWorth(t) {
+  if (!t) return 0;
+  let n = POINTS.base;
+  const st = tStartMin(t), en = tEndMin(t);
+  if (st != null && en != null) {
+    const mins = en > st ? en - st : en + 1440 - st; // windows may cross midnight
+    n += Math.min(POINTS.sizeCap, Math.round(mins / 15) * POINTS.perQuarterHour);
+  } else {
+    n += POINTS.untimed;
+  }
+  n += Math.min(POINTS.subtaskCap, ((t.subtasks || []).length) * POINTS.perSubtask);
+  n += Math.min(POINTS.pushCap, Math.max(0, Number(t.pushes) || 0) * POINTS.perPush);
+  if (t.projectId || t.projectRef) n += POINTS.project;
+  return n;
+}
+// An explicit `worth` overrides the reading. This is the inflation lever —
+// the ledger, not the formula, is what keeps it honest.
+const taskWorth = (t) => {
+  const raw = t == null ? null : t.worth;
+  // Guard the empty string explicitly: Number('') is 0, which is a perfectly
+  // valid override, so a cleared field would silently make the task worthless.
+  if (raw == null || raw === '') return autoWorth(t);
+  const o = Number(raw);
+  return Number.isFinite(o) && o >= 0 ? Math.round(o) : autoWorth(t);
+};
+
+/* Split a total into n whole parts that still sum to the total. The
+   remainder goes to the LAST parts, so finishing is worth marginally more
+   than starting and nothing is lost to rounding. */
+function shares(total, n) {
+  if (n <= 0) return [];
+  const each = Math.floor(total / n), rem = total - each * n;
+  return Array.from({ length: n }, (_, i) => each + (i >= n - rem ? 1 : 0));
+}
+const subtaskWorth = (t, subId) => {
+  const subs = (t && t.subtasks) || [];
+  const i = subs.findIndex((s) => s.id === subId);
+  return i < 0 ? 0 : shares(taskWorth(t), subs.length)[i];
+};
+// Late still pays. Ceil rather than floor so a 1-point share never rounds
+// away to nothing — "you did it eventually" must never be worth zero.
+const latePay = (n) => Math.ceil(n / 2);
+
+/* Streak level, derived rather than stored: +1 for a kept day, -1 for a
+   missed one, clamped to 0..5 and walked over a bounded window.
+
+   Derived matters. A stored counter is mutable state that two devices
+   would fight over under last-write-wins, and the log is already the
+   truth. Deriving it also gives the rule its shape for free: a missed
+   day costs one step, not the whole streak. */
+function habitLevel(h, uptoISO, windowDays = POINTS.streakWindow) {
+  if (!h) return 0;
+  const upto = parseISO(uptoISO);
+  let start = addDays(upto, -windowDays);
+  const born = h.createdAt ? parseISO(h.createdAt) : null;
+  if (born && born > start) start = born;
+  let level = 0;
+  // Days strictly before `uptoISO`: the day being awarded shouldn't pay
+  // itself a bonus for having just happened.
+  for (let d = new Date(start); d < upto; d = addDays(d, 1)) {
+    level = habitDoneOn(h, fmtISO(d)) ? Math.min(5, level + 1) : Math.max(0, level - 1);
+  }
+  return level;
+}
+const habitMultiplier = (level) => Math.min(POINTS.streakCap, 1 + POINTS.streakStep * Math.max(0, level));
+const habitWorth = (h, iso) => Math.round(POINTS.habit * habitMultiplier(habitLevel(h, iso)));
+
 function pushToToday(t, { activeBlock, curSinceFajr, sinceFajr }) {
   const next = { ...t };
   const st = tStartMin(t), en = tEndMin(t);
@@ -435,4 +548,4 @@ function pushToToday(t, { activeBlock, curSinceFajr, sinceFajr }) {
   return next;
 }
 
-export { hasVault,vaultWindowed,vaultUnlocked,pushToToday,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
+export { hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,POINTS,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };

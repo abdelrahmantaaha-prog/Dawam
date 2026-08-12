@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
-import { hasVault,vaultUnlocked,pushToToday,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins } from 'lucide-react';
+import { hasVault,vaultUnlocked,pushToToday,slotPassed,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { useSync, markDirty, markDeleted } from './sync.js';
+import { readLedger, balanceOf, award, revoke, spend } from './points.js';
 import { updateWidget } from './widget.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence } from './notify.js';
 import { ASSISTANT_SYSTEM, buildDaySnapshot, parseAssistantReply, callAssistant } from './assistant.js';
 
-import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
+import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
 
 export default function Rhythm() {
@@ -29,6 +30,9 @@ export default function Rhythm() {
   const [refresh, setRefresh] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [odBusy, setOdBusy] = useState(false);
+  const [ledger, setLedger] = useState([]);
+  const ledgerRef = useRef([]);
+  const [showPoints, setShowPoints] = useState(false);
   const [poolOpen, setPoolOpen] = useState(true);
   const [templatesOpen, setTemplatesOpen] = useState(true);
   const [dumpOpen, setDumpOpen] = useState(true);
@@ -235,14 +239,7 @@ export default function Rhythm() {
         for (const t of wd.tasks) {
           if (t.done) continue;
           const d = addDays(ws, t.day);
-          if (d < today) { items.push({ t, ws: new Date(ws), date: d }); continue; }
-          if (fmtISO(d) === fmtISO(today)) {
-            const st = tStartMin(t), en = tEndMin(t);
-            let endMin = null;
-            if (en != null) endMin = (st != null && en <= st) ? en + 1440 : en;
-            else { const ek = blockById(t.block).endKey; endMin = ek ? minutesOf(todayTimings[ek]) : null; }
-            if (endMin != null && sinceFajr(endMin) <= curSinceFajr) items.push({ t, ws: new Date(ws), date: d });
-          }
+          if (slotPassed(t, d, today, { timings: todayTimings, sinceFajr, curSinceFajr })) items.push({ t, ws: new Date(ws), date: d });
         }
       }
       items.sort((a, b) => (a.date - b.date) || (a.t.order - b.t.order));
@@ -402,9 +399,16 @@ export default function Rhythm() {
   const addHabit = () => { const h = newHabit(); persistHabits((prev) => [...prev, h]); return h; };
   const updHabit = (id, patch) => persistHabits((prev) => prev.map((h) => h.id === id ? { ...h, ...patch } : h));
   const delHabit = (id) => persistHabits((prev) => prev.filter((h) => h.id !== id));
-  const toggleHabitDay = (id, iso) => persistHabits((prev) => prev.map((h) => {
-    if (h.id !== id) return h; const log = { ...(h.log || {}) }; if (log[iso]) delete log[iso]; else log[iso] = 1; return { ...h, log };
-  }));
+  const toggleHabitDay = (id, iso) => {
+    const before = (settingsRef.current.habits || []).find((h) => h.id === id);
+    persistHabits((prev) => prev.map((h) => {
+      if (h.id !== id) return h; const log = { ...(h.log || {}) }; if (log[iso]) delete log[iso]; else log[iso] = 1; return { ...h, log };
+    }));
+    // Points ride on the log as it stood BEFORE the toggle: the multiplier is
+    // earned by the days leading up to this one, not by this one.
+    if (!before) return;
+    if (habitDoneOn(before, iso)) revokeRef(`habit:${id}:${iso}`); else awardHabitDay(before, iso);
+  };
 
   /* ---- PIN (soft lock) ---- */
   const setPin = async (pin) => {
@@ -456,6 +460,9 @@ export default function Rhythm() {
      are already saved, and saving again would stamp a fresh timestamp and push
      the same content back — the echo that turns a sync into a loop. */
   const adoptKeys = useCallback(async (keys) => {
+    // The ledger is spread over one key per day, so any of them landing means
+    // the balance on screen is stale. Re-read once, not per key.
+    if (keys.some((k) => k.startsWith('planner:points:'))) readLedger().then((l) => { ledgerRef.current = l; setLedger(l); });
     for (const key of keys) {
       const v = await loadKey(key);
       if (key === 'planner:settings') {
@@ -515,8 +522,22 @@ export default function Rhythm() {
     flash(`${tx('Moved to', 'نُقلت إلى')} ${wd(target.getDay())} ${target.getDate()} ${mon(target.getMonth())}.`);
   };
   const removeTask = (id) => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.id !== id) }); setEditing(null); };
-  const toggleDone = (id) => mutateTask(id, (t) => ({ ...t, done: !t.done }));
-  const toggleSub = (id, subId) => mutateTask(id, (t) => ({ ...t, subtasks: t.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) }));
+  // The task's own calendar date, needed to tell an on-time finish from a late
+  // one. Tasks in the displayed week carry a day index off that week's start.
+  const dateOfTask = (t) => addDays(weekStart, Number(t.day) || 0);
+  const toggleDone = (id) => {
+    const t = (weekRef.current.tasks || []).find((x) => x.id === id);
+    mutateTask(id, (x) => ({ ...x, done: !x.done }));
+    if (!t) return;
+    if (!t.done) awardTaskDone(t, dateOfTask(t)); else revokeRef(`task:${id}`);
+  };
+  const toggleSub = (id, subId) => {
+    const t = (weekRef.current.tasks || []).find((x) => x.id === id);
+    mutateTask(id, (x) => ({ ...x, subtasks: x.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) }));
+    if (!t) return;
+    const sub = (t.subtasks || []).find((s) => s.id === subId);
+    if (sub && !sub.done) awardSubDone(t, subId, dateOfTask(t)); else revokeRef(`sub:${id}:${subId}`);
+  };
   const moveTaskToBlock = (id, block) => mutateTask(id, (t) => ({ ...t, block }));
   // Drag-to-reorder: drop the task into `blockId` right before/after `targetId`
   // (or at the block's end when targetId is null), then renumber 1..n so the
@@ -582,12 +603,86 @@ export default function Rhythm() {
     flash(tx('Added to backlog.', 'أُضيفت إلى قائمة الانتظار.'));
   };
 
+  /* ---- points ---- */
+  /* The clock the ledger and the overdue scan share. Rebuilt per call rather
+     than memoised because "has this passed yet" is only true of the instant
+     you ask it. */
+  const lateCtx = useCallback(() => {
+    const n = new Date(); const curMin = n.getHours() * 60 + n.getMinutes();
+    const fajrM = minutesOf(todayTimings.Fajr);
+    const sinceFajr = (m) => (fajrM == null ? m : (((m - fajrM) % 1440) + 1440) % 1440);
+    return { today: logicalDayMid(), timings: todayTimings, sinceFajr, curSinceFajr: sinceFajr(curMin), activeBlock: activeBlockAt(todayTimings, curMin) };
+  }, [todayTimings, logicalDayMid]);
+
+  const refreshLedger = useCallback(async () => {
+    const l = await readLedger(); ledgerRef.current = l; setLedger(l);
+  }, []);
+  useEffect(() => { if (ready) refreshLedger(); }, [ready, refreshLedger]);
+
+  const balance = useMemo(() => balanceOf(ledger), [ledger]);
+  const paidOn = (ref) => ledgerRef.current.some((e) => e.ref === ref);
+  // What this task has already handed out, counting its subtasks. Ticking the
+  // parent settles the remainder, so the two routes can never total more than
+  // the task is worth.
+  const paidForTask = (id) => ledgerRef.current
+    .filter((e) => e.ref === `task:${id}` || e.ref.startsWith(`sub:${id}:`))
+    .reduce((n, e) => n + (Number(e.amount) || 0), 0);
+
+  const showEarned = (n, late) => {
+    if (!n) return;
+    flash(late ? `+${n} ${tx('(late)', '(متأخر)')}` : `+${n}`);
+  };
+
+  const awardTaskDone = async (t, taskDate) => {
+    const ctx = lateCtx();
+    const late = slotPassed(t, taskDate, ctx.today, ctx);
+    const gross = Math.max(0, taskWorth(t) - paidForTask(t.id));
+    const amount = late ? latePay(gross) : gross;
+    const e = await award(ledgerRef.current, { iso: fmtISO(ctx.today), ref: `task:${t.id}`, kind: 'task', amount, title: t.title, meta: late ? { late: true } : null });
+    if (e) { await refreshLedger(); showEarned(amount, late); }
+  };
+  const awardSubDone = async (t, subId, taskDate) => {
+    // The parent already settled the whole task; paying the subtask now would
+    // be paying twice for the same work.
+    if (paidOn(`task:${t.id}`)) return;
+    const ctx = lateCtx();
+    const late = slotPassed(t, taskDate, ctx.today, ctx);
+    const gross = subtaskWorth(t, subId);
+    const amount = late ? latePay(gross) : gross;
+    const sub = (t.subtasks || []).find((s) => s.id === subId);
+    const e = await award(ledgerRef.current, { iso: fmtISO(ctx.today), ref: `sub:${t.id}:${subId}`, kind: 'subtask', amount, title: (sub && sub.title) || t.title, meta: late ? { late: true } : null });
+    if (e) { await refreshLedger(); showEarned(amount, late); }
+  };
+  const awardHabitDay = async (h, iso) => {
+    const amount = habitWorth(h, iso);
+    const e = await award(ledgerRef.current, { iso, ref: `habit:${h.id}:${iso}`, kind: 'habit', amount, title: h.name });
+    if (e) { await refreshLedger(); showEarned(amount, false); }
+  };
+  // Unticking means "that didn't happen" — the entry goes, rather than being
+  // cancelled out by a negative one.
+  const revokeRef = async (ref) => { const n = await revoke(ledgerRef.current, ref); if (n) { await refreshLedger(); flash(`−${n}`); } };
+
+  const persistRewards = (fn) => persistSettings({ ...settingsRef.current, rewards: fn(settingsRef.current.rewards || []) });
+  const addReward = () => persistRewards((prev) => [...prev, { id: uid(), name: '', cost: 100 }]);
+  const updReward = (id, patch) => persistRewards((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const delReward = (id) => persistRewards((prev) => prev.filter((r) => r.id !== id));
+
+  const cashIn = async (reward) => {
+    const cost = Math.round(Number(reward.cost) || 0);
+    if (cost <= 0) return;
+    if (cost > balance) { flash(tx('Not enough points yet.', 'النقاط لا تكفي بعد.')); return; }
+    await spend(fmtISO(lateCtx().today), { title: reward.name, cost, rewardId: reward.id });
+    await refreshLedger();
+    flash(`${tx('Enjoy it.', 'استمتع.')} −${cost}`);
+  };
+
   /* ---- overdue actions ---- */
   const completeOverdue = async (item) => {
     const wsISO = fmtISO(item.ws);
     const cur = await readWeek(wsISO);
     await writeWeek(wsISO, { ...cur, tasks: (cur.tasks || []).map((x) => (x.id === item.t.id ? { ...x, done: true } : x)) });
     setOverdue((prev) => prev.filter((x) => x.t.id !== item.t.id));
+    await awardTaskDone(item.t, item.date); // late by definition — pays half
   };
   const completeAllOverdue = async () => {
     if (!overdue.length || odBusy) return; setOdBusy(true);
@@ -597,7 +692,17 @@ export default function Rhythm() {
       const cur = await readWeek(wsISO);
       await writeWeek(wsISO, { ...cur, tasks: (cur.tasks || []).map((x) => (ids.has(x.id) ? { ...x, done: true } : x)) });
     }
-    setOverdue([]); setOdBusy(false); bumpRefresh(); flash(tx('Overdue cleared — all marked done.', 'تم إنجاز كل المتأخرات.'));
+    let earned = 0;
+    for (const it of overdue) {
+      const ctx = lateCtx();
+      const gross = Math.max(0, taskWorth(it.t) - paidForTask(it.t.id));
+      const amount = latePay(gross);
+      const e = await award(ledgerRef.current, { iso: fmtISO(ctx.today), ref: `task:${it.t.id}`, kind: 'task', amount, title: it.t.title, meta: { late: true } });
+      if (e) { ledgerRef.current = [...ledgerRef.current, e]; earned += amount; }
+    }
+    await refreshLedger();
+    setOverdue([]); setOdBusy(false); bumpRefresh();
+    flash(earned ? `${tx('Overdue cleared — all marked done.', 'تم إنجاز كل المتأخرات.')} +${earned}` : tx('Overdue cleared — all marked done.', 'تم إنجاز كل المتأخرات.'));
   };
   const deleteAllOverdue = async () => {
     if (!overdue.length || odBusy) return; setOdBusy(true);
@@ -618,10 +723,7 @@ export default function Rhythm() {
     const destISO = fmtISO(startOfWeek(today, wsd));
     const destDay = Math.round((today - startOfWeek(today, wsd)) / 86400000);
 
-    const n = new Date(); const curMin = n.getHours() * 60 + n.getMinutes();
-    const fajrM = minutesOf(todayTimings.Fajr);
-    const sinceFajr = (m) => (fajrM == null ? m : (((m - fajrM) % 1440) + 1440) % 1440);
-    const ctx = { activeBlock: activeBlockAt(todayTimings, curMin), curSinceFajr: sinceFajr(curMin), sinceFajr };
+    const ctx = lateCtx();
 
     const byWeek = {}; for (const it of overdue) (byWeek[fmtISO(it.ws)] = byWeek[fmtISO(it.ws)] || []).push(it);
     // Read every source week before writing any of it — today is often both a
@@ -646,7 +748,10 @@ export default function Rhythm() {
     // several eras of this code and aren't on a common scale, so the only safe
     // claim is "after everything already here".
     const base = kept.reduce((m, x) => (x.day === destDay ? Math.max(m, Number(x.order) || 0) : m), 0) + 1;
-    const added = moving.map((t, i) => ({ ...pushToToday(t, ctx), day: destDay, order: base + i }));
+    // `pushes` is the dread signal the points weighting reads. It counts here
+    // and nowhere else: a task you keep shoving forward is the hardest thing
+    // on the list, and it should be worth more when you finally do it.
+    const added = moving.map((t, i) => ({ ...pushToToday(t, ctx), day: destDay, order: base + i, pushes: (Number(t.pushes) || 0) + 1 }));
     await writeWeek(destISO, { ...dest, tasks: [...kept, ...added] });
 
     setOverdue([]); setOdBusy(false); bumpRefresh();
@@ -1323,6 +1428,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           <div className="brand-en"><strong>Rhythm <span className="ver-tag">v{APP_VERSION}</span></strong><span>{tx('plan your day around the day', 'خطّط يومك حول اليوم')}</span></div>
         </div>
         <div className="hdr-actions">
+          <button className="icon pts-chip" onClick={() => setShowPoints(true)} aria-label={tx('Points', 'النقاط')} title={tx('Points', 'النقاط')}><Coins size={16} /><span>{balance}</span></button>
           <button className="icon today-jump" onClick={() => { goToday(); setView('plan'); }} aria-label={tx('Jump to today', 'انتقل إلى اليوم')} title={tx('Jump to today', 'انتقل إلى اليوم')}><Calendar size={16} /><span>{tx('Today', 'اليوم')}</span></button>
           <button className="icon lang-toggle" onClick={() => changeLang(LANG === 'ar' ? 'en' : 'ar')} aria-label={tx('Switch language', 'تبديل اللغة')} title={tx('Switch language', 'تبديل اللغة')}><Languages size={17} /><span>{LANG === 'ar' ? 'EN' : 'ع'}</span></button>
           <button className="icon" onClick={() => setChatOpen(true)} aria-label={tx('Planning assistant', 'مساعد التخطيط')} title={tx('Planning assistant', 'مساعد التخطيط')}><Sparkles size={17} /></button>
@@ -1660,6 +1766,13 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           onDelete={() => removePoolItem(editingPoolItem.id)}
           onToDay={() => { setEditingPool(null); setPlacer({ kind: 'pool', id: editingPoolItem.id }); }}
           onSaveTemplate={() => { addTemplate({ title: editingPoolItem.title, block: 'morning', projectId: editingPoolItem.projectId, subtasks: editingPoolItem.subtasks.map((s) => s.title) }); flash(tx('Saved as a recurring task.', 'حُفظت كمهمة متكررة.')); }} />
+      )}
+
+      {showPoints && (
+        <PointsPanel balance={balance} ledger={ledger} rewards={settings.rewards || []}
+          onClose={() => setShowPoints(false)}
+          onAddReward={addReward} onUpdReward={updReward} onDelReward={delReward}
+          onCashIn={cashIn} onForget={(ref) => revokeRef(ref)} />
       )}
 
       {showSettings && (

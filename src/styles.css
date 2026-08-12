@@ -791,3 +791,43 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 /* ---- header Jump-to-today button ---- */
 .today-jump{display:inline-flex !important;align-items:center;justify-content:center;width:auto !important;min-width:0;height:34px;padding:0 11px;gap:5px;font-size:12px;font-weight:700;white-space:nowrap;color:var(--verdigris)}
 .today-jump span{font-size:12.5px;font-weight:700;line-height:1}
+
+/* ---- points ---- */
+.pts-chip{gap:5px}
+.pts-chip span{font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.points-modal{max-width:520px}
+.pts-balance{display:flex;align-items:center;gap:10px;padding:14px 4px 16px;color:var(--verdigris)}
+.pts-num{font-family:'Cormorant',serif;font-size:38px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+.pts-cap{font-size:12px;color:var(--muted);align-self:flex-end;padding-bottom:5px}
+.pts-sec-h{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:14px 0 8px;font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.pts-rewards,.pts-ledger{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.pts-reward{display:flex;align-items:center;gap:8px;min-width:0}
+.pts-reward-main{flex:1;min-width:0;display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--soft);border:1px solid transparent;border-radius:9px;padding:9px 11px;text-align:start;cursor:pointer;color:inherit}
+.pts-reward-main:hover{border-color:var(--line)}
+.pts-reward-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13.5px}
+.pts-reward-cost{font-size:12.5px;font-weight:600;color:var(--verdigris);font-variant-numeric:tabular-nums;flex-shrink:0}
+.pts-reward-edit{flex:1;display:flex;align-items:center;gap:6px;min-width:0}
+.pts-reward-edit input:first-child{flex:1;min-width:0}
+.pts-reward-edit input[type=number]{width:78px;flex-shrink:0}
+.pts-entry{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:baseline;gap:4px 10px;padding:7px 2px;border-bottom:1px solid var(--soft)}
+.pts-entry-amt{font-size:13px;font-weight:600;color:var(--verdigris);font-variant-numeric:tabular-nums}
+.pts-entry.spend .pts-entry-amt{color:#B23A3A}
+.pts-entry-title{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* --muted, not --faint: this line carries the kind, the late flag and the date
+   — real content, not decoration. */
+.pts-entry-meta{font-size:11px;color:var(--muted);white-space:nowrap}
+.worth-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0 2px;color:var(--muted)}
+.worth-label{font-size:11.5px;letter-spacing:.08em;text-transform:uppercase}
+.worth-input{width:84px}
+.worth-auto{font-size:11.5px;color:var(--faint)}
+
+/* The verdigris that carries the brand on a light panel is only 4.12:1 on the
+   dark one, and these numbers are small bold text rather than headings — so
+   they need their own token rather than riding on --verdigris, which also
+   backs white-on-green buttons and can't be lightened safely. Light needs the
+   opposite treatment: --verdigris is only 3.93:1 on the light panel, so these
+   go a shade deeper there. */
+.rhythm{--coin:#2F6B53;--coin-spend:#B23A3A}
+.rhythm.dark{--coin:#6FBF97;--coin-spend:#E07A7A}
+.pts-balance,.pts-reward-cost,.pts-entry-amt{color:var(--coin)}
+.pts-entry.spend .pts-entry-amt{color:var(--coin-spend)}

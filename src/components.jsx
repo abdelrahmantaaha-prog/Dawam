@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete } from 'lucide-react';
-import { hasVault,vaultWindowed,vaultUnlocked,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Gift } from 'lucide-react';
+import { hasVault,vaultWindowed,vaultUnlocked,autoWorth,taskWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 
 function FlameGlyph({ level = 0, size = 14 }) {
@@ -357,6 +357,22 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaul
             <label><span>{tx('Start', 'البداية')}</span><input className="time-input" type="time" value={task.start || ''} disabled={vaultLocksTime} onChange={(e) => setField('start', e.target.value)} /></label>
             <label><span>{tx('End', 'النهاية')}</span><input className="time-input" type="time" value={task.end || ''} disabled={vaultLocksTime} onChange={(e) => setField('end', e.target.value)} /></label>
           </div>
+          {/* The reading, and the override for when the reading is wrong. Auto is
+              shown even while overridden so you can always see what you argued
+              with — this is the one knob that can inflate the currency. */}
+          <div className="worth-row">
+            <Coins size={13} />
+            <span className="worth-label">{tx('Worth', 'القيمة')}</span>
+            <input className="worth-input" type="number" min="0" placeholder={String(autoWorth(task))}
+              value={task.worth === '' || task.worth == null ? '' : task.worth}
+              onChange={(e) => setField('worth', e.target.value === '' ? null : e.target.value)} />
+            <span className="worth-auto">
+              {task.worth == null || task.worth === ''
+                ? `${tx('auto', 'تلقائي')} · ${(task.subtasks || []).length ? tx('split across steps', 'مقسّمة على الخطوات') : tx('on completion', 'عند الإنجاز')}`
+                : `${tx('auto would be', 'التلقائي')} ${autoWorth(task)}`}
+              {(Number(task.pushes) || 0) > 0 ? ` · ${tx('pushed', 'مؤجّلة')} ×${Number(task.pushes)}` : ''}
+            </span>
+          </div>
           <div className="editor-actions">
             <button className="ghost sm" onClick={onToPool}><Inbox size={14} /> {tx('Move to backlog', 'نقل إلى قائمة الانتظار')}</button>
             <button className="ghost sm" onClick={onSaveTemplate}><Repeat size={14} /> {tx('Save as recurring', 'حفظ كمتكررة')}</button>
@@ -446,6 +462,81 @@ function PoolEditor({ item, projects, allProjects = [], onClose, onChange, onDel
 }
 
 /* ------------------------------------------------------------------ */
+/*  Points — the balance, what it buys, and where it came from.        */
+/* ------------------------------------------------------------------ */
+/* The ledger is on screen and not just the balance, on purpose. The
+   problem this feature exists to solve is forgetting to reward yourself,
+   and a bare number can't show you that you actually did. */
+function PointsPanel({ balance, ledger, rewards, onClose, onAddReward, onUpdReward, onDelReward, onCashIn, onForget }) {
+  const [editing, setEditing] = useState(null);
+  const recent = ledger.slice().reverse().slice(0, 40);
+  const kindLabel = { task: tx('task', 'مهمة'), subtask: tx('step', 'خطوة'), habit: tx('habit', 'عادة'), spend: tx('spent', 'صرف') };
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal points-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <strong>{tx('Points', 'النقاط')}</strong>
+          <button className="icon" onClick={onClose} aria-label={tx('Close', 'إغلاق')}><X size={16} /></button>
+        </div>
+        <div className="modal-body">
+          <div className="pts-balance"><Coins size={22} /><span className="pts-num">{balance}</span><span className="pts-cap">{tx('points to spend', 'نقطة للصرف')}</span></div>
+
+          <div className="pts-sec-h">
+            <span>{tx('Rewards', 'المكافآت')}</span>
+            <button className="ghost sm" onClick={onAddReward}><Plus size={13} /> {tx('Add', 'إضافة')}</button>
+          </div>
+          {!rewards.length ? (
+            <p className="hint-text">{tx('Nothing to buy yet. Add something you actually want — an hour of games, a takeaway, whatever. The price is yours to set; that is what makes the points mean anything.', 'لا شيء للشراء بعد. أضف شيئًا تريده فعلًا — ساعة ألعاب، وجبة، أيًّا كان. أنت من يحدد السعر، وهذا ما يجعل للنقاط معنى.')}</p>
+          ) : (
+            <ul className="pts-rewards">{rewards.map((r) => {
+              const cost = Number(r.cost) || 0;
+              const afford = cost > 0 && cost <= balance;
+              return (
+                <li key={r.id} className="pts-reward">
+                  {editing === r.id ? (
+                    <div className="pts-reward-edit">
+                      <input value={r.name} onChange={(e) => onUpdReward(r.id, { name: e.target.value })} placeholder={tx('Reward', 'مكافأة')} />
+                      <input type="number" min="1" value={r.cost} onChange={(e) => onUpdReward(r.id, { cost: e.target.value })} placeholder={tx('Cost', 'السعر')} />
+                      <button className="ghost sm" onClick={() => setEditing(null)}><Check size={13} /></button>
+                      <button className="danger sm" onClick={() => { onDelReward(r.id); setEditing(null); }}><Trash2 size={13} /></button>
+                    </div>
+                  ) : (<>
+                    <button className="pts-reward-main" onClick={() => setEditing(r.id)}>
+                      <span className="pts-reward-name">{r.name || tx('Untitled reward', 'مكافأة بلا اسم')}</span>
+                      <span className="pts-reward-cost">{cost}</span>
+                    </button>
+                    <button className="primary sm" disabled={!afford} onClick={() => onCashIn(r)}>
+                      <Gift size={13} /> {tx('Cash in', 'اصرفها')}
+                    </button>
+                  </>)}
+                </li>
+              );
+            })}</ul>
+          )}
+
+          <div className="pts-sec-h"><span>{tx('Ledger', 'السجل')}</span></div>
+          {!recent.length ? (
+            <p className="hint-text">{tx('Nothing earned yet. Finish something.', 'لم تكسب شيئًا بعد. أنجز شيئًا.')}</p>
+          ) : (
+            <ul className="pts-ledger">{recent.map((e) => (
+              <li key={e.ref} className={`pts-entry ${e.amount < 0 ? 'spend' : ''}`}>
+                <span className="pts-entry-amt">{e.amount > 0 ? `+${e.amount}` : e.amount}</span>
+                <span className="pts-entry-title">{e.title}</span>
+                <span className="pts-entry-meta">
+                  {kindLabel[e.kind] || e.kind}{e.meta && e.meta.late ? ` · ${tx('late', 'متأخر')}` : ''} · {e.day}
+                </span>
+                {e.kind === 'spend' && <button className="icon sm" onClick={() => onForget(e.ref)} aria-label={tx('Remove', 'إزالة')} title={tx('Logged by mistake?', 'سُجّل بالخطأ؟')}><X size={13} /></button>}
+              </li>
+            ))}</ul>
+          )}
+        </div>
+        <div className="modal-foot"><button className="primary" onClick={onClose}>{tx('Done', 'تم')}</button></div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Habits — daily commitments; streaks glow brighter up to seven days */
 /* ------------------------------------------------------------------ */
-export { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };
+export { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };

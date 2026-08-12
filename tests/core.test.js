@@ -4,7 +4,8 @@ import { describe, it, expect } from 'vitest';
 import {
   activeBlockAt, projectPace, habitStreak, habitDoneOn, glowLevel,
   fmtISO, addDays, startOfWeek, DEFAULT_TIMINGS, migrateSettings, inWindow,
-  hasVault, vaultWindowed, vaultUnlocked, pushToToday,
+  hasVault, vaultWindowed, vaultUnlocked, pushToToday, POINTS, autoWorth, taskWorth,
+  shares, subtaskWorth, latePay, habitLevel, habitMultiplier, habitWorth,
 } from '../src/core.jsx';
 
 const T = DEFAULT_TIMINGS; // Fajr 04:15, Sunrise 05:50, Dhuhr 12:55, Asr 16:30, Maghrib 19:45, Isha 21:15
@@ -274,5 +275,116 @@ describe('pushToToday — where an overdue task lands', () => {
     const t = { block: 'fajr', start: '09:00', end: '10:00' };
     pushToToday(t, ctx('asr', min(17)));
     expect(t).toEqual({ block: 'fajr', start: '09:00', end: '10:00' });
+  });
+});
+
+describe('points — what a task is worth', () => {
+  it('a bare task is base plus the untimed allowance', () => {
+    expect(autoWorth({ title: 'x' })).toBe(POINTS.base + POINTS.untimed);
+  });
+
+  it('reads size off a real start/end window', () => {
+    // 90 minutes = 6 quarter hours.
+    expect(autoWorth({ start: '09:00', end: '10:30' })).toBe(POINTS.base + 6);
+  });
+
+  it('caps size so an all-day block cannot dominate', () => {
+    expect(autoWorth({ start: '06:00', end: '22:00' })).toBe(POINTS.base + POINTS.sizeCap);
+  });
+
+  it('measures a window that crosses midnight the short way round', () => {
+    expect(autoWorth({ start: '23:00', end: '00:30' })).toBe(POINTS.base + 6);
+  });
+
+  it('pays for decomposition, up to a cap', () => {
+    const subs = (n) => Array.from({ length: n }, (_, i) => ({ id: `s${i}`, title: 's' }));
+    expect(autoWorth({ subtasks: subs(3) })).toBe(POINTS.base + POINTS.untimed + 15);
+    expect(autoWorth({ subtasks: subs(99) })).toBe(POINTS.base + POINTS.untimed + POINTS.subtaskCap);
+  });
+
+  it('pays more for a task you keep pushing, up to a cap', () => {
+    const at = (n) => autoWorth({ pushes: n });
+    expect(at(0)).toBe(POINTS.base + POINTS.untimed);
+    expect(at(2)).toBe(POINTS.base + POINTS.untimed + 10);
+    expect(at(50)).toBe(POINTS.base + POINTS.untimed + POINTS.pushCap);
+  });
+
+  it('ignores a nonsense push count instead of paying out for it', () => {
+    expect(autoWorth({ pushes: -5 })).toBe(POINTS.base + POINTS.untimed);
+    expect(autoWorth({ pushes: 'lots' })).toBe(POINTS.base + POINTS.untimed);
+  });
+
+  it('an explicit worth overrides the reading, and a bad one does not', () => {
+    expect(taskWorth({ worth: 250, pushes: 0 })).toBe(250);
+    expect(taskWorth({ worth: 0 })).toBe(0);
+    expect(taskWorth({ worth: -3 })).toBe(autoWorth({ worth: -3 }));
+    expect(taskWorth({ worth: '' })).toBe(autoWorth({}));
+    expect(taskWorth({ worth: 'free' })).toBe(autoWorth({}));
+  });
+});
+
+describe('points — splitting across steps', () => {
+  it('the parts always sum to the whole', () => {
+    for (const total of [10, 35, 37, 75, 1]) {
+      for (const n of [1, 2, 3, 4, 7]) {
+        expect(shares(total, n).reduce((a, b) => a + b, 0)).toBe(total);
+      }
+    }
+  });
+
+  it('gives the remainder to the last steps, so finishing pays slightly more', () => {
+    expect(shares(10, 3)).toEqual([3, 3, 4]);
+  });
+
+  it('subtaskWorth picks the right slice, and nothing for a stranger', () => {
+    const t = { subtasks: [{ id: 'a' }, { id: 'b' }, { id: 'c' }] }; // worth 10+5+15 = 30
+    expect(taskWorth(t)).toBe(30);
+    expect([0, 1, 2].map((i) => subtaskWorth(t, 'abc'[i]))).toEqual([10, 10, 10]);
+    expect(subtaskWorth(t, 'nope')).toBe(0);
+  });
+
+  it('late pays half, and never rounds a real reward down to nothing', () => {
+    expect(latePay(30)).toBe(15);
+    expect(latePay(1)).toBe(1);
+    expect(latePay(0)).toBe(0);
+  });
+});
+
+describe('points — habit streak multiplier', () => {
+  const habit = (isos) => ({ id: 'h', createdAt: isoOffset(-40), log: Object.fromEntries(isos.map((i) => [i, 1])) });
+  const day = (n) => isoOffset(n);
+
+  it('a brand-new habit pays flat', () => {
+    expect(habitLevel(habit([]), day(0))).toBe(0);
+    expect(habitMultiplier(0)).toBe(1);
+  });
+
+  it('climbs one step per kept day and caps at 2x', () => {
+    const kept = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => day(-n));
+    expect(habitLevel(habit(kept), day(0))).toBe(5);
+    expect(habitMultiplier(5)).toBe(2);
+    expect(habitMultiplier(99)).toBe(2);       // cap holds however long the run
+  });
+
+  it('a missed day costs ONE step, not the whole streak', () => {
+    // This is the whole point of the rule: four kept days then one miss should
+    // leave you where day three was, not back at the start.
+    const kept = [day(-5), day(-4), day(-3), day(-2)]; // yesterday missed
+    expect(habitLevel(habit(kept), day(0))).toBe(3);
+  });
+
+  it('never goes below zero however long you have been away', () => {
+    expect(habitLevel(habit([]), day(0))).toBe(0);
+  });
+
+  it('does not count the day being awarded towards its own multiplier', () => {
+    const today = day(0);
+    expect(habitLevel(habit([today]), today)).toBe(0);
+  });
+
+  it('worth follows the level', () => {
+    const kept = [1, 2, 3, 4, 5].map((n) => day(-n));
+    expect(habitWorth(habit([]), day(0))).toBe(POINTS.habit);
+    expect(habitWorth(habit(kept), day(0))).toBe(POINTS.habit * 2);
   });
 });
