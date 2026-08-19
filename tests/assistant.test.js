@@ -1,7 +1,7 @@
 /* The assistant's parser is the safety boundary: nothing reaches the plan
    unless it validates AND the person approves. Test it like it matters. */
 import { describe, it, expect } from 'vitest';
-import { parseAssistantReply, validateProposal, buildDaySnapshot } from '../src/assistant.js';
+import { parseAssistantReply, validateProposal, buildDaySnapshot, parseEstimates } from '../src/assistant.js';
 
 const IDS = { taskIds: ['t1', 't2'], poolIds: ['p1'], todayISO: '2026-08-14' };
 
@@ -104,5 +104,39 @@ describe('buildDaySnapshot', () => {
     expect(s).toContain('NOW IN PERIOD: dhuhr');
     expect(s).toContain('OVERDUE TASKS: none');
     expect(s).toContain('streak=7');
+  });
+});
+
+describe('parseEstimates — the model advises, this decides', () => {
+  const IDS = ['t1', 't2'];
+
+  it('reads a clean answer', () => {
+    const m = parseEstimates('[{"id":"t1","minutes":45},{"id":"t2","minutes":15}]', IDS);
+    expect(m.get('t1')).toBe(45);
+    expect(m.get('t2')).toBe(15);
+  });
+
+  it('tolerates fences and prose around the array', () => {
+    const m = parseEstimates('Sure! ```json\n[{"id":"t1","minutes":30}]\n``` hope that helps', IDS);
+    expect(m.get('t1')).toBe(30);
+  });
+
+  it('drops hallucinated ids instead of sizing ghosts', () => {
+    const m = parseEstimates('[{"id":"made-up","minutes":30},{"id":"t1","minutes":20}]', IDS);
+    expect(m.has('made-up')).toBe(false);
+    expect(m.get('t1')).toBe(20);
+  });
+
+  it('clamps to 5..180 — a model saying "600" does not eat the day', () => {
+    const m = parseEstimates('[{"id":"t1","minutes":600},{"id":"t2","minutes":1}]', IDS);
+    expect(m.get('t1')).toBe(180);
+    expect(m.get('t2')).toBe(5);
+  });
+
+  it('returns null for junk, so the caller falls back to the heuristic', () => {
+    expect(parseEstimates('I cannot help with that.', IDS)).toBe(null);
+    expect(parseEstimates('{"id":"t1","minutes":30}', IDS)).toBe(null); // object, not array
+    expect(parseEstimates('[{"id":"t1","minutes":"soon"}]', IDS)).toBe(null);
+    expect(parseEstimates(null, IDS)).toBe(null);
   });
 });

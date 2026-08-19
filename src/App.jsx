@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3 } from 'lucide-react';
-import { hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { useSync, markDirty, markDeleted } from './sync.js';
 import { readLedger, balanceOf, award, revoke, spend } from './points.js';
 import { updateWidget } from './widget.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence, scheduleWakeAlarm, cancelWakeAlarm, pendingWakeAlarm } from './notify.js';
-import { ASSISTANT_SYSTEM, buildDaySnapshot, parseAssistantReply, callAssistant } from './assistant.js';
+import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, parseAssistantReply, parseEstimates, callAssistant } from './assistant.js';
+import { loadDurations, durationFor, rememberDuration } from './durations.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
@@ -500,7 +501,28 @@ export default function Rhythm() {
     };
     persistWeek({ ...w, tasks: [...w.tasks, t] });
   };
-  const mutateTask = (id, fn) => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.map((t) => (t.id === id ? fn(t) : t)) }); };
+  // Duration between a task's start and end, wrap-safe, or null.
+  const spanOf = (t) => {
+    const st = tStartMin(t), en = tEndMin(t);
+    return st != null && en != null ? ((en - st + 1440) % 1440) || null : null;
+  };
+  const mutateTask = (id, fn) => {
+    const w = weekRef.current;
+    let learned = null;
+    const tasks = w.tasks.map((t) => {
+      if (t.id !== id) return t;
+      const next = fn(t);
+      // Both times present, set by hand (the editor clears autoSlot on manual
+      // edits), and actually changed: that is the person stating a duration.
+      // Vault windows are excluded — they are availability, not effort.
+      if (next.start && next.end && !next.autoSlot && !hasVault(next) && (next.start !== t.start || next.end !== t.end)) {
+        learned = { title: next.title, min: spanOf(next) };
+      }
+      return next;
+    });
+    persistWeek({ ...w, tasks });
+    if (learned && learned.min) rememberDuration(learned.title, learned.min, 'manual');
+  };
 
   // Move a task to an absolute calendar date. If that date lands in a different
   // week object, relocate it there (tasks are stored per-week with a 0–6 day index).
@@ -566,7 +588,15 @@ export default function Rhythm() {
     const t = (weekRef.current.tasks || []).find((x) => x.id === id);
     mutateTask(id, (x) => ({ ...x, done: !x.done }));
     if (!t) return;
-    if (!t.done) awardTaskDone(t, dateOfTask(t)); else revokeRef(`task:${id}`);
+    if (!t.done) {
+      awardTaskDone(t, dateOfTask(t));
+      // Finishing a timed task without having touched its slot is acceptance:
+      // remember the duration under this title for every future slotting.
+      // 'kept' for a slot the button assigned, 'manual' when the times were
+      // the person's own — a kept slot never overwrites a hand-set number.
+      const min = !hasVault(t) ? spanOf(t) : null;
+      if (min) rememberDuration(t.title, min, t.autoSlot ? 'kept' : 'manual');
+    } else revokeRef(`task:${id}`);
   };
   const toggleSub = (id, subId) => {
     const t = (weekRef.current.tasks || []).find((x) => x.id === id);
@@ -655,6 +685,7 @@ export default function Rhythm() {
     const l = await readLedger(); ledgerRef.current = l; setLedger(l);
   }, []);
   useEffect(() => { if (ready) refreshLedger(); }, [ready, refreshLedger]);
+  useEffect(() => { if (ready) loadDurations(); }, [ready]);
 
   const balance = useMemo(() => balanceOf(ledger), [ledger]);
   const paidOn = (ref) => ledgerRef.current.some((e) => e.ref === ref);
@@ -714,31 +745,84 @@ export default function Rhythm() {
   };
 
   /* ---- structuring the day into strict slots ---- */
-  const structureSelectedDay = () => {
+  const [slotBusy, setSlotBusy] = useState(false);
+  const structureSelectedDay = async () => {
+    if (slotBusy) return;
     const isToday = sameDay(addDays(weekStart, selectedDay), logicalDayMid());
     const n = new Date(); const nowMin = n.getHours() * 60 + n.getMinutes();
     // Re-running re-flows: anything the last run placed goes back to floating
     // (its auto times stripped) instead of standing as an obstacle. 'end' marks
     // a start-only pin whose start is the person's and only the end was ours.
-    const dayTasks = week.tasks
+    let dayTasks = week.tasks
       .filter((t) => t.day === selectedDay && !t.done)
       .map((t) => (t.autoSlot === 'both' ? { ...t, start: '', end: '' } : t.autoSlot === 'end' ? { ...t, end: '' } : t));
+
+    /* Sizing order: memory, then AI, then heuristic.
+
+       Memory first — a duration the person accepted or set by hand is worth
+       more than any fresh model opinion, it costs nothing, and it makes the
+       recurring backbone of a week ("Email the client", every week) converge
+       on THEIR numbers instead of guesses. Tasks memory covers are not sent
+       to the model at all. */
+    dayTasks = dayTasks.map((t) => {
+      if (t.start && t.end) return t;
+      const m = durationFor(t.title);
+      return m ? { ...t, est: m, estSig: taskTextSig(t) } : t;
+    });
+
+    /* AI sizing, when a key is set. Only tasks whose text changed since the
+       last answer are sent (the estimate is cached on the task with a text
+       signature), and any failure — no key, offline, junk reply, timeout —
+       falls through to the built-in heuristic without a word of ceremony:
+       slotting must never be hostage to the network. */
+    let sized = 0, aiTried = false, estMap = null;
+    const needsEst = dayTasks.filter((t) => !(t.start && t.end) && (!t.est || t.estSig !== taskTextSig(t)));
+    if (settings.apiKey && needsEst.length) {
+      aiTried = true;
+      setSlotBusy(true);
+      try {
+        const listing = needsEst.map((t) => ({ id: t.id, title: t.title, steps: (t.subtasks || []).map((s) => s.title) }));
+        const text = await Promise.race([
+          callAssistant({ provider: settings.aiProvider || 'anthropic', apiKey: settings.apiKey, system: ESTIMATOR_SYSTEM, messages: [{ role: 'user', content: JSON.stringify(listing) }] }),
+          new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 20000)),
+        ]);
+        const est = parseEstimates(text, needsEst.map((t) => t.id));
+        if (est) {
+          sized = est.size;
+          estMap = est;
+          dayTasks = dayTasks.map((t) => (est.has(t.id) ? { ...t, est: est.get(t.id), estSig: taskTextSig(t) } : t));
+        }
+      } catch { /* heuristic it is */ }
+      setSlotBusy(false);
+    }
+
     const { slots, unplaced } = structureDay(dayTasks, timings, isToday ? nowMin : null);
+    // ONE write carrying both the estimate cache and the slots, built from the
+    // live ref. Two writes here once lost the estimates: the second was built
+    // from the stale render-time `week` and quietly un-wrote the first, so
+    // every slotting re-asked the model for the same tasks.
+    const byId = new Map(slots.map((s) => [s.id, s]));
+    if (slots.length || (estMap && estMap.size)) {
+      const w = weekRef.current;
+      persistWeek({
+        ...w,
+        tasks: w.tasks.map((t) => {
+          let nx = t;
+          if (estMap && estMap.has(t.id)) nx = { ...nx, est: estMap.get(t.id), estSig: taskTextSig(nx) };
+          const s = byId.get(t.id);
+          if (s) nx = { ...nx, start: s.start, end: s.end, time: '', autoSlot: s.pinned ? 'end' : 'both' };
+          return nx;
+        }),
+      });
+    }
     if (!slots.length) {
       flash(unplaced.length ? tx('No room left today for these tasks.', 'لا وقت متبقيًا اليوم لهذه المهام.') : tx('Nothing to slot.', 'لا شيء لجدولته.'));
       return;
     }
-    const byId = new Map(slots.map((s) => [s.id, s]));
-    persistWeek({
-      ...week,
-      tasks: week.tasks.map((t) => {
-        const s = byId.get(t.id);
-        return s ? { ...t, start: s.start, end: s.end, time: '', autoSlot: s.pinned ? 'end' : 'both' } : t;
-      }),
-    });
+    const sizedNote = aiTried && sized ? ` · ${sized} ${tx('sized by AI', 'قُدّرت بالذكاء الاصطناعي')}` : '';
     flash(unplaced.length
-      ? `${slots.length} ${tx('slotted', 'تمت جدولتها')} · ${unplaced.length} ${tx("didn't fit", 'لم تتسع لها')}`
-      : `${slots.length} ${tx('tasks slotted. Follow the clock.', 'مهمة جُدولت. اتبع الساعة.')}`);
+      ? `${slots.length} ${tx('slotted', 'تمت جدولتها')} · ${unplaced.length} ${tx("didn't fit", 'لم تتسع لها')}${sizedNote}`
+      : `${slots.length} ${tx('tasks slotted. Follow the clock.', 'مهمة جُدولت. اتبع الساعة.')}${sizedNote}`);
   };
   const clearSlots = () => {
     persistWeek({
@@ -1786,8 +1870,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
 
         <div className="plan-actions-row">
           <button className="plan-day-btn" onClick={startWizard}><Sparkles size={15} /> {tx('Plan the day', 'خطّط اليوم')}</button>
-          <button className="plan-day-btn slot-btn" onClick={structureSelectedDay} title={tx('Give every remaining task a strict time slot', 'امنح كل مهمة متبقية وقتًا محددًا')}>
-            <Rows3 size={15} /> {tx('Slot the day', 'جدول اليوم')}
+          <button className="plan-day-btn slot-btn" onClick={structureSelectedDay} disabled={slotBusy} title={tx('Give every remaining task a strict time slot', 'امنح كل مهمة متبقية وقتًا محددًا')}>
+            {slotBusy ? <Loader2 size={15} className="spin" /> : <Rows3 size={15} />} {slotBusy ? tx('Sizing…', 'جارٍ التقدير…') : tx('Slot the day', 'جدول اليوم')}
           </button>
           {dayHasSlots && <button className="ghost sm" onClick={clearSlots}><X size={13} /> {tx('Clear slots', 'إزالة الجدولة')}</button>}
         </div>

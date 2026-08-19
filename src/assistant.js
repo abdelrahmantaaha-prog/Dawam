@@ -131,6 +131,44 @@ export function validateProposal(p, { taskIds = [], poolIds = [], todayISO = nul
   }
 }
 
+/* ------------------------------------------------------------------ */
+/*  Task sizing — how long would this actually take?                    */
+/* ------------------------------------------------------------------ */
+/* Used by "Slot the day" when an API key is set. The model sees only the
+   task texts, returns minutes per id, and everything it says is clamped
+   and validated here — a bad answer degrades to the built-in heuristic,
+   it never breaks slotting. */
+export const ESTIMATOR_SYSTEM = `You estimate how many MINUTES each personal task will realistically take a normal person, based only on its text. Tasks may be in English or Arabic.
+
+Reply with ONLY a JSON array, no prose, no markdown fences:
+[{"id":"<id from input>","minutes":<integer>}]
+
+Rules:
+- One entry per input task, same ids. Never invent ids.
+- minutes is the realistic working duration: 5 for trivial (a quick text), 15-30 for small (an email, a call), 45-90 for substantial (write a report, deep work), up to 180 for genuinely long single sittings.
+- "steps" listed under a task are its subtasks — size the whole task including them.
+- When the text is too vague to judge, use 25.`;
+
+/* Model text → Map(id → minutes), or null when nothing validates. Unknown ids
+   are dropped, values are clamped to 5..180 — the model advises, this decides. */
+export function parseEstimates(text, ids) {
+  if (typeof text !== 'string') return null;
+  const a = text.indexOf('['), b = text.lastIndexOf(']');
+  if (a < 0 || b <= a) return null;
+  let arr;
+  try { arr = JSON.parse(text.slice(a, b + 1)); } catch { return null; }
+  if (!Array.isArray(arr)) return null;
+  const known = new Set(ids || []);
+  const out = new Map();
+  for (const e of arr) {
+    if (!e || typeof e !== 'object' || !known.has(e.id)) continue;
+    const m = Number(e.minutes);
+    if (!Number.isFinite(m) || m <= 0) continue;
+    out.set(e.id, Math.max(5, Math.min(180, Math.round(m))));
+  }
+  return out.size ? out : null;
+}
+
 /* Model text → { reply, proposals }. Tolerates fences/preamble; drops anything
    that doesn't validate rather than acting on a guess. */
 export function parseAssistantReply(text, ids = {}) {

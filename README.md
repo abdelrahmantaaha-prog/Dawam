@@ -252,9 +252,23 @@ Two things worth knowing:
 ## Slotting the day
 
 **Plan → "Slot the day"** gives every remaining task a strict start–end time in
-one press. Sizes are read off the task itself (25 min + 10 per subtask, capped
-at 90) — no estimate to enter, because entering estimates is the step that gets
-skipped. Manually timed tasks and vault windows stay put and everything else
+one press. Sizing runs in three tiers, best available wins:
+
+1. **Memory** — durations you've already established. Hand-setting a task's
+   start and end teaches it (`manual`), and so does completing an auto-slotted
+   task without touching its slot (`kept` — it remembers the duration you
+   actually worked, not the guess). Keyed by task text, so next week's "Email
+   the client" is sized by this week's evidence: free, offline, instant. A
+   weaker source never overwrites a stronger one — once you've said 40 minutes,
+   no model opinion changes it.
+2. **AI** — with an API key set (Settings → AI), tasks with no memory are sized
+   from their text by your model, clamped to 5–180 min and cached on the task
+   until its text changes. Any failure — no key, offline, junk reply — falls
+   through silently.
+3. **Heuristic** — 25 min + 10 per subtask, capped at 90. The floor the app
+   always stands on.
+
+The task editor shows what the next slotting would use (`~40m (remembered)`). Manually timed tasks and vault windows stay put and everything else
 flows around them; on today, packing starts from *now*. A block holding more
 intent than time shrinks every slot in it proportionally (10-minute floor), so
 an overfull day looks overfull everywhere instead of collapsing at the end;

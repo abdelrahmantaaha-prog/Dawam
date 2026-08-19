@@ -458,9 +458,27 @@ function slotPassed(t, taskDate, today, { timings, sinceFajr, curSinceFajr }) {
    fine until 6pm and then fall apart. The floor is 10 minutes; below
    that a slot is a lie, so what can't get 10 minutes goes unplaced and
    is reported instead. */
-const SLOT = { base: 25, perSubtask: 10, cap: 90, min: 10 };
-const estimateMinutes = (t) =>
-  Math.min(SLOT.cap, SLOT.base + ((t && t.subtasks) || []).length * SLOT.perSubtask);
+const SLOT = { base: 25, perSubtask: 10, cap: 90, min: 10, estCap: 480 };
+/* A stored estimate (t.est, minutes — remembered from the person's own hands,
+   or from the AI sizing pass) wins over the heuristic. The cap is 8 hours:
+   AI answers are clamped much tighter at the parse boundary (5..180), but a
+   duration the person set themselves is ground truth and must round-trip
+   uncut. The heuristic stays the floor the app can always stand on when
+   there is no key, no network, or no answer. */
+const estimateMinutes = (t) => {
+  const e = Number(t && t.est);
+  if (Number.isFinite(e) && e > 0) return Math.max(SLOT.min, Math.min(SLOT.estCap, Math.round(e)));
+  return Math.min(SLOT.cap, SLOT.base + ((t && t.subtasks) || []).length * SLOT.perSubtask);
+};
+/* What the estimate was based on. Stored alongside t.est so a renamed or
+   re-stepped task stops trusting a stale number — djb2 is plenty: this is a
+   change detector, not a security boundary. */
+function taskTextSig(t) {
+  const s = `${(t && t.title) || ''}${(((t && t.subtasks) || []).map((x) => x.title).join(''))}`;
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
 
 function structureDay(tasks, timings, curMin) {
   const fajrM = minutesOf(timings.Fajr);
@@ -684,4 +702,4 @@ function pushToToday(t, { activeBlock, curSinceFajr, sinceFajr }) {
   return next;
 }
 
-export { hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,structureDay,SLEEP,sleepPlan,POINTS,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
+export { hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,SLEEP,sleepPlan,POINTS,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };

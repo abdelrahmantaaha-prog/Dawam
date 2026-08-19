@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   activeBlockAt, projectPace, habitStreak, habitDoneOn, glowLevel,
   fmtISO, addDays, startOfWeek, DEFAULT_TIMINGS, migrateSettings, inWindow,
-  hasVault, vaultWindowed, vaultUnlocked, pushToToday, structureDay, sleepPlan, POINTS, autoWorth, taskWorth,
+  hasVault, vaultWindowed, vaultUnlocked, pushToToday, structureDay, estimateMinutes, taskTextSig, sleepPlan, POINTS, autoWorth, taskWorth,
   shares, subtaskWorth, latePay, habitLevel, habitMultiplier, habitWorth,
 } from '../src/core.jsx';
 
@@ -512,5 +512,30 @@ describe('sleepPlan — cycles counted back from Fajr', () => {
 
   it('returns null rather than guessing when Fajr is unknown', () => {
     expect(sleepPlan(min(23, 0), null)).toBe(null);
+  });
+});
+
+describe('estimateMinutes — memory and AI beat the heuristic', () => {
+  it('a stored estimate wins over the subtask heuristic', () => {
+    expect(estimateMinutes({ title: 'x', est: 40 })).toBe(40);
+    expect(estimateMinutes({ title: 'x', est: 40, subtasks: [{}, {}, {}] })).toBe(40);
+  });
+  it('a person-set long duration round-trips uncut', () => {
+    expect(estimateMinutes({ est: 240 })).toBe(240);
+  });
+  it('junk estimates fall back to the heuristic', () => {
+    expect(estimateMinutes({ est: 0 })).toBe(25);      // heuristic base, no subtasks
+    expect(estimateMinutes({ est: -5 })).toBe(25);
+    expect(estimateMinutes({ est: 'soon' })).toBe(25);
+  });
+  it('taskTextSig changes when the text changes, and only then', () => {
+    const a = taskTextSig({ title: 'Write report', subtasks: [{ title: 'draft' }] });
+    expect(taskTextSig({ title: 'Write report', subtasks: [{ title: 'draft' }] })).toBe(a);
+    expect(taskTextSig({ title: 'Write REPORT', subtasks: [{ title: 'draft' }] })).not.toBe(a);
+    expect(taskTextSig({ title: 'Write report', subtasks: [{ title: 'edit' }] })).not.toBe(a);
+  });
+  it('structureDay sizes a slot from t.est when present', () => {
+    const r = structureDay([{ id: 'a', title: 'a', block: 'morning', done: false, subtasks: [], est: 40 }], T, null);
+    expect(r.slots[0]).toMatchObject({ start: '05:50', end: '06:30' });
   });
 });
