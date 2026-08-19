@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   activeBlockAt, projectPace, habitStreak, habitDoneOn, glowLevel,
   fmtISO, addDays, startOfWeek, DEFAULT_TIMINGS, migrateSettings, inWindow,
-  hasVault, vaultWindowed, vaultUnlocked, pushToToday, POINTS, autoWorth, taskWorth,
+  hasVault, vaultWindowed, vaultUnlocked, pushToToday, structureDay, sleepPlan, POINTS, autoWorth, taskWorth,
   shares, subtaskWorth, latePay, habitLevel, habitMultiplier, habitWorth,
 } from '../src/core.jsx';
 
@@ -386,5 +386,131 @@ describe('points — habit streak multiplier', () => {
     const kept = [1, 2, 3, 4, 5].map((n) => day(-n));
     expect(habitWorth(habit([]), day(0))).toBe(POINTS.habit);
     expect(habitWorth(habit(kept), day(0))).toBe(POINTS.habit * 2);
+  });
+});
+
+describe('structureDay — strict slots from what is logged', () => {
+  // DEFAULT_TIMINGS: Fajr 04:15, Sunrise 05:50, Dhuhr 12:55, Asr 16:30,
+  // Maghrib 19:45, Isha 21:15.
+  const mk = (id, block, extra = {}) => ({ id, title: id, block, done: false, subtasks: [], ...extra });
+  const slotOf = (r, id) => r.slots.find((s) => s.id === id);
+
+  it('packs untimed tasks back to back from the start of their block', () => {
+    const r = structureDay([mk('a', 'morning'), mk('b', 'morning')], T, null);
+    expect(slotOf(r, 'a')).toMatchObject({ start: '05:50', end: '06:15' }); // 25 min base
+    expect(slotOf(r, 'b')).toMatchObject({ start: '06:15', end: '06:40' });
+    expect(r.unplaced).toEqual([]);
+  });
+
+  it('starts from NOW inside the current block, not from its beginning', () => {
+    const r = structureDay([mk('a', 'morning')], T, min(9, 0));
+    expect(slotOf(r, 'a')).toMatchObject({ start: '09:00', end: '09:25' });
+  });
+
+  it('skips blocks that are already over — those tasks belong to Overdue', () => {
+    const r = structureDay([mk('a', 'fajr')], T, min(9, 0));
+    expect(r.slots).toEqual([]);
+  });
+
+  it('sizes a slot from the subtask count, capped', () => {
+    const subs = (n) => Array.from({ length: n }, (_, i) => ({ id: `s${i}` }));
+    const r = structureDay([mk('a', 'morning', { subtasks: subs(3) })], T, null);
+    expect(slotOf(r, 'a')).toMatchObject({ start: '05:50', end: '06:45' }); // 25+30
+    const big = structureDay([mk('b', 'morning', { subtasks: subs(20) })], T, null);
+    expect(slotOf(big, 'b')).toMatchObject({ end: '07:20' }); // capped at 90
+  });
+
+  it('flows around a manually timed task instead of double-booking it', () => {
+    const fixed = mk('fixed', 'morning', { start: '06:00', end: '07:00' });
+    const r = structureDay([mk('a', 'morning'), fixed, mk('b', 'morning')], T, null);
+    expect(slotOf(r, 'fixed')).toBeUndefined(); // manual times are not touched
+    // 05:50–06:00 is only ten minutes — not enough for a full slot, so both
+    // land after the fixed hour instead of squeezing before it.
+    expect(slotOf(r, 'a')).toMatchObject({ start: '07:00', end: '07:25' });
+    expect(slotOf(r, 'b')).toMatchObject({ start: '07:25', end: '07:50' });
+    // nothing overlaps the fixed hour
+    for (const s of r.slots) {
+      const st = min(...s.start.split(':').map(Number)), en = min(...s.end.split(':').map(Number));
+      expect(en <= min(6, 0) || st >= min(7, 0)).toBe(true);
+    }
+  });
+
+  it('keeps a start-only task at its own start and assigns just the end', () => {
+    const r = structureDay([mk('pin', 'morning', { start: '08:00' })], T, null);
+    expect(slotOf(r, 'pin')).toMatchObject({ start: '08:00', end: '08:25', pinned: true });
+  });
+
+  it('shrinks every slot proportionally when the block is oversubscribed', () => {
+    // Fajr block is 04:15→05:50 = 95 minutes; four 25-minute tasks want 100.
+    const r = structureDay([mk('a', 'fajr'), mk('b', 'fajr'), mk('c', 'fajr'), mk('d', 'fajr')], T, null);
+    expect(r.slots).toHaveLength(4);
+    expect(r.unplaced).toEqual([]);
+    expect(slotOf(r, 'a').start).toBe('04:15');
+    // every slot shrank a little; none was silently dropped
+    for (const s of r.slots) {
+      const dur = min(...s.end.split(':').map(Number)) - min(...s.start.split(':').map(Number));
+      expect(dur).toBeGreaterThanOrEqual(10);
+      expect(dur).toBeLessThan(25);
+    }
+  });
+
+  it('reports what genuinely cannot fit rather than slotting a lie', () => {
+    // 95-minute Fajr block, twelve tasks: even at the 10-minute floor only
+    // nine fit.
+    const many = Array.from({ length: 12 }, (_, i) => mk(`t${i}`, 'fajr'));
+    const r = structureDay(many, T, null);
+    expect(r.slots.length + r.unplaced.length).toBe(12);
+    expect(r.unplaced.length).toBeGreaterThan(0);
+  });
+
+  it('slots Isha across midnight on the Fajr clock', () => {
+    // 23:30, Isha. The window runs to next Fajr; a slot placed now ends past
+    // midnight in real clock time.
+    const r = structureDay([mk('late', 'isha', { subtasks: [{ id: 's1' }, { id: 's2' }] })], T, min(23, 30));
+    expect(slotOf(r, 'late')).toMatchObject({ start: '23:30', end: '00:15' }); // 45 min, wraps
+  });
+
+  it('never touches a vault task, and flows around its window', () => {
+    const vault = mk('v', 'maghrib', { start: '19:50', end: '20:20', secret: 'x' });
+    const r = structureDay([vault, mk('a', 'maghrib')], T, null);
+    expect(slotOf(r, 'v')).toBeUndefined();
+    expect(slotOf(r, 'a')).toMatchObject({ start: '20:20' }); // 19:45–19:50 is under 25min
+  });
+
+  it('ignores done tasks entirely', () => {
+    const r = structureDay([mk('d', 'morning', { done: true }), mk('a', 'morning')], T, null);
+    expect(slotOf(r, 'd')).toBeUndefined();
+    expect(slotOf(r, 'a')).toMatchObject({ start: '05:50' });
+  });
+});
+
+describe('sleepPlan — cycles counted back from Fajr', () => {
+  const FAJR = min(4, 15);
+
+  it('at 21:30, only the bedtimes still ahead survive', () => {
+    const p = sleepPlan(min(21, 30), FAJR);
+    expect(p.untilFajr).toBe(min(4, 15) + 1440 - min(21, 30));
+    // 6 cycles means bed by 19:00 and 5 means 20:30 — both already behind at
+    // 21:30, so showing them would be advice about the past.
+    expect(p.bedtimes.map((b) => b.cycles)).toEqual([4, 3]);
+    expect(p.bedtimes[0].at).toBe(min(22, 0)); // 04:15 − 15m − 6h
+    expect(p.bedtimes[1].at).toBe(min(23, 30));
+  });
+
+  it('sleeping now: whole cycles only, wake at the boundary', () => {
+    const p = sleepPlan(min(23, 0), FAJR);
+    // 23:00→04:15 = 315m; minus 15 latency = 300 = 3 cycles + 30m spare.
+    expect(p.cyclesIfNow).toBe(3);
+    expect(p.alignedWake).toBe(min(3, 45)); // 23:00+15m+270m
+  });
+
+  it('pre-dawn: less than a cycle left reads as zero, not a negative', () => {
+    const p = sleepPlan(min(3, 30), FAJR);
+    expect(p.cyclesIfNow).toBe(0);
+    expect(p.alignedWake).toBe(null);
+  });
+
+  it('returns null rather than guessing when Fajr is unknown', () => {
+    expect(sleepPlan(min(23, 0), null)).toBe(null);
   });
 });

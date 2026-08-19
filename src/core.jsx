@@ -442,6 +442,142 @@ function slotPassed(t, taskDate, today, { timings, sinceFajr, curSinceFajr }) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Structuring the day — strict time slots at the press of a button.  */
+/* ------------------------------------------------------------------ */
+/* The whole computation happens in MINUTES SINCE FAJR, not clock time.
+   Isha is the only block that crosses midnight, but it is also the one
+   where slotting matters most, and in Fajr-space every window is a plain
+   ordered interval: fajr [0..sunrise), …, isha [isha..1440). Convert to
+   clock time only at the very end.
+
+   Estimates are deliberately not asked for. The size is read off the
+   task (same philosophy as points): 25 minutes base, +10 per subtask,
+   capped at 90. When a block holds more intent than time, every slot in
+   it shrinks proportionally rather than the last tasks falling off —
+   a day that is too full should FEEL too full in every slot, not look
+   fine until 6pm and then fall apart. The floor is 10 minutes; below
+   that a slot is a lie, so what can't get 10 minutes goes unplaced and
+   is reported instead. */
+const SLOT = { base: 25, perSubtask: 10, cap: 90, min: 10 };
+const estimateMinutes = (t) =>
+  Math.min(SLOT.cap, SLOT.base + ((t && t.subtasks) || []).length * SLOT.perSubtask);
+
+function structureDay(tasks, timings, curMin) {
+  const fajrM = minutesOf(timings.Fajr);
+  if (fajrM == null) return { slots: [], unplaced: tasks.map((t) => t.id) };
+  const sf = (m) => (((m - fajrM) % 1440) + 1440) % 1440;
+  const toClock = (m) => mm2((fajrM + m) % 1440);
+  const cur = curMin == null ? 0 : sf(curMin);
+
+  // Block windows in Fajr-space. Isha runs to the next Fajr.
+  const windows = BLOCKS.map((b) => ({
+    id: b.id,
+    start: sf(minutesOf(timings[b.startKey])),
+    end: b.endKey ? sf(minutesOf(timings[b.endKey])) : 1440,
+  }));
+
+  const slots = [], unplaced = [];
+  for (const w of windows) {
+    if (w.end <= cur) continue; // the block is over; those tasks belong to Overdue
+    const from = Math.max(w.start, cur);
+
+    const inBlock = tasks.filter((t) => !t.done && vBlock(t.block) === w.id);
+    // Anything with a fixed position stays exactly where it is and becomes an
+    // obstacle: a manually timed task, a vault window (never touched), or a
+    // start-only task, which keeps its start and gets an end by estimate.
+    const busy = [];
+    const floating = [];
+    for (const t of inBlock) {
+      const st = t.start ? minutesOf(t.start) : null;
+      if (hasVault(t) && vaultWindowed(t)) { busy.push([sf(tStartMin(t)), sf(tEndMin(t))]); continue; }
+      if (st != null && t.end) { busy.push([sf(st), sf(minutesOf(t.end))]); continue; }
+      if (st != null) {
+        const s = sf(st);
+        const e = Math.min(w.end, s + estimateMinutes(t));
+        if (e > s) { busy.push([s, e]); slots.push({ id: t.id, start: t.start, end: toClock(e), autoSlot: true, pinned: true }); }
+        continue;
+      }
+      floating.push(t);
+    }
+    if (!floating.length) continue;
+    busy.sort((a, b) => a[0] - b[0]);
+
+    // Free gaps between the obstacles, clipped to [from, w.end).
+    const gaps = [];
+    let cursor = from;
+    for (const [bs, be] of busy) {
+      if (be <= cursor) continue;
+      if (bs > cursor) gaps.push([cursor, Math.min(bs, w.end)]);
+      cursor = Math.max(cursor, be);
+      if (cursor >= w.end) break;
+    }
+    if (cursor < w.end) gaps.push([cursor, w.end]);
+    const freeTotal = gaps.reduce((n, [a, b]) => n + Math.max(0, b - a), 0);
+
+    // Scale to fit, floor at SLOT.min; whoever the floor pushes past the end
+    // of the free time goes unplaced (reported, never silently dropped).
+    const wanted = floating.map((t) => estimateMinutes(t));
+    const wantTotal = wanted.reduce((a, b) => a + b, 0);
+    const scale = wantTotal > freeTotal ? freeTotal / wantTotal : 1;
+    // Cumulative floors, not per-slot rounding: rounding each slot up can
+    // overflow the block by a minute and push the LAST task out entirely,
+    // which is exactly the silent drop this function promises not to do.
+    const durs = [];
+    let acc = 0, prev = 0;
+    for (const m of wanted) {
+      acc += m * scale;
+      const d = Math.floor(acc) - prev; prev += d;
+      durs.push(Math.max(SLOT.min, d));
+    }
+
+    let g = 0, at = gaps.length ? gaps[0][0] : w.end;
+    for (let i = 0; i < floating.length; i++) {
+      let need = durs[i], placedAt = null;
+      while (g < gaps.length) {
+        const [, ge] = gaps[g];
+        at = Math.max(at, gaps[g][0]);
+        if (ge - at >= need) { placedAt = at; at += need; break; }
+        g++; if (g < gaps.length) at = gaps[g][0];
+      }
+      if (placedAt == null) { unplaced.push(floating[i].id); continue; }
+      slots.push({ id: floating[i].id, start: toClock(placedAt), end: toClock(placedAt + need), autoSlot: true });
+    }
+  }
+  return { slots, unplaced };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Sleep — cycle arithmetic anchored on Fajr.                         */
+/* ------------------------------------------------------------------ */
+/* What this is NOT: sleep-phase detection. Knowing which phase you are
+   in takes movement or heart-rate sensing all night, which a WebView
+   cannot do — and the honest version of this feature is arithmetic:
+   sleep runs in ~90-minute cycles, waking at a cycle boundary beats
+   waking mid-cycle, and Rhythm has something most alarm apps don't —
+   a fixed, meaningful wake anchor. Count back from Fajr in whole
+   cycles, plus a fall-asleep allowance, and the alarm fires at a
+   boundary by construction rather than by measurement. */
+const SLEEP = { cycle: 90, latency: 15, maxCycles: 6, minCycles: 3 };
+
+function sleepPlan(curMin, fajrMin, cfg = SLEEP) {
+  if (fajrMin == null || curMin == null) return null;
+  const untilFajr = (((fajrMin - curMin) % 1440) + 1440) % 1440;
+  // Whole cycles that fit between falling asleep now and Fajr.
+  const cyclesIfNow = Math.max(0, Math.floor((untilFajr - cfg.latency) / cfg.cycle));
+  // Sleeping NOW, the last cycle boundary at or before Fajr:
+  const alignedWake = cyclesIfNow > 0 ? (curMin + cfg.latency + cyclesIfNow * cfg.cycle) % 1440 : null;
+  // Bedtimes that make Fajr itself a boundary, most sleep first.
+  const bedtimes = [];
+  for (let n = cfg.maxCycles; n >= cfg.minCycles; n--) {
+    const bed = (((fajrMin - cfg.latency - n * cfg.cycle) % 1440) + 1440) % 1440;
+    const lead = (((bed - curMin) % 1440) + 1440) % 1440;
+    // Only bedtimes still ahead of us on the way to THIS Fajr.
+    if (lead > 0 && lead < untilFajr) bedtimes.push({ cycles: n, at: bed });
+  }
+  return { untilFajr, cyclesIfNow, alignedWake, bedtimes };
+}
+
+/* ------------------------------------------------------------------ */
 /*  Points — what a thing is worth.                                    */
 /* ------------------------------------------------------------------ */
 /* The weight is read off signals the task already carries, because
@@ -548,4 +684,4 @@ function pushToToday(t, { activeBlock, curSinceFajr, sinceFajr }) {
   return next;
 }
 
-export { hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,POINTS,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
+export { hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,structureDay,SLEEP,sleepPlan,POINTS,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };

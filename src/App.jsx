@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins } from 'lucide-react';
-import { hasVault,vaultUnlocked,pushToToday,slotPassed,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3 } from 'lucide-react';
+import { hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { useSync, markDirty, markDeleted } from './sync.js';
 import { readLedger, balanceOf, award, revoke, spend } from './points.js';
 import { updateWidget } from './widget.js';
-import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence } from './notify.js';
+import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence, scheduleWakeAlarm, cancelWakeAlarm, pendingWakeAlarm } from './notify.js';
 import { ASSISTANT_SYSTEM, buildDaySnapshot, parseAssistantReply, callAssistant } from './assistant.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
@@ -712,6 +712,64 @@ export default function Rhythm() {
     await refreshLedger();
     flash(`${tx('Enjoy it.', 'استمتع.')} −${cost}`);
   };
+
+  /* ---- structuring the day into strict slots ---- */
+  const structureSelectedDay = () => {
+    const isToday = sameDay(addDays(weekStart, selectedDay), logicalDayMid());
+    const n = new Date(); const nowMin = n.getHours() * 60 + n.getMinutes();
+    // Re-running re-flows: anything the last run placed goes back to floating
+    // (its auto times stripped) instead of standing as an obstacle. 'end' marks
+    // a start-only pin whose start is the person's and only the end was ours.
+    const dayTasks = week.tasks
+      .filter((t) => t.day === selectedDay && !t.done)
+      .map((t) => (t.autoSlot === 'both' ? { ...t, start: '', end: '' } : t.autoSlot === 'end' ? { ...t, end: '' } : t));
+    const { slots, unplaced } = structureDay(dayTasks, timings, isToday ? nowMin : null);
+    if (!slots.length) {
+      flash(unplaced.length ? tx('No room left today for these tasks.', 'لا وقت متبقيًا اليوم لهذه المهام.') : tx('Nothing to slot.', 'لا شيء لجدولته.'));
+      return;
+    }
+    const byId = new Map(slots.map((s) => [s.id, s]));
+    persistWeek({
+      ...week,
+      tasks: week.tasks.map((t) => {
+        const s = byId.get(t.id);
+        return s ? { ...t, start: s.start, end: s.end, time: '', autoSlot: s.pinned ? 'end' : 'both' } : t;
+      }),
+    });
+    flash(unplaced.length
+      ? `${slots.length} ${tx('slotted', 'تمت جدولتها')} · ${unplaced.length} ${tx("didn't fit", 'لم تتسع لها')}`
+      : `${slots.length} ${tx('tasks slotted. Follow the clock.', 'مهمة جُدولت. اتبع الساعة.')}`);
+  };
+  const clearSlots = () => {
+    persistWeek({
+      ...week,
+      tasks: week.tasks.map((t) => (t.day !== selectedDay || !t.autoSlot ? t
+        : t.autoSlot === 'end' ? { ...t, end: '', autoSlot: null }
+        : { ...t, start: '', end: '', autoSlot: null })),
+    });
+    flash(tx('Slots cleared.', 'أُزيلت الجدولة.'));
+  };
+  const dayHasSlots = week.tasks.some((t) => t.day === selectedDay && t.autoSlot);
+
+  /* ---- sleep: cycle-aligned wake alarm (native) ---- */
+  const [alarmAt, setAlarmAt] = useState(null);
+  useEffect(() => {
+    if (!ready) return;
+    (async () => { if (await nativeShell()) setAlarmAt(await pendingWakeAlarm()); })();
+  }, [ready]);
+  // Next real occurrence of a minute-of-day: today if still ahead, else tomorrow.
+  const nextOccurrence = (minOfDay) => {
+    const d = new Date(); d.setHours(0, 0, 0, 0); d.setMinutes(minOfDay);
+    if (d.getTime() <= Date.now() + 60000) d.setDate(d.getDate() + 1);
+    return d;
+  };
+  const setWake = async (minOfDay, label) => {
+    if (!(await ensurePermission())) { flash(tx('Allow notifications first (Settings → Sync).', 'فعّل الإشعارات أولًا (الإعدادات ← المزامنة).')); return; }
+    const at = nextOccurrence(minOfDay);
+    if (await scheduleWakeAlarm(at, label)) { setAlarmAt(at); flash(`${tx('Alarm set for', 'ضُبط المنبه على')} ${fmtTime(mm2(minOfDay))}`); }
+    else flash(tx("Couldn't set the alarm.", 'تعذّر ضبط المنبه.'));
+  };
+  const clearWake = async () => { await cancelWakeAlarm(); setAlarmAt(null); flash(tx('Alarm cancelled.', 'أُلغي المنبه.')); };
 
   /* ---- overdue actions ---- */
   const completeOverdue = async (item) => {
@@ -1599,6 +1657,46 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 <div className="now-empty">{tx('Nothing scheduled today.', 'لا شيء مجدول اليوم.')} {bHint(activeBlock)}.</div>
               )}
             {!todayInView && <button className="now-jump" onClick={goToday}>{tx('Jump to today', 'انتقل إلى اليوم')}</button>}
+
+            {activeId === 'isha' && (() => {
+              const fajrMin = minutesOf(todayTimings.Fajr);
+              const plan = sleepPlan(curMin, fajrMin);
+              if (!plan) return null;
+              const hm = (mins) => `${Math.floor(mins / 60)}${tx('h', 'س')} ${mins % 60}${tx('m', 'د')}`;
+              return (
+                <div className="sleep-card">
+                  <div className="sleep-h"><Moon size={14} /> {tx('Sleep', 'النوم')}
+                    <span className="sleep-until">{tx('Fajr', 'الفجر')} {fmtTime(todayTimings.Fajr)} · {tx('in', 'بعد')} {hm(plan.untilFajr)}</span>
+                  </div>
+                  {plan.bedtimes.length > 0 && (
+                    <div className="sleep-beds">
+                      {plan.bedtimes.map((b) => (
+                        <span key={b.cycles} className="sleep-bed">
+                          <strong>{b.cycles}</strong> {tx('cycles', 'دورات')} → {tx('sleep by', 'نَم قبل')} <strong>{fmtTime(mm2(b.at))}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  <p className="sleep-now-line">
+                    {plan.cyclesIfNow > 0
+                      ? <>{tx('Sleeping now fits', 'النوم الآن يتسع لـ')} <strong>{plan.cyclesIfNow}</strong> {tx('full cycles — boundary wake at', 'دورات كاملة — استيقاظ عند حد الدورة')} <strong>{fmtTime(mm2(plan.alignedWake))}</strong>.</>
+                      : tx('Less than one full cycle until Fajr — a short nap beats a broken cycle.', 'أقل من دورة كاملة حتى الفجر — غفوة قصيرة أفضل من دورة مقطوعة.')}
+                  </p>
+                  {notifyState.supported ? (
+                    <div className="sleep-actions">
+                      <button className="ghost sm" onClick={() => setWake(fajrMin, tx('Fajr — time to wake', 'الفجر — وقت الاستيقاظ'))}><AlarmClock size={13} /> {tx('Alarm at Fajr', 'منبه عند الفجر')}</button>
+                      {plan.cyclesIfNow > 0 && plan.alignedWake !== fajrMin && (
+                        <button className="ghost sm" onClick={() => setWake(plan.alignedWake, tx('Cycle boundary — time to wake', 'حد الدورة — وقت الاستيقاظ'))}><AlarmClock size={13} /> {fmtTime(mm2(plan.alignedWake))} ({plan.cyclesIfNow} {tx('cycles', 'دورات')})</button>
+                      )}
+                      {alarmAt && <button className="ghost sm sleep-cancel" onClick={clearWake}><X size={13} /> {tx('Alarm', 'منبه')} {fmtTime(mm2(alarmAt.getHours() * 60 + alarmAt.getMinutes()))}</button>}
+                    </div>
+                  ) : (
+                    <p className="hint-text" style={{ margin: 0 }}>{tx('The wake alarm needs the Android app — times above still hold.', 'المنبه يحتاج تطبيق أندرويد — المواعيد أعلاه صحيحة على أي حال.')}</p>
+                  )}
+                  <p className="sleep-note">{tx('Arithmetic, not measurement: ~90-minute cycles plus 15 minutes to fall asleep. No phone can feel your sleep phase from the nightstand.', 'حساب لا قياس: دورات ~٩٠ دقيقة + ١٥ دقيقة للنوم. لا يمكن لهاتف أن يستشعر مرحلة نومك من على الطاولة.')}</p>
+                </div>
+              );
+            })()}
           </div>
         </div>
         );
@@ -1686,7 +1784,13 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           ))}
         </div>
 
-        <button className="plan-day-btn" onClick={startWizard}><Sparkles size={15} /> {tx('Plan the day', 'خطّط اليوم')}</button>
+        <div className="plan-actions-row">
+          <button className="plan-day-btn" onClick={startWizard}><Sparkles size={15} /> {tx('Plan the day', 'خطّط اليوم')}</button>
+          <button className="plan-day-btn slot-btn" onClick={structureSelectedDay} title={tx('Give every remaining task a strict time slot', 'امنح كل مهمة متبقية وقتًا محددًا')}>
+            <Rows3 size={15} /> {tx('Slot the day', 'جدول اليوم')}
+          </button>
+          {dayHasSlots && <button className="ghost sm" onClick={clearSlots}><X size={13} /> {tx('Clear slots', 'إزالة الجدولة')}</button>}
+        </div>
 
         {/* Day timeline (left) + Recurring/Backlog sidebar (right) — kept side by side so both stay visible as drop targets while dragging */}
         <div className="plan-columns">

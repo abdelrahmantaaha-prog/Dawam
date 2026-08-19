@@ -831,3 +831,18 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .rhythm.dark{--coin:#6FBF97;--coin-spend:#E07A7A}
 .pts-balance,.pts-reward-cost,.pts-entry-amt{color:var(--coin)}
 .pts-entry.spend .pts-entry-amt{color:var(--coin-spend)}
+
+/* ---- slotting + sleep ---- */
+.plan-actions-row{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.plan-actions-row .plan-day-btn{width:auto;flex:1;min-width:150px;margin-bottom:0}
+.sleep-card{margin-top:16px;padding:13px 14px;border:1px solid var(--line);border-radius:12px;background:var(--soft);display:flex;flex-direction:column;gap:9px}
+.sleep-h{display:flex;align-items:center;gap:7px;font-size:12px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.sleep-until{margin-inline-start:auto;letter-spacing:0;text-transform:none;font-weight:600;font-size:12.5px}
+.sleep-beds{display:flex;flex-wrap:wrap;gap:6px}
+.sleep-bed{font-size:12.5px;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:5px 9px;background:var(--panel)}
+.sleep-bed strong{color:var(--ink)}
+.sleep-now-line{margin:0;font-size:13px;color:var(--ink)}
+.sleep-actions{display:flex;flex-wrap:wrap;gap:7px}
+.sleep-cancel{color:#B23A3A}
+.rhythm.dark .sleep-cancel{color:#E07A7A}
+.sleep-note{margin:0;font-size:11px;color:var(--muted);line-height:1.5}

@@ -249,6 +249,33 @@ Two things worth knowing:
   the background, so it refreshes when the app is open or resumed. Making it
   update live while closed needs a native foreground service.
 
+## Slotting the day
+
+**Plan → "Slot the day"** gives every remaining task a strict start–end time in
+one press. Sizes are read off the task itself (25 min + 10 per subtask, capped
+at 90) — no estimate to enter, because entering estimates is the step that gets
+skipped. Manually timed tasks and vault windows stay put and everything else
+flows around them; on today, packing starts from *now*. A block holding more
+intent than time shrinks every slot in it proportionally (10-minute floor), so
+an overfull day looks overfull everywhere instead of collapsing at the end;
+what can't get even ten minutes is reported, never silently dropped. Slotted
+times are real start/end times, so reminders, the Now page's timed windows and
+the focus lock all apply. "Clear slots" removes only what the button wrote —
+hand-set times are never touched, and editing a time by hand releases that task
+from future clears.
+
+## Sleep
+
+During Isha the Now page shows bedtimes counted back from Fajr in ~90-minute
+sleep cycles (+15 min to fall asleep), what sleeping right now fits, and — in
+the Android app — one-tap wake alarms at Fajr or at the last cycle boundary
+before it. **This is arithmetic, not measurement**: real sleep-phase detection
+needs movement or heart-rate sensing all night, which no phone on a nightstand
+can honestly do. Waking at a computed cycle boundary is the defensible version.
+The alarm is a maximum-importance notification on its own channel (crank its
+sound in system settings); it is not the system alarm-clock app, and it
+respects Do Not Disturb unless you exempt the channel.
+
 ## The day, and the Now page
 
 **The day runs Fajr → next Fajr.** Between midnight and Fajr you are still in

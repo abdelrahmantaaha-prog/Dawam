@@ -354,8 +354,10 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaul
             <label><span>{tx('Project', 'المشروع')}</span><select value={task.projectRef || ''} onChange={(e) => setField('projectRef', e.target.value || null)}><option value="">{tx('— none —', '— بدون —')}</option>{allProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
             <label><span>{tx('Date', 'التاريخ')}</span><input className="time-input" type="date" value={dateISO} onChange={(e) => e.target.value && onMoveDate(e.target.value)} /></label>
             <label><span>{tx('Block', 'الفترة')}</span><select value={task.block} onChange={(e) => setField('block', e.target.value)}>{BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}</select></label>
-            <label><span>{tx('Start', 'البداية')}</span><input className="time-input" type="time" value={task.start || ''} disabled={vaultLocksTime} onChange={(e) => setField('start', e.target.value)} /></label>
-            <label><span>{tx('End', 'النهاية')}</span><input className="time-input" type="time" value={task.end || ''} disabled={vaultLocksTime} onChange={(e) => setField('end', e.target.value)} /></label>
+            {/* A hand-set time is the person's own; dropping autoSlot here keeps
+                "Clear slots" and re-slotting from ever overwriting it. */}
+            <label><span>{tx('Start', 'البداية')}</span><input className="time-input" type="time" value={task.start || ''} disabled={vaultLocksTime} onChange={(e) => onChange((t) => ({ ...t, start: e.target.value, autoSlot: null }))} /></label>
+            <label><span>{tx('End', 'النهاية')}</span><input className="time-input" type="time" value={task.end || ''} disabled={vaultLocksTime} onChange={(e) => onChange((t) => ({ ...t, end: e.target.value, autoSlot: null }))} /></label>
           </div>
           {/* The reading, and the override for when the reading is wrong. Auto is
               shown even while overridden so you can always see what you argued

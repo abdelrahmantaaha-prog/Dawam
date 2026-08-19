@@ -20,6 +20,7 @@
 /* ------------------------------------------------------------------ */
 
 const ONGOING_ID = 1;            // fixed id: rescheduling replaces it in place
+const ALARM_ID = 2;              // the single wake alarm; scheduling replaces it
 const REMINDER_BASE = 1000;      // task reminders live above this
 // Channel ids are VERSIONED. Android freezes a channel's importance at creation
 // and ignores later changes, so correcting importance means publishing a new id
@@ -27,6 +28,7 @@ const REMINDER_BASE = 1000;      // task reminders live above this
 // behaviour forever (short of reinstalling).
 const CH_REMIND = 'rhythm-reminders-v2';
 const CH_ONGOING = 'rhythm-now-v2';
+const CH_ALARM = 'rhythm-alarm-v1';
 
 /* Imported STATICALLY on purpose. These were behind dynamic import() to keep
    them out of the web bundle, but a failed chunk load then rejected out of
@@ -129,6 +131,12 @@ async function ensureChannels(ln) {
     // 2 = IMPORTANCE_LOW: silent, but still shown with a status-bar icon.
     // (1 = MIN hides the icon and collapses it, which reads as "nothing".)
     await ln.createChannel({ id: CH_ONGOING, name: 'Now', importance: 2, visibility: 1 });
+    // 5 = IMPORTANCE_MAX, its own channel so its sound/volume can be cranked in
+    // system settings independently of ordinary reminders. Honesty note: this
+    // is a maximum-priority notification with sound, not the system alarm-clock
+    // app — it rings at notification volume and respects Do Not Disturb unless
+    // the user exempts the channel.
+    await ln.createChannel({ id: CH_ALARM, name: 'Wake alarm', importance: 5, visibility: 1, vibration: true });
     channelsReady = true;
   } catch { /* channels are Android-only; harmless elsewhere */ }
 }
@@ -183,6 +191,44 @@ export async function syncReminders(items) {
       }));
     if (due.length) await ln.schedule({ notifications: due });
   } catch (e) { console.warn('reminder sync failed', e); }
+}
+
+/* The wake alarm. One at a time by design — a single fixed id means setting a
+   new one replaces the old, and there is never a forgotten alarm from
+   yesterday going off at 4am. */
+export async function scheduleWakeAlarm(at, label) {
+  const ln = get();
+  if (!ln) return false;
+  if ((await ln.checkPermissions()).display !== 'granted') return false;
+  await ensureChannels(ln);
+  try {
+    await ln.schedule({ notifications: [{
+      id: ALARM_ID,
+      title: label || 'Wake up',
+      body: '',
+      channelId: CH_ALARM,
+      schedule: { at, allowWhileIdle: true }, // exact even in Doze — the manifest carries SCHEDULE_EXACT_ALARM
+    }] });
+    return true;
+  } catch (e) { console.warn('alarm schedule failed', e); return false; }
+}
+export async function cancelWakeAlarm() {
+  const ln = get();
+  if (!ln) return;
+  try { await ln.cancel({ notifications: [{ id: ALARM_ID }] }); } catch { /* nothing pending */ }
+}
+/* When the pending alarm fires, as a Date — or null. The UI reads this instead
+   of trusting its own memory, so a force-close can't leave a ghost "alarm set"
+   badge with nothing behind it. */
+export async function pendingWakeAlarm() {
+  const ln = get();
+  if (!ln) return null;
+  try {
+    const p = await ln.getPending();
+    const hit = (p.notifications || []).find((n) => n.id === ALARM_ID);
+    const at = hit && hit.schedule && hit.schedule.at ? new Date(hit.schedule.at) : null;
+    return at && !Number.isNaN(at.getTime()) ? at : null;
+  } catch { return null; }
 }
 
 /* How many reminders Android currently holds for us — the honest answer to
