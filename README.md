@@ -43,22 +43,31 @@ The import path accepts every prior backup schema and migrates in place.
 - The PIN is a soft lock (deters casual access). It is not encryption; the data
   in localStorage is readable by anyone with technical access to the device.
 
-## AI brain-dump sorting (optional)
+## AI features (optional)
 
-The "Brain dump" box on the Plan page can file free text into your day using an
-AI model. Pick a provider and add your key under **Settings → Backup → AI
-sorting** (stored only on this device):
+The brain-dump sorter, the planning assistant and task sizing all share one
+transport: **Google Gemini (free tier) primary, Groq (free tier) as an
+automatic fallback**. Keys live under **Settings → Backup → AI features**,
+stored only on this device.
 
-- **Google Gemini — free tier.** Get a key at aistudio.google.com/apikey, no
-  card needed. Rhythm calls Flash-Lite via the `gemini-flash-lite-latest`
-  alias (with a pinned fallback), so Google's model retirements don't break the
-  sorter. Free-tier limits are per-minute and per-day (HTTP 429 when exceeded;
-  daily quota resets at midnight Pacific). Caveat: on the free tier, Google may
-  use prompts to improve its products.
-- **Anthropic (Claude)** — paid; keys at console.anthropic.com.
+- **Gemini** — get a key at aistudio.google.com/apikey, no card needed. Rhythm
+  calls Flash-Lite via the `gemini-flash-lite-latest` alias (with a pinned
+  fallback), so Google's model retirements don't break anything. Free-tier
+  limits are per-minute and per-day (HTTP 429; daily quota resets at midnight
+  Pacific). Caveat: on the free tier, Google may use prompts to improve its
+  products.
+- **Groq (optional backup)** — console.groq.com. Used automatically **only on
+  outage-type failures** (Gemini unreachable, rate-limited, or 5xx), never on
+  configuration errors: a bad key fails loudly instead of being papered over.
+  Different infrastructure, so the two rarely fail together. A Groq-only setup
+  (no Gemini key) also works.
 
-When you use the sorter, your dump text is sent to the chosen provider — an
-opt-in exception to local-only; the rest of the app never touches the network.
+There is deliberately no provider switch. An earlier version had one, and it
+was a trap: a key for one provider entered while the toggle pointed at the
+other made every AI feature die with a 401 and nothing to say why. One primary,
+one backup, zero configuration to get wrong. When you use these features, your
+text is sent to the provider — an opt-in exception to local-only; the rest of
+the app never touches the network.
 
 ## Cross-device sync
 

@@ -775,7 +775,7 @@ export default function Rhythm() {
        signature), and any failure — no key, offline, junk reply, timeout —
        falls through to the built-in heuristic without a word of ceremony:
        slotting must never be hostage to the network. */
-    let sized = 0, aiTried = false, estMap = null;
+    let sized = 0, aiTried = false, estMap = null, aiWhy = '';
     const needsEst = dayTasks.filter((t) => !(t.start && t.end) && (!t.est || t.estSig !== taskTextSig(t)));
     if (settings.apiKey && needsEst.length) {
       aiTried = true;
@@ -783,7 +783,7 @@ export default function Rhythm() {
       try {
         const listing = needsEst.map((t) => ({ id: t.id, title: t.title, steps: (t.subtasks || []).map((s) => s.title) }));
         const text = await Promise.race([
-          callAssistant({ provider: settings.aiProvider || 'anthropic', apiKey: settings.apiKey, system: ESTIMATOR_SYSTEM, messages: [{ role: 'user', content: JSON.stringify(listing) }] }),
+          callAssistant({ apiKey: settings.apiKey, groqKey: settings.groqKey, system: ESTIMATOR_SYSTEM, messages: [{ role: 'user', content: JSON.stringify(listing) }] }),
           new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 20000)),
         ]);
         const est = parseEstimates(text, needsEst.map((t) => t.id));
@@ -792,7 +792,7 @@ export default function Rhythm() {
           estMap = est;
           dayTasks = dayTasks.map((t) => (est.has(t.id) ? { ...t, est: est.get(t.id), estSig: taskTextSig(t) } : t));
         }
-      } catch { /* heuristic it is */ }
+      } catch (e) { aiWhy = String((e && e.message) || e); } // heuristic it is — but say so
       setSlotBusy(false);
     }
 
@@ -819,7 +819,11 @@ export default function Rhythm() {
       flash(unplaced.length ? tx('No room left today for these tasks.', 'لا وقت متبقيًا اليوم لهذه المهام.') : tx('Nothing to slot.', 'لا شيء لجدولته.'));
       return;
     }
-    const sizedNote = aiTried && sized ? ` · ${sized} ${tx('sized by AI', 'قُدّرت بالذكاء الاصطناعي')}` : '';
+    // A quiet AI failure looks identical to AI never having run, which reads
+    // as "the AI features are broken". Slotting still worked — say both.
+    const sizedNote = aiTried
+      ? (sized ? ` · ${sized} ${tx('sized by AI', 'قُدّرت بالذكاء الاصطناعي')}` : ` · ${tx('AI sizing failed', 'تعذّر التقدير الذكي')} (${aiWhy || tx('bad reply', 'رد غير مفهوم')})`)
+      : '';
     flash(unplaced.length
       ? `${slots.length} ${tx('slotted', 'تمت جدولتها')} · ${unplaced.length} ${tx("didn't fit", 'لم تتسع لها')}${sizedNote}`
       : `${slots.length} ${tx('tasks slotted. Follow the clock.', 'مهمة جُدولت. اتبع الساعة.')}${sizedNote}`);
@@ -1126,7 +1130,7 @@ export default function Rhythm() {
     if (!dump.trim()) return;
     // Local-only PWA: the sorter needs your own Anthropic API key, stored on-device
     // in Settings. Without one, explain rather than fail cryptically.
-    if (!settings.apiKey) { setParseError(tx('The sorter needs an API key — pick a provider and add a key under Settings → Backup → AI sorting (Google Gemini has a free tier). Stored only on this device.', 'يحتاج الفرز إلى مفتاح — اختر مزوّدًا وأضف مفتاحًا من الإعدادات ← النسخ ← الفرز الذكي (لدى Google Gemini خطة مجانية). يُحفظ على هذا الجهاز فقط.')); return; }
+    if (!settings.apiKey && !settings.groqKey) { setParseError(tx('The sorter needs a key — add a free Gemini key under Settings → AI sorting (aistudio.google.com/apikey). Stored only on this device.', 'يحتاج الفرز إلى مفتاح — أضف مفتاح Gemini مجانيًا من الإعدادات ← الفرز الذكي (aistudio.google.com/apikey). يُحفظ على هذا الجهاز فقط.')); return; }
     setParsing(true); setParseError(''); setPreview(null);
     const dayList = Array.from({ length: 7 }, (_, i) => { const d = addDays(weekStart, i); return `${i}=${wdFull(d.getDay())} ${d.getDate()} ${mon(d.getMonth())}`; }).join(', ');
     const existing = week.tasks.map((t) => `{id:"${t.id}", title:"${t.title.replace(/"/g, "'")}", day:${t.day}, block:"${t.block}"}`).join('\n');
@@ -1152,26 +1156,18 @@ Rules:
 
 Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     try {
-      let res;
+      // Shared transport: Gemini primary, Groq fallback on outages — one
+      // implementation for the sorter, the chat and the estimator, so they
+      // can never disagree about how to reach a model.
+      let text;
       try {
-        if (settings.aiProvider === 'gemini') {
-          // Gemini's OpenAI-compatible endpoint; free-tier keys from aistudio.google.com/apikey.
-          // The "-latest" alias tracks the newest Flash-Lite so model retirements
-          // (2.0-flash died 2026-03-03 and broke exactly this call) can't silently
-          // return; a pinned fallback covers the alias being unavailable.
-          const geminiCall = (model) => fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${settings.apiKey}` }, body: JSON.stringify({ model, max_tokens: 4096, messages: [{ role: 'system', content: system }, { role: 'user', content: dump.trim() }] }) });
-          res = await geminiCall('gemini-flash-lite-latest');
-          if (res.status === 404 || res.status === 400) res = await geminiCall('gemini-2.5-flash-lite');
-        } else {
-          res = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-api-key': settings.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' }, body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 4096, system, messages: [{ role: 'user', content: dump.trim() }] }) });
-        }
-      } catch { setParseError("Can't reach the sorter — this view can't call Claude's API. Add items by hand instead."); setParsing(false); return; }
-      if (res.status === 429) { setParseError(settings.aiProvider === 'gemini' ? tx('Gemini free-tier limit hit (per-minute or daily). Wait a minute and retry — daily quotas reset at midnight Pacific.', 'تم بلوغ حد Gemini المجاني (بالدقيقة أو اليومي). انتظر دقيقة وأعد المحاولة — تتجدد الحصة اليومية منتصف الليل بتوقيت المحيط الهادئ.') : tx('Rate limit hit (HTTP 429). Wait a moment and retry.', 'تم بلوغ حد المعدل (429). انتظر قليلًا وأعد المحاولة.')); setParsing(false); return; }
-      if (!res.ok) { setParseError(`Sorter request failed (HTTP ${res.status}). Add items by hand instead.`); setParsing(false); return; }
-      const data = await res.json();
-      const text = settings.aiProvider === 'gemini'
-        ? (data.choices?.[0]?.message?.content || '')
-        : (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+        text = await callAssistant({ apiKey: settings.apiKey, groqKey: settings.groqKey, system, messages: [{ role: 'user', content: dump.trim() }], maxTokens: 4096 });
+      } catch (e) {
+        setParseError(e.code === 'rate'
+          ? tx('Free-tier limit hit (per-minute or daily). Wait a minute and retry — daily quotas reset at midnight Pacific.', 'تم بلوغ الحد المجاني (بالدقيقة أو اليومي). انتظر دقيقة وأعد المحاولة — تتجدد الحصة اليومية منتصف الليل بتوقيت المحيط الهادئ.')
+          : `${tx('Sorter request failed', 'فشل طلب الفرز')} (${e.message || e}). ${tx('Add items by hand instead.', 'أضف العناصر يدويًا.')}`);
+        setParsing(false); return;
+      }
       let clean = text.replace(/```json|```/g, '').trim();
       const a = clean.indexOf('{'); const b = clean.lastIndexOf('}');
       if (a > -1 && b > a) clean = clean.slice(a, b + 1);
@@ -1327,7 +1323,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     setChatInput('');
     try {
       const messages = [...prior, { role: 'user', content: `Current state of my planner:\n\n${buildSnapshot()}\n\n---\n${q}` }];
-      const text = await callAssistant({ provider: settings.aiProvider || 'anthropic', apiKey: settings.apiKey, system: ASSISTANT_SYSTEM, messages });
+      const text = await callAssistant({ apiKey: settings.apiKey, groqKey: settings.groqKey, system: ASSISTANT_SYSTEM, messages });
       const { reply, proposals } = parseAssistantReply(text, chatIds());
       setChatMsgs((prev) => [...prev, { role: 'assistant', text: reply, proposals, applied: {} }]);
     } catch (e) {

@@ -182,27 +182,59 @@ export function parseAssistantReply(text, ids = {}) {
 }
 
 /* Provider call — mirrors the brain-dump sorter's shapes. */
-export async function callAssistant({ provider, apiKey, system, messages }) {
-  if (provider === 'gemini') {
-    const call = (model) => fetch('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, max_tokens: 1500, messages: [{ role: 'system', content: system }, ...messages] }),
-    });
-    let res = await call('gemini-flash-lite-latest');
-    if (res.status === 404 || res.status === 400) res = await call('gemini-2.5-flash-lite');
-    if (res.status === 429) { const e = new Error('rate'); e.code = 'rate'; throw e; }
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    return data.choices?.[0]?.message?.content || '';
-  }
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+/* Transport: Gemini primary, Groq fallback — the Loqma playbook.
+
+   One provider dimension fewer is the point. The old provider toggle was a
+   trap: enter a Gemini key while the toggle sat on Anthropic (the default)
+   and every feature sent the wrong key to the wrong API and died with a 401 —
+   "the AI features don't work" with nothing to say why. Now there is exactly
+   one primary (Gemini, free tier) and one optional backup (Groq, free tier,
+   different infrastructure, so the two rarely fail together).
+
+   The fallback fires ONLY on outage-type failures — unreachable, 429,
+   5xx — never on config errors: a 401 means the key is wrong, and hiding
+   that behind a fallback would just move the confusion. */
+const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions';
+const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL = 'openai/gpt-oss-120b';
+
+const rateError = () => { const e = new Error('rate'); e.code = 'rate'; return e; };
+
+export async function callAssistant({ apiKey, groqKey, system, messages, maxTokens = 1500 }) {
+  const post = (url, key, model) => fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-    body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1500, system, messages }),
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model, max_tokens: maxTokens, messages: [{ role: 'system', content: system }, ...messages] }),
   });
-  if (res.status === 429) { const e = new Error('rate'); e.code = 'rate'; throw e; }
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const data = await res.json();
-  return (data.content || []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+  const read = async (res) => { const data = await res.json(); return data.choices?.[0]?.message?.content || ''; };
+
+  const groq = async () => {
+    const res = await post(GROQ_URL, groqKey, GROQ_MODEL);
+    if (res.status === 429) throw rateError();
+    if (!res.ok) throw new Error(`Groq HTTP ${res.status}`);
+    return read(res);
+  };
+
+  if (!apiKey) {
+    if (groqKey) return groq(); // Groq-only setup is a fine way to run
+    throw new Error('no API key');
+  }
+
+  let res;
+  try {
+    // "-latest" tracks the newest Flash-Lite so model retirements can't
+    // silently break this call; the pinned name covers the alias being down.
+    res = await post(GEMINI_URL, apiKey, 'gemini-flash-lite-latest');
+    if (res.status === 404 || res.status === 400) res = await post(GEMINI_URL, apiKey, 'gemini-2.5-flash-lite');
+  } catch (e) {
+    if (groqKey) return groq(); // network failure — the definition of an outage
+    throw new Error('offline');
+  }
+  if (res.status === 429 || res.status >= 500) {
+    if (groqKey) { try { return await groq(); } catch { /* report Gemini's failure below */ } }
+    if (res.status === 429) throw rateError();
+    throw new Error(`HTTP ${res.status}`);
+  }
+  if (!res.ok) throw new Error(`HTTP ${res.status}`); // 401/403: config, not outage — no fallback
+  return read(res);
 }

@@ -539,3 +539,20 @@ describe('estimateMinutes — memory and AI beat the heuristic', () => {
     expect(r.slots[0]).toMatchObject({ start: '05:50', end: '06:30' });
   });
 });
+
+describe('migrateSettings — the Anthropic path is gone', () => {
+  it('clears a stranded sk-ant key instead of letting every AI call 401 forever', () => {
+    const m = migrateSettings({ apiKey: 'sk-ant-abc123', aiProvider: 'anthropic' });
+    expect(m.apiKey).toBe('');
+    expect(m.aiProvider).toBeUndefined();
+  });
+  it('keeps a Gemini key even when the old toggle pointed at Anthropic', () => {
+    // The trap this migration heals: right key, wrong toggle, dead features.
+    const m = migrateSettings({ apiKey: 'AIzaSyExample', aiProvider: 'anthropic' });
+    expect(m.apiKey).toBe('AIzaSyExample');
+  });
+  it('defaults groqKey and preserves a stored one', () => {
+    expect(migrateSettings({}).groqKey).toBe('');
+    expect(migrateSettings({ groqKey: 'gsk_x' }).groqKey).toBe('gsk_x');
+  });
+});

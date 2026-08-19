@@ -274,7 +274,7 @@ const DEFAULT_SETTINGS = {
   habits: [],
   pin: null,           // { hash, salt } — soft lock, not encryption
   apiKey: '',          // optional API key for the brain-dump sorter (stored locally only)
-  aiProvider: 'anthropic', // 'anthropic' (paid) or 'gemini' (free tier)
+  groqKey: '',         // optional Groq key — free-tier fallback when Gemini is down
   autoDark: true,      // switch the interface to dark at night (Maghrib→Sunrise)
   rewards: [],         // what points buy — you set the prices, which is what makes them mean anything
   weekStartDay: 6,
@@ -363,8 +363,14 @@ function migrateSettings(s) {
   base.lang = s.lang === 'ar' ? 'ar' : 'en';
   base.habits = Array.isArray(s.habits) ? s.habits : [];
   base.pin = s.pin && s.pin.hash ? s.pin : null;
-  base.apiKey = typeof s.apiKey === 'string' ? s.apiKey : '';
-  base.aiProvider = s.aiProvider === 'gemini' ? 'gemini' : 'anthropic';
+  // The Anthropic path was removed: an sk-ant key can never work again, and
+  // keeping it around means every AI feature fails a 401 forever with the
+  // settings looking configured. Clearing it makes "add a Gemini key" the
+  // visible next step. delete keeps old exports importable without reviving
+  // the provider switch.
+  base.apiKey = typeof s.apiKey === 'string' && !/^sk-ant/.test(s.apiKey) ? s.apiKey : '';
+  base.groqKey = typeof s.groqKey === 'string' ? s.groqKey : '';
+  delete base.aiProvider;
   base.autoDark = s.autoDark !== false;
   base.rewards = Array.isArray(s.rewards) ? s.rewards : [];
   return base;
