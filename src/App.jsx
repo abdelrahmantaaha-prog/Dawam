@@ -5,6 +5,7 @@ import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable,
 import { useSync, markDirty, markDeleted } from './sync.js';
 import { readLedger, balanceOf, award, revoke, spend } from './points.js';
 import { updateWidget } from './widget.js';
+import { writeNowFile } from './nowfile.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence, scheduleWakeAlarm, cancelWakeAlarm, pendingWakeAlarm } from './notify.js';
 import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, parseAssistantReply, parseEstimates, callAssistant } from './assistant.js';
 import { loadDurations, durationFor, rememberDuration } from './durations.js';
@@ -1477,6 +1478,12 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   useEffect(() => {
     if (!ready) return;
     updateWidget(widgetPayload);
+    /* Same payload, same trigger, out to a file Bawwab can read. It gates the
+       phone by the clock and has never known what the hour was for, so a
+       refusal there is subtraction and nothing else — this gives it something
+       to offer instead. Failure is swallowed inside; the planner does not
+       depend on it. */
+    writeNowFile(widgetPayload);
   }, [ready, widgetKey]); // eslint-disable-line
 
   useEffect(() => {
