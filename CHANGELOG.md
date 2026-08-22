@@ -7,6 +7,48 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ---
 
+## [2.5] — 2026-08-22
+
+Anchor moves in. Rhythm becomes a desktop app that contains the whole focus
+suite, and the two halves are wired together at the only seam that matters:
+the round you run is the task you planned.
+
+### Added
+- **Rhythm Desktop** (`desktop/`) — an Electron shell that runs the planner in
+  its own window and everything Anchor used to be in the same process: the
+  always-on-top overlay, foreground-window polling through the PowerShell
+  sidecar, drift nudges and force-return, break and away blackouts, chair
+  detection, hard blocks and free times. Anchor is no longer a separate app.
+- **Focus view** (`src/focus.jsx`) — start a round from one of today's tasks,
+  a saved template or an ad-hoc title; a live card with the clock, drift state
+  and the triage question; today's rounds and focus rate; and every focus
+  setting, all in Rhythm's own surfaces and in both languages.
+- **Rounds are linked to tasks.** A round started from a planned task carries
+  its id. When the round ends, the planner is raised and asked whether that
+  finishes the task — ticking it off marks it done and records what the work
+  actually took.
+- **Durations learned from measurement.** A finished round writes its measured
+  minutes into duration memory as `kept`, so future slotting is sized by real
+  time rather than an estimate. A duration set by hand still outranks it.
+- `npm run desktop:smoke` — an end-to-end test that launches the app against a
+  throwaway profile and drives a real round over the DevTools protocol, proving
+  the planner ↔ session ↔ planner round trip.
+
+### Changed
+- **"Focus this" is the real thing on the desktop.** Task and habit focus used
+  to start an in-app countdown; where the shell exists it now starts a proper
+  round with the overlay and the drift watch. The countdown remains the web and
+  Android behaviour.
+- The desktop build (`RHYTHM_DESKTOP=1`) leaves the PWA plugin out. The planner
+  is served from `rhythm://app` — a registered scheme, so `localStorage` keeps
+  one fixed origin for the life of the app — and service workers cannot
+  register on anything but http(s).
+- Anchor's `%APPDATA%/anchor/anchor-data.json` is adopted on first launch:
+  settings, templates, learned filters and history come across. Anchor's own
+  file is left untouched.
+
+---
+
 ## [2.4] — 2026-07-12
 
 Sync becomes sign-in-and-go, prayers join habits as built-ins, the interface

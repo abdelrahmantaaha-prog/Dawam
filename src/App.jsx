@@ -9,6 +9,7 @@ import { writeNowFile } from './nowfile.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence, scheduleWakeAlarm, cancelWakeAlarm, pendingWakeAlarm } from './notify.js';
 import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, parseAssistantReply, parseEstimates, callAssistant } from './assistant.js';
 import { loadDurations, durationFor, rememberDuration } from './durations.js';
+import { FocusView, isDesktop, useRoundEnded } from './focus.jsx';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
@@ -27,7 +28,11 @@ export default function Rhythm() {
   const [todayData, setTodayData] = useState(null);
   const [nowTick, setNowTick] = useState(0);
   const [storageOk, setStorageOk] = useState(true);
-  const [view, setView] = useState('now');         // 'overdue' | 'now' | 'plan'
+  const [view, setView] = useState('now');         // 'overdue' | 'now' | 'plan' | 'focus'
+  // The last focus round that ended and has not been answered yet. The shell
+  // raises the window when a round linked to a task finishes, so the question
+  // lands in front of the person while the answer still means something.
+  const [pendingRound, setPendingRound] = useState(null);
   const [overdue, setOverdue] = useState([]);
   const [refresh, setRefresh] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1005,6 +1010,15 @@ export default function Rhythm() {
         endsAt = ms;
       }
     }
+    if (isDesktop()) {
+      const mins = Math.max(1, Math.round((endsAt - now) / 60000));
+      // Habits come through here too, and a habit id is not a task id — only
+      // pass one the planner can actually tick off afterwards.
+      const known = (weekRef.current.tasks || []).some((x) => x.id === task.id);
+      window.rhythmFocus.startWork({ task: task.title || 'Focus', workMin: mins, allowed: [], taskId: known ? task.id : null });
+      setView('focus');
+      return;
+    }
     setFocus({ id: task.id, title: task.title || 'Focus', endsAt });
   };
   useEffect(() => {
@@ -1242,6 +1256,25 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   // time; checking it reveals the next.
   const blockIdx = (id) => BLOCKS.findIndex((b) => b.id === id);
   const nowList = todayTasks.slice().sort((a, b) => (blockIdx(a.block) - blockIdx(b.block)) || (a.done - b.done) || (a.order - b.order));
+  /* ---- focus suite (desktop only) ----
+     What can be focused on: today's unfinished tasks, sized by their own slot
+     when they have one and by what past rounds taught us when they don't. A
+     vaulted task is left out — its point is a time window, not a work session. */
+  const focusTasks = nowList
+    .filter((t) => !t.done && !hasVault(t))
+    .map((t) => ({ id: t.id, title: t.title, minutes: spanOf(t) || durationFor(t.title) || null, when: timeLabel(t) }));
+  // Measured time is stronger evidence than a slot the person drew, so it is
+  // written after toggleDone's own guess — but still as 'kept', so a duration
+  // they typed themselves is never overwritten by a round that ran short.
+  const focusMarkDone = (id, minutes) => {
+    const t = (weekRef.current.tasks || []).find((x) => x.id === id);
+    if (!t) return;
+    if (!t.done) toggleDone(id);
+    rememberDuration(t.title, minutes, 'kept');
+  };
+  const focusLearn = (title, minutes) => { rememberDuration(title, minutes, 'kept'); };
+  useRoundEnded((entry) => { setPendingRound(entry); setView('focus'); });
+
   const nowStart = cleanTime(todayTimings[activeBlock.startKey]) || '';
   const nowEnd = activeBlock.endKey ? cleanTime(todayTimings[activeBlock.endKey]) || '' : '';
   const clockLabel = `${((now.getHours() + 11) % 12) + 1}:${pad(now.getMinutes())} ${now.getHours() < 12 ? 'AM' : 'PM'}`;
@@ -2207,6 +2240,17 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         </div>
       )}
 
+      {view === 'focus' && isDesktop() && (
+        <FocusView
+          tasks={focusTasks}
+          durationFor={durationFor}
+          pendingRound={pendingRound}
+          onDismissRound={() => setPendingRound(null)}
+          onMarkTaskDone={focusMarkDone}
+          onLearnDuration={focusLearn}
+        />
+      )}
+
       {locked && settings.pin && (
         <PinScreen onVerify={verifyPin} onSuccess={() => setLocked(false)} />
       )}
@@ -2230,6 +2274,12 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         <button className={`navbtn ${view === 'habits' ? 'on' : ''}`} onClick={() => setView('habits')} aria-label={tx('Habits', 'العادات')}>
           <Flame size={20} /><span className="navlabel">{tx('Habits', 'عادات')}</span>
         </button>
+        {isDesktop() && (
+          <button className={`navbtn ${view === 'focus' ? 'on' : ''}`} onClick={() => setView('focus')} aria-label={tx('Focus', 'تركيز')}>
+            <AlarmClock size={20} /><span className="navlabel">{tx('Focus', 'تركيز')}</span>
+            {pendingRound && <span className="navbadge">1</span>}
+          </button>
+        )}
       </nav>
     </div>
   );

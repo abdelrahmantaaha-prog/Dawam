@@ -1,0 +1,116 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  background: transparent;
+  overflow: hidden;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  user-select: none;
+}
+
+#card {
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 84px;
+  margin: 4px;
+  padding: 0 14px;
+  border-radius: 16px;
+  background: rgba(17, 20, 26, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  transition: border-color 0.3s, background 0.3s;
+}
+
+/* No clock on the widget by design — just a state light, so the
+   countdown itself never becomes the distraction. */
+#dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #2dd4bf;
+  box-shadow: 0 0 10px rgba(45, 212, 191, 0.7);
+  transition: background 0.3s, box-shadow 0.3s;
+}
+
+.mid { flex: 1; min-width: 0; }
+
+#task {
+  color: #e5e7eb;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#sub {
+  color: #8b93a3;
+  font-size: 11.5px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.btns {
+  -webkit-app-region: no-drag;
+  display: flex;
+  gap: 6px;
+}
+
+.btns button {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: #cbd2dd;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btns button:hover { background: rgba(255, 255, 255, 0.18); }
+
+/* phase styling */
+#card.idle #dot { background: #6b7280; box-shadow: none; }
+
+#card.break { border-color: rgba(96, 165, 250, 0.5); }
+#card.break #dot { background: #60a5fa; box-shadow: 0 0 10px rgba(96, 165, 250, 0.7); }
+
+#card.paused #dot { background: #9ca3af; box-shadow: none; }
+
+#card.drifting {
+  border-color: rgba(245, 158, 11, 0.9);
+  background: rgba(46, 32, 10, 0.95);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+#card.drifting #dot { background: #f59e0b; box-shadow: 0 0 10px rgba(245, 158, 11, 0.8); }
+#card.drifting #sub { color: #fbbf24; font-weight: 600; }
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+  50% { box-shadow: 0 0 22px rgba(245, 158, 11, 0.65); }
+}
+
+/* triage buttons: shown in place of the standard buttons while a
+   "work or distraction?" question is pending — the card never resizes. */
+#askBtns[hidden], #stdBtns[hidden] { display: none; }
+
+#askBtns .pill {
+  width: auto;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+#askBtns .pill.work { background: rgba(45, 212, 191, 0.2); color: #2dd4bf; }
+#askBtns .pill.dist { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+#askBtns #askLater { width: 24px; height: 26px; font-size: 10px; }
+#askBtns button:hover { filter: brightness(1.35); }
+
+/* asking state gets a blue accent so it reads as a question, not an alarm
+   (unless drifting styling overrides it) */
+#card.asking { border-color: rgba(96, 165, 250, 0.55); }

@@ -1,0 +1,73 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  overflow: hidden;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  user-select: none;
+  cursor: none;
+}
+
+#wrap {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3vh;
+}
+
+#msg {
+  color: #3f4754;
+  font-size: 2.6vw;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+#count {
+  color: #9ca8b8;
+  font-size: 13vw;
+  font-weight: 200;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+#sub {
+  color: #2b313c;
+  font-size: 1.2vw;
+  letter-spacing: 0.08em;
+}
+
+/* hold-to-skip: deliberately dim and small, in the corner */
+#skip {
+  position: fixed;
+  right: 28px;
+  bottom: 24px;
+  background: none;
+  border: 1px solid #22272f;
+  border-radius: 999px;
+  color: #3f4754;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  padding: 10px 20px;
+  cursor: pointer;
+  overflow: hidden;
+}
+#skip:hover { color: #8b93a3; border-color: #3f4754; }
+
+#skipLabel { position: relative; z-index: 1; }
+
+#skipFill {
+  position: absolute;
+  inset: 0;
+  width: 0%;
+  background: rgba(96, 165, 250, 0.25);
+}
+#skip.holding #skipFill {
+  width: 100%;
+  transition: width 5s linear;
+}

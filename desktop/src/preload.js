@@ -1,0 +1,39 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+/* The one bridge, shared by the planner window and the focus windows.
+
+   Its presence is also how the planner knows it is on the desktop: the web
+   and Android builds see `window.rhythmFocus === undefined` and hide the
+   focus suite entirely, rather than shipping dead buttons. */
+contextBridge.exposeInMainWorld('rhythmFocus', {
+  desktop: true,
+  getState: () => ipcRenderer.invoke('get-state'),
+  getData: () => ipcRenderer.invoke('get-data'),
+  // req: { task, workMin, allowed, taskId }
+  startWork: (req) => ipcRenderer.invoke('start-work', req),
+  saveTemplate: (tpl) => ipcRenderer.invoke('save-template', tpl),
+  deleteTemplate: (id) => ipcRenderer.invoke('delete-template', id),
+  triageVerdict: (key, verdict) => ipcRenderer.invoke('triage-verdict', key, verdict),
+  triageSnooze: (key) => ipcRenderer.invoke('triage-snooze', key),
+  templateVerdict: (id, key, verdict) => ipcRenderer.invoke('template-verdict', id, key, verdict),
+  presenceReport: (present) => ipcRenderer.invoke('presence-report', present),
+  awayDismiss: () => ipcRenderer.invoke('away-dismiss'),
+  pause: () => ipcRenderer.invoke('pause'),
+  resume: () => ipcRenderer.invoke('resume'),
+  stop: () => ipcRenderer.invoke('stop'),
+  skipBreak: () => ipcRenderer.invoke('skip-break'),
+  saveSettings: (patch) => ipcRenderer.invoke('save-settings', patch),
+  openPlanner: () => ipcRenderer.invoke('open-planner'),
+  // Listeners return their own unsubscribe — React effects need to clean up,
+  // and a planner that re-renders must not stack duplicate handlers.
+  onState: (cb) => sub('state', (_e, s) => cb(s)),
+  onNudge: (cb) => sub('nudge', (_e, info) => cb(info)),
+  onRoundEnded: (cb) => sub('round-ended', (_e, entry) => cb(entry)),
+  onHistoryChanged: (cb) => sub('history-changed', () => cb()),
+  onDataChanged: (cb) => sub('data-changed', () => cb())
+});
+
+function sub(channel, handler) {
+  ipcRenderer.on(channel, handler);
+  return () => ipcRenderer.removeListener(channel, handler);
+}

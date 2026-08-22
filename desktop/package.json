@@ -1,0 +1,21 @@
+{
+  "name": "rhythm-desktop",
+  "productName": "Rhythm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Rhythm on the desktop — the planner window plus the focus suite (the app formerly known as Anchor).",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "smoke": "node smoke.mjs"
+  },
+  "author": "Abdelrahman Taha",
+  "license": "MIT",
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0"
+  }
+}

@@ -40,11 +40,17 @@ function devSyncApi() {
   };
 }
 
+/* The desktop shell serves this build from rhythm://app, a registered scheme
+   rather than http. Service workers refuse to register on anything but http(s),
+   so the PWA plugin is left out of that build entirely — an installable app has
+   no use for it, and its registration only ever produced a console error. */
+const DESKTOP = !!process.env.RHYTHM_DESKTOP;
+
 export default defineConfig({
   plugins: [
     devSyncApi(),
     react(),
-    VitePWA({
+    ...(DESKTOP ? [] : [VitePWA({
       registerType: 'autoUpdate',
       injectRegister: 'auto',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
@@ -76,6 +82,6 @@ export default defineConfig({
           { urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i, handler: 'CacheFirst', options: { cacheName: 'google-fonts-files', expiration: { maxEntries: 24, maxAgeSeconds: 60 * 60 * 24 * 365 } } },
         ],
       },
-    }),
+    })]),
   ],
 });

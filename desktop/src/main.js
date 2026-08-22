@@ -1,0 +1,595 @@
+/* Rhythm desktop — the planner and the focus suite in one process.
+
+   The planner is Rhythm's own web build, loaded into the main window. The
+   focus half is Anchor, brought over whole: the same PowerShell foreground
+   poller, the same session state machine, the same overlay / break / away
+   windows. What is new is the seam between them — a focus round can be
+   started from a real planned task, and when the round ends the planner is
+   told, so the task can be ticked off and its true duration remembered.
+
+   Nothing here reaches the network. The planner talks to its own sync API
+   only if the build was given VITE_API_BASE. */
+
+const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, nativeImage, screen, protocol, shell } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const Store = require('./store');
+const SessionManager = require('./session');
+const { startPoller, startEnforcer } = require('./poller');
+
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+
+const DEV = process.argv.includes('--dev');
+const DEV_URL = process.env.RHYTHM_DEV_URL || 'http://127.0.0.1:5199';
+const DIST = path.join(__dirname, '..', '..', 'dist');
+
+/* The planner is served from rhythm://app rather than file://.
+
+   Origin is the reason. Rhythm keeps everything in localStorage, and
+   localStorage is keyed by origin — file:// gives each document its own
+   opaque one, and a localhost server would move the data every time the port
+   changed. A registered standard scheme is one fixed, secure origin for the
+   life of the app, so a plan written today is still there after an update. */
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'rhythm', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
+]);
+
+const MIME = {
+  '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript',
+  '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp', '.ico': 'image/x-icon', '.woff': 'font/woff',
+  '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.webmanifest': 'application/manifest+json',
+  '.txt': 'text/plain', '.map': 'application/json'
+};
+
+function serveDist(req) {
+  const url = new URL(req.url);
+  let rel = decodeURIComponent(url.pathname);
+  // Single-page app: anything without a file extension is a route, not a file.
+  if (rel === '/' || !path.extname(rel)) rel = '/index.html';
+  const file = path.join(DIST, path.normalize(rel).replace(/^[\\/]+/, ''));
+  // path.normalize collapses "..", but a crafted path could still climb out.
+  if (!file.startsWith(DIST)) return new Response('Forbidden', { status: 403 });
+  try {
+    const body = fs.readFileSync(file);
+    return new Response(body, { headers: { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream' } });
+  } catch {
+    return new Response('Not found', { status: 404 });
+  }
+}
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  let planner = null;   // the Rhythm window — the app's face
+  let overlay = null;
+  let tray = null;
+  let quitting = false;
+  let poller = null;
+  let enforcer = null;
+  let breakWins = [];
+  let presenceWin = null;
+  let awayWins = [];
+  let lastPresentAt = Date.now();
+  let awaySuppressed = false; // manual dismiss holds until the camera sees a face again
+  let awayPaused = false; // we paused the session because the chair emptied
+  let camFailed = false; // permanent: no camera / permission denied
+  let camRetryAt = 0; // transient failure (camera busy in a call): retry after this
+
+  const store = new Store();
+  let sessions = null;
+
+  const iconPath = path.join(__dirname, '..', 'assets', 'icon.png');
+  const icon = () => nativeImage.createFromPath(iconPath);
+  const winFile = (name) => path.join(__dirname, 'windows', name);
+  const preload = path.join(__dirname, 'preload.js');
+
+  function broadcast(channel, payload) {
+    for (const win of [planner, overlay, ...breakWins, ...awayWins]) {
+      if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
+    }
+  }
+
+  // Full-screen black break screens, one per display — a forced screensaver
+  // so breaks are actually taken away from the PC.
+  function showBreakScreens() {
+    if (breakWins.length) return;
+    for (const d of screen.getAllDisplays()) {
+      const win = new BrowserWindow({
+        x: d.bounds.x,
+        y: d.bounds.y,
+        width: d.bounds.width,
+        height: d.bounds.height,
+        frame: false,
+        fullscreen: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        backgroundColor: '#000000',
+        icon: icon(),
+        webPreferences: { preload }
+      });
+      win.setAlwaysOnTop(true, 'screen-saver');
+      win.on('close', (e) => {
+        // Alt+F4 shouldn't be a cheap exit — skipping requires the hold button.
+        if (!quitting) e.preventDefault();
+      });
+      win.loadFile(winFile('break.html'));
+      breakWins.push(win);
+    }
+  }
+
+  function hideBreakScreens() {
+    for (const win of breakWins) {
+      if (!win.isDestroyed()) win.destroy();
+    }
+    breakWins = [];
+  }
+
+  // Chair detection: a hidden window samples the webcam through a local face
+  // detector while a work session runs. webSecurity is off ONLY here so the
+  // detector can fetch its wasm + model over file:// — the window never loads
+  // remote content.
+  function ensurePresenceWindow(state) {
+    // An away-pause must NOT tear down the camera — it's the only way to
+    // notice the user coming back.
+    const want =
+      state.phase === 'work' &&
+      (!state.paused || awayPaused) &&
+      store.data.settings.chairDetect &&
+      !camFailed;
+    if (want && !presenceWin && Date.now() >= camRetryAt) {
+      lastPresentAt = Date.now(); // camera warm-up grace
+      presenceWin = new BrowserWindow({
+        show: false,
+        webPreferences: { preload, webSecurity: false, backgroundThrottling: false }
+      });
+      presenceWin.webContents.on('console-message', (_e, level, message) => {
+        if (level >= 2) console.error('[presence]', message);
+      });
+      presenceWin.loadFile(winFile('presence.html'));
+    } else if (!want && presenceWin) {
+      if (!presenceWin.isDestroyed()) presenceWin.destroy();
+      presenceWin = null;
+      hideAwayScreens();
+    }
+  }
+
+  function showAwayScreens() {
+    if (awayWins.length) return;
+    for (const d of screen.getAllDisplays()) {
+      const win = new BrowserWindow({
+        x: d.bounds.x,
+        y: d.bounds.y,
+        width: d.bounds.width,
+        height: d.bounds.height,
+        frame: false,
+        fullscreen: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        backgroundColor: '#000000',
+        icon: icon(),
+        webPreferences: { preload }
+      });
+      win.setAlwaysOnTop(true, 'screen-saver');
+      win.on('close', (e) => {
+        if (!quitting) e.preventDefault();
+      });
+      win.loadFile(winFile('away.html'));
+      awayWins.push(win);
+    }
+    // The empty chair stops the clock — away time shouldn't eat the round.
+    const s = sessions.getState();
+    if (s.phase === 'work' && !s.paused) {
+      awayPaused = true;
+      sessions.pause();
+    }
+  }
+
+  function hideAwayScreens() {
+    for (const win of awayWins) {
+      if (!win.isDestroyed()) win.destroy();
+    }
+    awayWins = [];
+    if (awayPaused) {
+      awayPaused = false;
+      const s = sessions.getState();
+      if (s.phase === 'work' && s.paused) sessions.resume();
+    }
+  }
+
+  function notify(title, body) {
+    if (Notification.isSupported()) {
+      new Notification({ title, body, icon: icon() }).show();
+    }
+  }
+
+  function createOverlay() {
+    const W = 340;
+    const H = 92;
+    const pos = store.data.settings.overlayPos;
+    const wa = screen.getPrimaryDisplay().workArea;
+    const x = pos ? pos.x : wa.x + wa.width - W - 16;
+    const y = pos ? pos.y : wa.y + 16;
+
+    overlay = new BrowserWindow({
+      width: W,
+      height: H,
+      x,
+      y,
+      frame: false,
+      transparent: true,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      resizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      icon: icon(),
+      webPreferences: { preload }
+    });
+    overlay.setAlwaysOnTop(true, 'screen-saver');
+    overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    overlay.webContents.on('console-message', (_e, level, message) => {
+      if (level >= 2) console.error('[overlay]', message);
+    });
+    overlay.loadFile(winFile('overlay.html'));
+
+    overlay.on('moved', () => {
+      const [ox, oy] = overlay.getPosition();
+      store.data.settings.overlayPos = { x: ox, y: oy };
+      store.save();
+    });
+  }
+
+  function createPlanner() {
+    planner = new BrowserWindow({
+      width: 1120,
+      height: 780,
+      minWidth: 360,
+      minHeight: 560,
+      show: false,
+      autoHideMenuBar: true,
+      icon: icon(),
+      backgroundColor: '#F4FAF6',
+      webPreferences: { preload }
+    });
+    planner.webContents.on('console-message', (_e, level, message) => {
+      if (level >= 2) console.error('[planner]', message);
+    });
+    // Links out of the planner belong in the real browser, not in a window
+    // with the focus API attached to it.
+    planner.webContents.setWindowOpenHandler(({ url }) => {
+      if (/^https?:/.test(url)) shell.openExternal(url);
+      return { action: 'deny' };
+    });
+    planner.webContents.on('will-navigate', (e, url) => {
+      if (!url.startsWith('rhythm://') && !url.startsWith(DEV_URL)) {
+        e.preventDefault();
+        if (/^https?:/.test(url)) shell.openExternal(url);
+      }
+    });
+
+    if (DEV) planner.loadURL(DEV_URL);
+    else planner.loadURL('rhythm://app/');
+
+    planner.once('ready-to-show', () => {
+      if (store.data.settings.openPlannerAtStart !== false) planner.show();
+    });
+
+    planner.on('close', (e) => {
+      if (!quitting) {
+        e.preventDefault();
+        planner.hide(); // keep running in the tray
+      }
+    });
+  }
+
+  function showPlanner() {
+    if (!planner || planner.isDestroyed()) createPlanner();
+    planner.show();
+    planner.focus();
+  }
+
+  function updateTray(state) {
+    if (!tray) return;
+    const paused = state.paused ? ' (paused)' : '';
+    const tip =
+      state.phase === 'work'
+        ? `Rhythm — ${state.task}${paused}`
+        : state.phase === 'break'
+          ? 'Rhythm — on a break'
+          : 'Rhythm';
+    tray.setToolTip(tip);
+    tray.setContextMenu(
+      Menu.buildFromTemplate([
+        { label: 'Open Rhythm', click: showPlanner },
+        {
+          label: overlay && overlay.isVisible() ? 'Hide Focus Overlay' : 'Show Focus Overlay',
+          click: () => {
+            if (!overlay || overlay.isDestroyed()) return;
+            overlay.isVisible() ? overlay.hide() : overlay.show();
+            updateTray(sessions.getState());
+          }
+        },
+        { type: 'separator' },
+        {
+          label: state.paused ? 'Resume Session' : 'Pause Session',
+          enabled: state.phase !== 'idle',
+          click: () => (state.paused ? sessions.resume() : sessions.pause())
+        },
+        {
+          label: 'Stop Session',
+          enabled: state.phase !== 'idle',
+          click: () => sessions.stop()
+        },
+        { type: 'separator' },
+        {
+          label: 'Quit Rhythm',
+          click: () => {
+            quitting = true;
+            app.quit();
+          }
+        }
+      ])
+    );
+  }
+
+  app.on('second-instance', () => showPlanner());
+
+  app.on('window-all-closed', () => {
+    // Tray app: keep running with no windows.
+  });
+
+  app.on('before-quit', () => {
+    quitting = true;
+    if (poller) poller.stop();
+    if (enforcer) enforcer.stop();
+    hideBreakScreens();
+    hideAwayScreens();
+    if (presenceWin && !presenceWin.isDestroyed()) presenceWin.destroy();
+  });
+
+  app.whenReady().then(() => {
+    app.setAppUserModelId('app.rhythm.desktop');
+    protocol.handle('rhythm', serveDist);
+    store.load();
+    sessions = new SessionManager(store);
+
+    createOverlay();
+    createPlanner();
+
+    if (store.migratedFromAnchor) {
+      notify('Anchor moved in', 'Your focus settings, templates and history came across to Rhythm.');
+    }
+
+    tray = new Tray(icon().resize({ width: 16, height: 16 }));
+    tray.on('click', showPlanner);
+    updateTray(sessions.getState());
+
+    poller = startPoller();
+    enforcer = startEnforcer();
+
+    // Free times: scheduled windows when the hard-block list is ignored.
+    // Lines like "20:00-23:00" (daily) or "fri,sat 14:00-02:00" (24h clock;
+    // overnight ranges wrap past midnight).
+    function inFreeTime() {
+      const lines = store.data.settings.freeTimes || [];
+      if (!lines.length) return false;
+      const now = new Date();
+      const day = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][now.getDay()];
+      const mins = now.getHours() * 60 + now.getMinutes();
+      for (const raw of lines) {
+        const line = String(raw).toLowerCase().trim();
+        const m = line.match(/^(?:([a-z, ]+?)\s+)?(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$/);
+        if (!m) continue;
+        if (m[1]) {
+          const days = m[1].split(/[,\s]+/).filter(Boolean);
+          if (!days.some((d) => day.startsWith(d) || d.startsWith(day))) continue;
+        }
+        const from = Number(m[2]) * 60 + Number(m[3]);
+        const to = Number(m[4]) * 60 + Number(m[5]);
+        const inRange = from <= to ? mins >= from && mins < to : mins >= from || mins < to;
+        if (inRange) return true;
+      }
+      return false;
+    }
+
+    // Hard block: matched windows are minimized on sight, session or not.
+    // Runs independently of the session machinery, so it beats cleared
+    // lists and "work" verdicts by construction. Free times switch it off.
+    let lastBlockNotifyAt = 0;
+    function hardBlockCheck(s) {
+      const list = (store.data.settings.blocklist || [])
+        .map((k) => String(k).toLowerCase().trim())
+        .filter(Boolean);
+      if (!list.length) return;
+      if (inFreeTime()) return;
+      const title = s.title || '';
+      const procName = s.process || '';
+      if (!title && !procName) return;
+      if (procName.toLowerCase() === 'electron' || title === 'Rhythm') return;
+      const hay = `${title} ${procName} ${s.host || ''}`.toLowerCase();
+      const hit = list.find((k) => hay.includes(k));
+      if (!hit) return;
+      const hwnd = Number(s.hwnd) || 0;
+      if (hwnd) enforcer.send(`minimize ${hwnd}`);
+      if (Date.now() - lastBlockNotifyAt > 30000) {
+        lastBlockNotifyAt = Date.now();
+        notify('Blocked', `That window matches "${hit}" on your hard-block list.`);
+      }
+    }
+
+    poller.on('sample', (s) => {
+      sessions.onSample(s);
+      hardBlockCheck(s);
+    });
+
+    let lastPhase = 'idle';
+    sessions.on('state', (s) => {
+      broadcast('state', s);
+      if (s.phase !== lastPhase) {
+        lastPhase = s.phase;
+        updateTray(s);
+      }
+      if (s.phase === 'break' && store.data.settings.breakScreen) {
+        showBreakScreens();
+      } else if (s.phase !== 'break' && breakWins.length) {
+        hideBreakScreens();
+      }
+      ensurePresenceWindow(s);
+    });
+
+    // Away watchdog: no face for awaySec during a work session -> blackout.
+    setInterval(() => {
+      const s = sessions.getState();
+      const active =
+        s.phase === 'work' &&
+        !s.paused &&
+        store.data.settings.chairDetect &&
+        presenceWin &&
+        !camFailed &&
+        !awaySuppressed;
+      if (!active) return;
+      const awayMs = Math.max(5, Number(store.data.settings.awaySec) || 10) * 1000;
+      if (Date.now() - lastPresentAt > awayMs) showAwayScreens();
+    }, 1000);
+
+    sessions.on('nudge', (info) => {
+      broadcast('nudge', info);
+      notify('You drifted', `Back to: ${info.task}`);
+      if (overlay && !overlay.isDestroyed() && !overlay.isVisible()) overlay.show();
+    });
+    sessions.on('notify', (n) => notify(n.title, n.body));
+    sessions.on('enforce', ({ offender, target }) => {
+      if (offender) enforcer.send(`minimize ${offender}`);
+      if (target && target !== offender) {
+        setTimeout(() => enforcer.send(`focus ${target}`), 300);
+      }
+    });
+    sessions.on('history-changed', () => broadcast('history-changed'));
+    // The seam: a finished round is the planner's business. It decides whether
+    // that means the task is done and what the task really costs.
+    sessions.on('round-ended', (entry) => {
+      broadcast('round-ended', entry);
+      if (entry.taskId) showPlanner();
+    });
+
+    ipcMain.handle('get-state', () => sessions.getState());
+    ipcMain.handle('get-data', () => ({
+      settings: store.data.settings,
+      templates: store.data.templates,
+      history: store.data.history
+    }));
+    ipcMain.handle('triage-verdict', (_e, key, verdict) => {
+      sessions.setVerdict(key, verdict);
+      broadcast('data-changed');
+    });
+    ipcMain.handle('triage-snooze', (_e, key) => sessions.snoozeAsk(key));
+    ipcMain.handle('template-verdict', (_e, id, key, verdict) => {
+      const tpl = store.data.templates.find((t) => t.id === id);
+      if (!tpl) return;
+      tpl.verdicts = tpl.verdicts || {};
+      if (verdict === null) delete tpl.verdicts[key];
+      else tpl.verdicts[key] = verdict;
+      store.save();
+      broadcast('data-changed');
+    });
+    ipcMain.handle('start-work', (_e, req) => {
+      sessions.startWork(req);
+      updateTray(sessions.getState());
+      return sessions.getState();
+    });
+    ipcMain.handle('save-template', (_e, tpl) => {
+      const task = String(tpl.task || '').trim();
+      if (!task) return store.data.templates;
+      const existing = store.data.templates.find(
+        (t) => t.task.toLowerCase() === task.toLowerCase()
+      );
+      // Learned filters travel with the template: keep what the old template
+      // knew, plus anything taught during a live session of this same task.
+      const liveVerdicts =
+        sessions.task && sessions.task.toLowerCase() === task.toLowerCase()
+          ? sessions.sessionVerdicts
+          : {};
+      const entry = {
+        id: Date.now(),
+        task,
+        workMin: Math.max(1, Math.min(240, Number(tpl.workMin) || 50)),
+        allowed: (Array.isArray(tpl.allowed) ? tpl.allowed : [])
+          .map((k) => String(k).trim())
+          .filter(Boolean),
+        verdicts: { ...((existing && existing.verdicts) || {}), ...liveVerdicts }
+      };
+      // Same task name updates the existing template instead of duplicating.
+      store.data.templates = store.data.templates.filter(
+        (t) => t.task.toLowerCase() !== task.toLowerCase()
+      );
+      store.data.templates.unshift(entry);
+      store.save();
+      broadcast('data-changed');
+      return store.data.templates;
+    });
+    ipcMain.handle('delete-template', (_e, id) => {
+      store.data.templates = store.data.templates.filter((t) => t.id !== id);
+      store.save();
+      broadcast('data-changed');
+      return store.data.templates;
+    });
+    ipcMain.handle('pause', () => {
+      sessions.pause();
+      updateTray(sessions.getState());
+    });
+    ipcMain.handle('resume', () => {
+      sessions.resume();
+      updateTray(sessions.getState());
+    });
+    ipcMain.handle('stop', () => {
+      sessions.stop();
+      updateTray(sessions.getState());
+    });
+    ipcMain.handle('skip-break', () => sessions.skipBreak());
+    ipcMain.handle('save-settings', (_e, patch) => {
+      const s = store.data.settings;
+      Object.assign(s, patch || {});
+      store.save();
+      if (typeof patch.launchAtLogin === 'boolean') {
+        app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin });
+      }
+      broadcast('data-changed');
+      sessions.emitState();
+      return store.data.settings;
+    });
+    ipcMain.handle('open-planner', () => showPlanner());
+    ipcMain.handle('presence-report', (_e, status) => {
+      if (status && status.error) {
+        if (presenceWin && !presenceWin.isDestroyed()) presenceWin.destroy();
+        presenceWin = null;
+        hideAwayScreens();
+        if (['NotAllowedError', 'NotFoundError', 'SecurityError'].includes(status.error)) {
+          camFailed = true;
+          notify(
+            'Chair detection unavailable',
+            'Rhythm could not access the camera — the feature is off until the app restarts.'
+          );
+        } else {
+          // e.g. NotReadableError / "Device in use" — the camera is busy
+          // (probably a call). Try again in a minute, silently.
+          camRetryAt = Date.now() + 60000;
+        }
+        return;
+      }
+      if (status === true) {
+        lastPresentAt = Date.now();
+        awaySuppressed = false;
+        hideAwayScreens();
+      }
+    });
+    ipcMain.handle('away-dismiss', () => {
+      // The user clicked/typed on the away screen — they're clearly here even
+      // if the camera can't see them. Hold off until a face is seen again.
+      awaySuppressed = true;
+      lastPresentAt = Date.now();
+      hideAwayScreens();
+    });
+  });
+}

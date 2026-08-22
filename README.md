@@ -16,10 +16,34 @@ npm run build      # production build → dist/
 npm run preview    # serve the production build locally
 npm test           # unit tests (vitest)
 npm run icons      # regenerate PWA icons into public/
+
+npm run desktop:install  # once — pulls Electron into desktop/
+npm run desktop          # build the planner, then launch the Windows app
+npm run desktop:dev      # Electron pointed at the dev server on :5199
+npm run desktop:smoke    # end-to-end test of the planner ↔ focus seam
 ```
 
 Deploy `dist/` to any static host (Netlify, Vercel, GitHub Pages, a folder on
 your own server). **The service worker requires HTTPS** (or localhost).
+
+## Desktop app — the planner and the focus suite together
+
+On Windows, Rhythm runs as its own app that also contains everything **Anchor**
+used to be: the always-on-top overlay, the drift watch, force-return, break and
+away blackouts, chair detection, hard blocks and free times. Anchor is not a
+separate program any more — see `desktop/README.md`.
+
+What the merge is for is the seam between the two halves. A round is started
+**from a planned task**, sized by that task's own slot or by what past rounds
+taught Rhythm it takes; "focus this" anywhere in the planner starts a real round
+instead of the plain countdown the web build falls back to; and when the round
+ends the planner is told, with the task id and the time really spent, so it can
+offer to tick the task off and learn the duration from measurement rather than
+from a guess. A duration you typed yourself still wins.
+
+The focus view and its nav button exist **only** where the shell does: the web
+and Android builds see no bridge on `window` and render neither, rather than
+shipping buttons that cannot work.
 
 ## Install as an app
 
@@ -159,6 +183,9 @@ src/components.jsx  scene, flame glyph, habit line, block row, sidebar, editors
 src/views.jsx       Habits, Projects, Settings, PIN screen
 src/App.jsx         the main component: state, handlers, wizard, gate, routing
 src/sync.js         backend-agnostic merge engine + twice-a-day cadence
+src/focus.jsx       the focus suite's view + bridge hooks (desktop only)
+desktop/            the Electron shell: Anchor's machinery in one process with
+                    the planner. See desktop/README.md
 src/styles.css      the full stylesheet (extracted from the artifact)
 tests/core.test.js  unit tests for the pure functions
 tests/sync.test.js  merge + cadence tests against a mock transport

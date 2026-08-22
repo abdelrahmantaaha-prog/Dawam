@@ -12,7 +12,12 @@
     "android:sync": "vite build && cap sync android",
     "android:open": "npm run android:sync && cap open android",
     "android:apk": "npm run android:sync && cd android && gradlew.bat assembleDebug",
-    "android:remote": "npm run android:sync && node scripts/remote-config.mjs"
+    "android:remote": "npm run android:sync && node scripts/remote-config.mjs",
+    "desktop:build": "node scripts/build-desktop.mjs",
+    "desktop": "npm run desktop:build && npm --prefix desktop start",
+    "desktop:dev": "npm --prefix desktop run dev",
+    "desktop:install": "npm --prefix desktop install",
+    "desktop:smoke": "npm run desktop:build && npm --prefix desktop run smoke"
   },
   "dependencies": {
     "@auth/express": "^0.10.1",
