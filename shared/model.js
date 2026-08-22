@@ -25,10 +25,15 @@
 export const DOC_VERSION = 1;
 export const MAX_DOC_BYTES = 4 * 1024 * 1024;
 
-/* Keys worth syncing. Excludes the storage probe and the cached prayer-time
-   tables, which are derived and device-local. */
+/* Keys worth syncing. Excludes the storage probe, the cached prayer-time
+   tables, and the expanded calendar feeds — all three are derived, all three
+   are device-local, and the calendar cache in particular is other people's
+   meetings by the megabyte. The feed LIST (planner:calendars) does sync: it is
+   small, it is the person's own configuration, and a calendar added on the
+   laptop should be there on the phone. */
+const DERIVED = ["planner:prayers:", "planner:calcache:", "planner:trellocache"];
 export const isSyncable = (k) =>
-  typeof k === "string" && k.startsWith("planner:") && k !== "planner:__probe" && !k.startsWith("planner:prayers:");
+  typeof k === "string" && k.startsWith("planner:") && k !== "planner:__probe" && !DERIVED.some((p) => k.startsWith(p));
 
 const ts = (e) => (!e ? 0 : Number(e.deletedAt || e.updatedAt || 0) || 0);
 const isTomb = (e) => !!(e && e.deletedAt);

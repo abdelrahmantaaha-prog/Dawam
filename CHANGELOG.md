@@ -7,6 +7,51 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ---
 
+## [2.6] — 2026-08-22
+
+The day starts planning around the things you never told it about: the
+meetings already in your calendar, the prayer itself, and the cards that are
+due on a board somewhere. And a remembered duration stops being whatever
+happened last time.
+
+### Added
+- **Read-only calendars.** Add a feed address — Google calls it the "secret
+  address in iCal format" — and everything on it becomes time the planner will
+  not schedule over. `src/calendar.js` is a full iCalendar reader: folded
+  lines, TZID stamps read through their real zone, RRULE expansion (daily,
+  weekly, monthly by nth or last weekday, yearly, INTERVAL/COUNT/UNTIL),
+  EXDATE, single-instance RECURRENCE-ID edits, DURATION, and the two flags
+  that mean "this does not hold my time" (CANCELLED, TRANSPARENT).
+- **Google sign-in, on the desktop.** The shell holds a refresh token, so it is
+  authorise-once rather than the hour-long browser token that was ruled out.
+  PKCE, loopback redirect, `calendar.readonly`, and the token kept in the OS
+  keychain through Electron's safeStorage. Bring your own OAuth client.
+- **`GET /api/ics`** — a relay for the web and the phone, which cannot read a
+  Google feed directly because it carries no CORS header. Allowlisted to
+  calendar hosts, https only, every redirect hop re-checked, size-capped and
+  timed out. It is a calendar reader, not a proxy.
+- **Conflict-aware slotting.** `structureDay` takes outside obstacles and
+  routes around them, and holds the opening minutes of each prayer block for
+  the prayer itself (15 by default — the blocks already start AT the adhan,
+  which is exactly when a task used to get slotted).
+- **Read-only Trello.** Your own API key and a token granted once with
+  `scope=read` and no expiry. Cards with a due date show up under the day;
+  one button makes a Rhythm task out of one. The card is never touched.
+
+### Changed
+- **A remembered duration is now a rolling average of the recent sittings**,
+  not the last one. Last-one-wins made the estimate hostage to a single odd
+  afternoon: one session where the email took ten minutes because it was
+  already half written, and every future slot got ten minutes. Five sittings
+  per source, averaged within the strongest source present — so a number set
+  by hand still outranks anything measured or guessed. Entries written before
+  this become the first sitting rather than being discarded.
+- The calendar and Trello caches never enter the sync document: both are
+  derived from someone else's system, and one is other people's meetings by
+  the megabyte. The feed LIST does sync — it is your own configuration.
+
+---
+
 ## [2.5] — 2026-08-22
 
 Anchor moves in. Rhythm becomes a desktop app that contains the whole focus

@@ -5,6 +5,8 @@ import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable 
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
 import { saveJson } from './files.js';
+import { CalendarSettings } from './calview.jsx';
+import { TrelloSettings } from './trelloview.jsx';
 function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, onAdd, onUpd, onDel, onToggleDay, onFocus }) {
   const [openId, setOpenId] = useState(null);
   // The day runs Fajr → next Fajr, so "today" comes from the caller, which
@@ -297,7 +299,7 @@ function PinScreen({ onVerify, onSuccess }) {
 /* ------------------------------------------------------------------ */
 /*  Settings                                                           */
 /* ------------------------------------------------------------------ */
-function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, notify, onEnableNotify, onTestNotify, onRecheck, storageOk, onClose, onClearDay, dayLabel, onLang }) {
+function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, notify, onEnableNotify, onTestNotify, onRecheck, storageOk, onClose, onClearDay, dayLabel, onLang, calendar, trello }) {
   const [local, setLocal] = useState(settings);
   const [tab, setTab] = useState('general');
   // Keep the local editing copy in sync when the parent persists settings from
@@ -370,6 +372,8 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
     ['labels', tx('Labels', 'الوسوم'), Tag],
     ['recurring', tx('Recurring', 'المتكررة'), Repeat],
     ['prayer', tx('Prayer', 'الصلاة'), Clock],
+    ['calendar', tx('Calendar', 'التقويم'), Calendar],
+    ['trello', tx('Trello', 'ترللو'), LayoutTemplate],
     ['security', tx('Security', 'الأمان'), Shield],
     ['sync', tx('Sync', 'المزامنة'), Repeat],
     ['backup', tx('Backup', 'النسخ'), Copy],
@@ -448,6 +452,28 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
               <p className="hint-text">{tx('Computed on-device from the date and your timezone. Turn off to set times manually.', 'يُحسب على جهازك من التاريخ ومنطقتك الزمنية. أوقفه لضبط المواقيت يدويًا.')}</p>
             </div>
           </>)}
+
+          {tab === 'calendar' && calendar && (
+            <CalendarSettings
+              feeds={calendar.feeds}
+              onFeedsChange={calendar.onFeedsChange}
+              report={calendar.report}
+              onRefresh={calendar.onRefresh}
+              refreshing={calendar.refreshing}
+              calSettings={local.calendar || {}}
+              onCalSettings={(p) => patch({ calendar: { ...(localRef.current.calendar || {}), ...p } })}
+            />
+          )}
+
+          {tab === 'trello' && trello && (
+            <TrelloSettings
+              trello={local.trello || {}}
+              onChange={(next) => patch({ trello: next })}
+              report={trello.report}
+              onRefresh={(cfg, o) => trello.onRefresh(cfg, o)}
+              refreshing={trello.refreshing}
+            />
+          )}
 
           {tab === 'security' && (
             <div className="sect">

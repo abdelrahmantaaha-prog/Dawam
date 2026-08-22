@@ -126,3 +126,22 @@ describe('docSize', () => {
     expect(docSize(doc({ 'planner:pool': entry('x'.repeat(1000), 1) }))).toBeGreaterThan(1000);
   });
 });
+
+describe('what syncs', () => {
+  it('syncs the planner keys, including the calendar feed list', () => {
+    expect(isSyncable('planner:week:2026-08-22')).toBe(true);
+    expect(isSyncable('planner:settings')).toBe(true);
+    expect(isSyncable('planner:durations')).toBe(true);
+    expect(isSyncable('planner:calendars')).toBe(true);
+  });
+
+  it('keeps derived and device-local caches out of the document', () => {
+    // Both are rebuilt from something else; the calendar one is other
+    // people's meetings by the megabyte and has no business on the wire.
+    expect(isSyncable('planner:prayers:2026-08')).toBe(false);
+    expect(isSyncable('planner:calcache:abc123')).toBe(false);
+    expect(isSyncable('planner:trellocache')).toBe(false);
+    expect(isSyncable('planner:__probe')).toBe(false);
+    expect(isSyncable('rhythm:sync:meta')).toBe(false);
+  });
+});

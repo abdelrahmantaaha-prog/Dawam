@@ -24,6 +24,18 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
   skipBreak: () => ipcRenderer.invoke('skip-break'),
   saveSettings: (patch) => ipcRenderer.invoke('save-settings', patch),
   openPlanner: () => ipcRenderer.invoke('open-planner'),
+
+  /* Read-only calendar access. Present only on the desktop, which is exactly
+     how the planner decides whether to offer real Google sign-in or fall back
+     to a feed URL relayed through the server. */
+  calendar: {
+    fetchIcs: (url) => ipcRenderer.invoke('cal-fetch-ics', url),
+    status: () => ipcRenderer.invoke('cal-status'),
+    authorize: (clientId, clientSecret) => ipcRenderer.invoke('cal-authorize', clientId, clientSecret),
+    disconnect: () => ipcRenderer.invoke('cal-disconnect'),
+    listCalendars: () => ipcRenderer.invoke('cal-list'),
+    listEvents: (calendarId, fromMs, toMs) => ipcRenderer.invoke('cal-events', calendarId, fromMs, toMs),
+  },
   // Listeners return their own unsubscribe — React effects need to clean up,
   // and a planner that re-renders must not stack duplicate handlers.
   onState: (cb) => sub('state', (_e, s) => cb(s)),

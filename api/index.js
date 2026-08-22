@@ -14,6 +14,7 @@ import { ExpressAuth, getSession } from "@auth/express";
 import { authConfig, authConfigured, userIdFrom } from "./_auth.js";
 import { isConfigured as dbConfigured, getDoc, insertDoc, updateDoc, deleteDoc } from "./_db.js";
 import { pushDocument } from "./_sync-core.js";
+import { readFeed } from "./_ics.js";
 
 /* the store seam _sync-core.js writes through — Neon in production, an
    in-memory fake in the tests */
@@ -97,6 +98,20 @@ app.get("/api/me", async (req, res) => {
     db: dbConfigured(),
     user: s && s.user ? { id: userIdFrom(s), name: s.user.name, email: s.user.email, image: s.user.image } : null,
   });
+});
+
+/* ---------- calendar relay ----------
+   Read-only, allowlisted to calendar hosts, and open to signed-out users on
+   purpose: the calendar feature has nothing to do with sync, and a person who
+   never signs in should still be able to plan around their own meetings.
+   What keeps it from being an open proxy lives in _ics.js. */
+app.get("/api/ics", rateLimit(30, 60_000), async (req, res) => {
+  const out = await readFeed(req.query && req.query.url);
+  if (out.status !== 200) return res.status(out.status).json({ error: out.error });
+  res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+  // Someone's meetings are not something to leave in a shared cache.
+  res.setHeader("Cache-Control", "private, max-age=300");
+  res.send(out.text);
 });
 
 /* ---------- pull ---------- */

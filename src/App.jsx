@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3 } from 'lucide-react';
 import {brokerFrom, hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
-import { useSync, markDirty, markDeleted } from './sync.js';
+import { useSync, markDirty, markDeleted, apiBase } from './sync.js';
 import { readLedger, balanceOf, award, revoke, spend } from './points.js';
 import { updateWidget } from './widget.js';
 import { writeNowFile } from './nowfile.js';
@@ -10,6 +10,10 @@ import { isNative as nativeShell, ensurePermission, permissionState, pendingCoun
 import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, parseAssistantReply, parseEstimates, callAssistant } from './assistant.js';
 import { loadDurations, durationFor, rememberDuration } from './durations.js';
 import { FocusView, isDesktop, useRoundEnded } from './focus.jsx';
+import { loadFeeds, saveFeeds, refreshAll, loadInstances, busyOn, eventsOn } from './calsync.js';
+import { DayEvents } from './calview.jsx';
+import { TrelloCards } from './trelloview.jsx';
+import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
 
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
@@ -33,6 +37,20 @@ export default function Rhythm() {
   // raises the window when a round linked to a task finishes, so the question
   // lands in front of the person while the answer still means something.
   const [pendingRound, setPendingRound] = useState(null);
+  /* Read-only calendars. `calFeeds` is the person's configuration and syncs;
+     `calInstances` is the expanded events, rebuilt from the device-local
+     cache. `calReport` is per-feed so a calendar that quietly stopped
+     updating can say so instead of just going empty. */
+  const [calFeeds, setCalFeeds] = useState([]);
+  const [calInstances, setCalInstances] = useState([]);
+  const [calReport, setCalReport] = useState([]);
+  const [calBusy, setCalBusy] = useState(false);
+  // Trello, same shape of problem: a cached copy of someone else's system,
+  // refreshed on a timer, never written to.
+  const [trelloCards, setTrelloCards] = useState([]);
+  const [trelloReport, setTrelloReport] = useState(null);
+  const [trelloBusy, setTrelloBusy] = useState(false);
+  const [trelloAdded, setTrelloAdded] = useState(() => new Set());
   const [overdue, setOverdue] = useState([]);
   const [refresh, setRefresh] = useState(0);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -802,7 +820,13 @@ export default function Rhythm() {
       setSlotBusy(false);
     }
 
-    const { slots, unplaced } = structureDay(dayTasks, timings, isToday ? nowMin : null);
+    // The day is planned around what is already spoken for: calendar events
+    // as hard walls, and the opening minutes of each prayer block held for
+    // the prayer itself.
+    const { slots, unplaced } = structureDay(dayTasks, timings, isToday ? nowMin : null, {
+      busy: calBusyFor(addDays(weekStart, selectedDay)),
+      prayerReserveMin: (settings.calendar || {}).prayerReserveMin ?? 15,
+    });
     // ONE write carrying both the estimate cache and the slots, built from the
     // live ref. Two writes here once lost the estimates: the second was built
     // from the stale render-time `week` and quietly un-wrote the first, so
@@ -1256,6 +1280,98 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   // time; checking it reveals the next.
   const blockIdx = (id) => BLOCKS.findIndex((b) => b.id === id);
   const nowList = todayTasks.slice().sort((a, b) => (blockIdx(a.block) - blockIdx(b.block)) || (a.done - b.done) || (a.order - b.order));
+  /* ---- calendars ----
+     Refreshed on boot and every half hour the app stays open. A feed is a
+     file over HTTP: there is nothing to subscribe to, and asking more often
+     than the calendar changes is just noise on someone's connection. */
+  const calFeedsRef = useRef([]);
+  const refreshCalendars = useCallback(async (feeds, { force = false } = {}) => {
+    const list = feeds || calFeedsRef.current;
+    if (!list.length) { setCalInstances([]); setCalReport([]); return []; }
+    setCalBusy(true);
+    const report = await refreshAll(list, { apiBase: apiBase(), force });
+    setCalReport(report);
+    setCalInstances(await loadInstances(list));
+    setCalBusy(false);
+    return report;
+  }, []);
+  useEffect(() => { calFeedsRef.current = calFeeds; }, [calFeeds]);
+
+  const persistFeeds = useCallback(async (feeds) => {
+    setCalFeeds(feeds);
+    calFeedsRef.current = feeds;
+    await saveFeeds(feeds);
+    markDirty('planner:calendars');
+    setCalInstances(await loadInstances(feeds));
+    return feeds;
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return undefined;
+    let alive = true;
+    (async () => {
+      const feeds = await loadFeeds();
+      if (!alive) return;
+      setCalFeeds(feeds);
+      calFeedsRef.current = feeds;
+      setCalInstances(await loadInstances(feeds));
+      refreshCalendars(feeds);
+    })();
+    const id = setInterval(() => refreshCalendars(calFeedsRef.current), 30 * 60 * 1000);
+    return () => { alive = false; clearInterval(id); };
+  }, [ready, refreshCalendars]);
+
+  const calSettings = settings.calendar || {};
+  // What the scheduler must not schedule over, for the day being looked at.
+  const calBusyFor = useCallback(
+    (date) => busyOn(calInstances, date, { includeAllDay: calSettings.includeAllDay === true }),
+    [calInstances, calSettings.includeAllDay]
+  );
+  const selectedDayEvents = useMemo(
+    () => eventsOn(calInstances, addDays(weekStart, selectedDay)),
+    [calInstances, weekStart, selectedDay]
+  );
+
+  /* ---- Trello ----
+     Refreshed alongside the calendars. Cards are shown, never imported: one
+     becomes a Rhythm task only when the person presses the button, and the
+     card itself is left exactly as it was. */
+  const refreshTrelloCards = useCallback(async (cfg, { force = false } = {}) => {
+    const t = cfg || settingsRef.current.trello || {};
+    if (!t.key || !t.token || !(t.boards || []).length) { setTrelloCards([]); setTrelloReport(null); return null; }
+    setTrelloBusy(true);
+    const r = await refreshTrello({ key: t.key, token: t.token }, t.boards);
+    setTrelloReport(r);
+    if (r.ok) setTrelloCards(r.cards);
+    setTrelloBusy(false);
+    return r;
+  }, []);
+
+  useEffect(() => {
+    if (!ready) return undefined;
+    let alive = true;
+    (async () => {
+      const cached = await readTrelloCache();
+      if (alive && cached.cards.length) setTrelloCards(cached.cards);
+      refreshTrelloCards();
+    })();
+    const id = setInterval(() => refreshTrelloCards(), 30 * 60 * 1000);
+    return () => { alive = false; clearInterval(id); };
+  }, [ready, refreshTrelloCards]);
+
+  const trelloDue = useMemo(
+    () => dueCards(trelloCards, { withinDays: (settings.trello || {}).withinDays ?? 14 }),
+    [trelloCards, settings.trello]
+  );
+  // A card becomes an ordinary task in the block the day is looking at. It
+  // keeps no link back: Rhythm has read access to that board and nothing more,
+  // so pretending the two stay in step would be a lie.
+  const addTrelloCard = async (card) => {
+    await addTaskOnDate(fmtISO(addDays(weekStart, selectedDay)), activeBlock.id, card.title);
+    setTrelloAdded((prev) => new Set(prev).add(card.id));
+    flash(tx('Added to the day.', 'أُضيفت إلى اليوم.'));
+  };
+
   /* ---- focus suite (desktop only) ----
      What can be focused on: today's unfinished tasks, sized by their own slot
      when they have one and by what past rounds taught us when they don't. A
@@ -1912,6 +2028,24 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           {dayHasSlots && <button className="ghost sm" onClick={clearSlots}><X size={13} /> {tx('Clear slots', 'إزالة الجدولة')}</button>}
         </div>
 
+        {/* What the day already owes someone else. Read-only, and shown here
+            rather than folded into the timeline on purpose: these are not
+            tasks, nothing can be done to them, and the only thing the person
+            needs is to see what "Slot the day" just planned around. */}
+        {selectedDayEvents.length > 0 && (
+          <div className="cal-strip">
+            <div className="cal-strip-h"><Calendar size={12} /> {tx('On your calendar', 'في تقويمك')}</div>
+            <DayEvents events={selectedDayEvents} />
+          </div>
+        )}
+
+        {trelloDue.length > 0 && (
+          <div className="cal-strip">
+            <div className="cal-strip-h"><LayoutTemplate size={12} /> {tx('Due on Trello', 'مستحق في ترللو')}</div>
+            <TrelloCards cards={trelloDue} onAdd={addTrelloCard} added={trelloAdded} />
+          </div>
+        )}
+
         {/* Day timeline (left) + Recurring/Backlog sidebar (right) — kept side by side so both stay visible as drop targets while dragging */}
         <div className="plan-columns">
           <div className="timeline">
@@ -2054,6 +2188,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           notify={notifyState} onEnableNotify={enableNotify} onTestNotify={testNotify} onRecheck={probeNotify}
           storageOk={storageOk} onClose={() => setShowSettings(false)}
           onClearDay={() => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.day !== selectedDay) }); flash(tx('Day cleared.', 'تم مسح اليوم.')); }}
+          calendar={{ feeds: calFeeds, onFeedsChange: persistFeeds, report: calReport, onRefresh: (feeds, o) => refreshCalendars(feeds, o), refreshing: calBusy }}
+          trello={{ report: trelloReport, onRefresh: (cfg, o) => refreshTrelloCards(cfg, o), refreshing: trelloBusy }}
           dayLabel={`${wdFull(selectedDate.getDay())} ${selectedDate.getDate()} ${mon(selectedDate.getMonth())}`} />
       )}
 

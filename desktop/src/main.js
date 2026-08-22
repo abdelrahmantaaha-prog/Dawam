@@ -16,6 +16,7 @@ const fs = require('fs');
 const Store = require('./store');
 const SessionManager = require('./session');
 const { startPoller, startEnforcer } = require('./poller');
+const calendar = require('./calendar');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
@@ -560,6 +561,17 @@ if (!app.requestSingleInstanceLock()) {
       return store.data.settings;
     });
     ipcMain.handle('open-planner', () => showPlanner());
+
+    /* ---- calendar ----
+       The planner asks; the main process is the only part of the app that can
+       answer, because it is the only part without a browser's CORS rules and
+       the only one that can hold a refresh token. Read-only in both routes. */
+    ipcMain.handle('cal-fetch-ics', (_e, url) => calendar.fetchIcs(url));
+    ipcMain.handle('cal-status', () => calendar.status());
+    ipcMain.handle('cal-authorize', (_e, clientId, clientSecret) => calendar.authorize(clientId, clientSecret));
+    ipcMain.handle('cal-disconnect', () => calendar.disconnect());
+    ipcMain.handle('cal-list', () => calendar.listCalendars());
+    ipcMain.handle('cal-events', (_e, calendarId, fromMs, toMs) => calendar.listEvents(calendarId, fromMs, toMs));
     ipcMain.handle('presence-report', (_e, status) => {
       if (status && status.error) {
         if (presenceWin && !presenceWin.isDestroyed()) presenceWin.destroy();

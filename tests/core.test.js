@@ -556,3 +556,70 @@ describe('migrateSettings — the Anthropic path is gone', () => {
     expect(migrateSettings({ groqKey: 'gsk_x' }).groqKey).toBe('gsk_x');
   });
 });
+
+describe('structureDay — routing around what is already spoken for', () => {
+  // DEFAULT_TIMINGS: Fajr 04:15, Sunrise 05:50, Dhuhr 12:55, Asr 16:30,
+  // Maghrib 19:45, Isha 21:15. "morning" runs 05:50 → 12:55.
+  const mk = (id, block, extra = {}) => ({ id, title: id, block, done: false, subtasks: [], ...extra });
+  const slotOf = (r, id) => r.slots.find((s) => s.id === id);
+  const hm = (h, m) => h * 60 + m;
+
+  it('starts after a meeting rather than on top of it', () => {
+    const busy = [{ start: hm(5, 50), end: hm(7, 0) }]; // a 09:00-ish standup, in block terms
+    const r = structureDay([mk('a', 'morning')], T, null, { busy });
+    expect(slotOf(r, 'a')).toMatchObject({ start: '07:00', end: '07:25' });
+  });
+
+  it('uses the gap between two meetings when the task fits in it', () => {
+    const busy = [
+      { start: hm(6, 0), end: hm(7, 0) },
+      { start: hm(7, 30), end: hm(9, 0) },
+    ];
+    const r = structureDay([mk('a', 'morning')], T, null, { busy });
+    // 05:50→06:00 is only 10 minutes; the 07:00→07:30 gap is 30, and a base
+    // task wants 25, so that is where it lands.
+    expect(slotOf(r, 'a')).toMatchObject({ start: '07:00', end: '07:25' });
+  });
+
+  it('treats an event running past midnight as one wall, not two', () => {
+    // 23:00 → 01:00 sits inside the Isha block, which itself runs to Fajr.
+    const busy = [{ start: hm(23, 0), end: hm(25, 0) }];
+    const r = structureDay([mk('a', 'isha')], T, null, { busy });
+    const s = slotOf(r, 'a');
+    expect(s).toBeTruthy();
+    // Either before the wall or after it — never starting inside it.
+    const startMin = Number(s.start.slice(0, 2)) * 60 + Number(s.start.slice(3));
+    const insideWall = startMin >= hm(23, 0) || startMin < hm(1, 0);
+    expect(insideWall).toBe(false);
+  });
+
+  it('reports a task as unplaced when the day is genuinely taken', () => {
+    const busy = [{ start: hm(5, 50), end: hm(12, 55) }]; // the whole morning block
+    const r = structureDay([mk('a', 'morning')], T, null, { busy });
+    expect(r.slots).toHaveLength(0);
+    expect(r.unplaced).toEqual(['a']);
+  });
+
+  it('ignores an obstacle that lands in a different block', () => {
+    const busy = [{ start: hm(13, 0), end: hm(14, 0) }]; // inside Dhuhr, not morning
+    const r = structureDay([mk('a', 'morning')], T, null, { busy });
+    expect(slotOf(r, 'a')).toMatchObject({ start: '05:50' });
+  });
+
+  it('holds the opening of a prayer block for the prayer itself', () => {
+    const r = structureDay([mk('a', 'dhuhr')], T, null, { prayerReserveMin: 15 });
+    expect(slotOf(r, 'a')).toMatchObject({ start: '13:10' }); // 12:55 + 15
+  });
+
+  it('leaves the non-prayer blocks alone when reserving prayer time', () => {
+    // "morning" is the gap between Sunrise and Dhuhr — no adhan opens it.
+    const r = structureDay([mk('a', 'morning')], T, null, { prayerReserveMin: 15 });
+    expect(slotOf(r, 'a')).toMatchObject({ start: '05:50' });
+  });
+
+  it('takes a malformed obstacle as no obstacle rather than throwing', () => {
+    const busy = [{ start: 'x', end: 3 }, { start: 100, end: 100 }, null];
+    const r = structureDay([mk('a', 'morning')], T, null, { busy: busy.filter(Boolean) });
+    expect(slotOf(r, 'a')).toMatchObject({ start: '05:50' });
+  });
+});

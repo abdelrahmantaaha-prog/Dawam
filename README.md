@@ -45,6 +45,30 @@ The focus view and its nav button exist **only** where the shell does: the web
 and Android builds see no bridge on `window` and render neither, rather than
 shipping buttons that cannot work.
 
+## Calendars and Trello (read-only)
+
+Rhythm can plan around what you have already committed to. **Settings →
+Calendar** takes a feed address (in Google Calendar: Settings → your calendar →
+Integrate calendar → "Secret address in iCal format"); everything on it becomes
+time the planner will not schedule over. On the desktop you can sign in to
+Google properly instead — the shell holds a refresh token, so it is
+authorise-once rather than the hour-long token a browser gets. Both routes ask
+for read access only; Rhythm never writes to your calendar.
+
+All-day events do not block the day's hours by default — a birthday is a note
+on the day, not a claim on it — and there is a setting for the minutes each
+prayer block keeps for the prayer itself.
+
+**Settings → Trello** takes your own API key and a token granted with
+`scope=read` and no expiry. Cards with a due date appear under the day, and one
+button copies one into your plan. The card is left alone.
+
+Why the two connect so differently: Trello's API answers cross-origin, so the
+page can call it directly on any platform. A Google feed does not, so the
+desktop reads it in the main process and the web build relays it through
+`/api/ics` — allowlisted to calendar hosts, https only, every redirect hop
+re-checked.
+
 ## Install as an app
 
 Open the deployed site on your phone → browser menu → **Add to Home Screen**
@@ -184,6 +208,13 @@ src/views.jsx       Habits, Projects, Settings, PIN screen
 src/App.jsx         the main component: state, handlers, wizard, gate, routing
 src/sync.js         backend-agnostic merge engine + twice-a-day cadence
 src/focus.jsx       the focus suite's view + bridge hooks (desktop only)
+src/calendar.js     iCalendar reader: parsing, recurrence, busy intervals
+src/calsync.js      where feed text comes from (shell / direct / relay) and
+                    where the expanded events are cached
+src/calview.jsx     calendar settings + the day's agenda
+src/trello.js       read-only Trello: boards, lists, cards that are due
+src/trelloview.jsx  Trello settings + due cards in the day
+api/_ics.js         the calendar relay's guard rails (allowlist, hop checks)
 desktop/            the Electron shell: Anchor's machinery in one process with
                     the planner. See desktop/README.md
 src/styles.css      the full stylesheet (extracted from the artifact)

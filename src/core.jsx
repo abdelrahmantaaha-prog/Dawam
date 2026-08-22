@@ -1,5 +1,5 @@
 /* Rhythm core - pure logic: i18n, dates, prayer math, sky, blocks, model. */
-const APP_VERSION = '2.5';
+const APP_VERSION = '2.6';
 
 /* ------------------------------------------------------------------ */
 /*  i18n — lightweight, module-level translator (same pattern as the   */
@@ -283,6 +283,18 @@ const DEFAULT_SETTINGS = {
   prayerGate: true,
   time24: false,
   prayer: { useLive: true, city: 'Cairo', country: 'Egypt', method: 5, customTimes: { ...DEFAULT_TIMINGS } },
+  /* Read-only calendars, and how hard the planner should route around them.
+     The feeds themselves live under their own storage key (planner:calendars)
+     — this is only the behaviour. */
+  calendar: {
+    includeAllDay: false,   // a birthday is a note on the day, not a claim on its hours
+    prayerReserveMin: 15,   // the blocks start AT the adhan; hold the prayer's own minutes
+    googleClientId: '',     // desktop OAuth, your own Google Cloud client
+    googleClientSecret: '',
+  },
+  /* Read-only Trello. The token is granted with scope=read and no expiry, so
+     it never interrupts a working day to be renewed. */
+  trello: { key: '', token: '', boards: [], withinDays: 14 },
 };
 
 /* Long-term project shape:
@@ -490,7 +502,20 @@ function taskTextSig(t) {
   return h.toString(36);
 }
 
-function structureDay(tasks, timings, curMin) {
+/* `opts.busy` is time that is already spoken for by something outside the
+   planner: calendar events, read-only, treated as walls rather than
+   suggestions. Each entry is { start, end } in minutes from the day's own
+   midnight, and `end` MAY exceed 1440 — an event running to 01:00 tomorrow is
+   one wall, not two, and splitting it at midnight would let a task be slotted
+   into the middle of it. Length, not the end stamp, is what survives the
+   conversion into Fajr-space below.
+
+   `opts.prayerReserveMin` holds the opening minutes of each prayer block for
+   the prayer itself. The blocks are already bounded BY the adhan times, so
+   without this the scheduler would happily start a task at the exact minute
+   the adhan sounds — technically inside the window, and exactly the collision
+   the person asked to stop having. */
+function structureDay(tasks, timings, curMin, opts = {}) {
   const fajrM = minutesOf(timings.Fajr);
   if (fajrM == null) return { slots: [], unplaced: tasks.map((t) => t.id) };
   const sf = (m) => (((m - fajrM) % 1440) + 1440) % 1440;
@@ -503,6 +528,19 @@ function structureDay(tasks, timings, curMin) {
     start: sf(minutesOf(timings[b.startKey])),
     end: b.endKey ? sf(minutesOf(timings[b.endKey])) : 1440,
   }));
+
+  // Outside obstacles, converted once. Their LENGTH is carried across, not
+  // their end minute: sf() wraps, so sf(end) of a midnight-crossing event
+  // would land before its own start and silently vanish.
+  const external = (opts.busy || [])
+    .map((b) => {
+      const start = Number(b.start), end = Number(b.end);
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+      const bs = sf(start);
+      return [bs, Math.min(1440, bs + (end - start))];
+    })
+    .filter(Boolean);
+  const reserve = Math.max(0, Math.round(Number(opts.prayerReserveMin) || 0));
 
   const slots = [], unplaced = [];
   for (const w of windows) {
@@ -527,6 +565,17 @@ function structureDay(tasks, timings, curMin) {
       }
       floating.push(t);
     }
+    // Outside obstacles apply whether or not this block holds any floating
+    // task — but only a block with something to place needs the gap maths.
+    for (const [es, ee] of external) {
+      const s = Math.max(es, w.start), e = Math.min(ee, w.end);
+      if (e > s) busy.push([s, e]);
+    }
+    if (reserve && PRAYER_BLOCKS.includes(w.id)) {
+      const e = Math.min(w.end, w.start + reserve);
+      if (e > w.start) busy.push([w.start, e]);
+    }
+
     if (!floating.length) continue;
     busy.sort((a, b) => a[0] - b[0]);
 
