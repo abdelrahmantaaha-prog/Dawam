@@ -275,6 +275,8 @@ const DEFAULT_SETTINGS = {
   pin: null,           // { hash, salt } — soft lock, not encryption
   apiKey: '',          // optional API key for the brain-dump sorter (stored locally only)
   groqKey: '',         // optional Groq key — free-tier fallback when Gemini is down
+  brokerUrl: '',       // the shared key pool (keybroker) — one door to every project's keys
+  brokerToken: '',     // this app's token for it; the keys above stay as the fallback
   autoDark: true,      // switch the interface to dark at night (Maghrib→Sunrise)
   rewards: [],         // what points buy — you set the prices, which is what makes them mean anything
   weekStartDay: 6,
@@ -370,6 +372,8 @@ function migrateSettings(s) {
   // the provider switch.
   base.apiKey = typeof s.apiKey === 'string' && !/^sk-ant/.test(s.apiKey) ? s.apiKey : '';
   base.groqKey = typeof s.groqKey === 'string' ? s.groqKey : '';
+  base.brokerUrl = typeof s.brokerUrl === 'string' ? s.brokerUrl : '';
+  base.brokerToken = typeof s.brokerToken === 'string' ? s.brokerToken : '';
   delete base.aiProvider;
   base.autoDark = s.autoDark !== false;
   base.rewards = Array.isArray(s.rewards) ? s.rewards : [];
@@ -709,3 +713,17 @@ function pushToToday(t, { activeBlock, curSinceFajr, sinceFajr }) {
 }
 
 export { hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,SLEEP,sleepPlan,POINTS,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
+
+/* The shared key pool, if this copy has been pointed at one.
+ *
+ * A build can carry defaults (VITE_BROKER_URL / VITE_BROKER_TOKEN) and settings
+ * override them. Worth being plain about the trade: a browser app has nowhere
+ * to hide a token, so anyone with the bundle has it. That is why each app holds
+ * its own, revocable on its own, and why the keys in Settings stay exactly
+ * where they are — they are what answers when the pool cannot be reached. */
+export function brokerFrom(settings) {
+  const env = (typeof import.meta !== 'undefined' && import.meta.env) || {};
+  const url = String(settings?.brokerUrl || env.VITE_BROKER_URL || '').trim().replace(/\/+$/, '');
+  const token = String(settings?.brokerToken || env.VITE_BROKER_TOKEN || '').trim();
+  return url && token ? { url, token } : null;
+}

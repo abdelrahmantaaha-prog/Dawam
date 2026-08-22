@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3 } from 'lucide-react';
-import { hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import {brokerFrom, hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { useSync, markDirty, markDeleted } from './sync.js';
 import { readLedger, balanceOf, award, revoke, spend } from './points.js';
@@ -778,13 +778,13 @@ export default function Rhythm() {
        slotting must never be hostage to the network. */
     let sized = 0, aiTried = false, estMap = null, aiWhy = '';
     const needsEst = dayTasks.filter((t) => !(t.start && t.end) && (!t.est || t.estSig !== taskTextSig(t)));
-    if (settings.apiKey && needsEst.length) {
+    if ((settings.apiKey || brokerFrom(settings)) && needsEst.length) {
       aiTried = true;
       setSlotBusy(true);
       try {
         const listing = needsEst.map((t) => ({ id: t.id, title: t.title, steps: (t.subtasks || []).map((s) => s.title) }));
         const text = await Promise.race([
-          callAssistant({ apiKey: settings.apiKey, groqKey: settings.groqKey, system: ESTIMATOR_SYSTEM, messages: [{ role: 'user', content: JSON.stringify(listing) }] }),
+          callAssistant({ apiKey: settings.apiKey, groqKey: settings.groqKey, broker: brokerFrom(settings), system: ESTIMATOR_SYSTEM, messages: [{ role: 'user', content: JSON.stringify(listing) }] }),
           new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 20000)),
         ]);
         const est = parseEstimates(text, needsEst.map((t) => t.id));
@@ -1131,7 +1131,7 @@ export default function Rhythm() {
     if (!dump.trim()) return;
     // Local-only PWA: the sorter needs your own Anthropic API key, stored on-device
     // in Settings. Without one, explain rather than fail cryptically.
-    if (!settings.apiKey && !settings.groqKey) { setParseError(tx('The sorter needs a key — add a free Gemini key under Settings → AI sorting (aistudio.google.com/apikey). Stored only on this device.', 'يحتاج الفرز إلى مفتاح — أضف مفتاح Gemini مجانيًا من الإعدادات ← الفرز الذكي (aistudio.google.com/apikey). يُحفظ على هذا الجهاز فقط.')); return; }
+    if (!settings.apiKey && !settings.groqKey && !brokerFrom(settings)) { setParseError(tx('The sorter needs a key — add a free Gemini key under Settings → AI sorting (aistudio.google.com/apikey). Stored only on this device.', 'يحتاج الفرز إلى مفتاح — أضف مفتاح Gemini مجانيًا من الإعدادات ← الفرز الذكي (aistudio.google.com/apikey). يُحفظ على هذا الجهاز فقط.')); return; }
     setParsing(true); setParseError(''); setPreview(null);
     const dayList = Array.from({ length: 7 }, (_, i) => { const d = addDays(weekStart, i); return `${i}=${wdFull(d.getDay())} ${d.getDate()} ${mon(d.getMonth())}`; }).join(', ');
     const existing = week.tasks.map((t) => `{id:"${t.id}", title:"${t.title.replace(/"/g, "'")}", day:${t.day}, block:"${t.block}"}`).join('\n');
@@ -1162,7 +1162,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       // can never disagree about how to reach a model.
       let text;
       try {
-        text = await callAssistant({ apiKey: settings.apiKey, groqKey: settings.groqKey, system, messages: [{ role: 'user', content: dump.trim() }], maxTokens: 4096 });
+        text = await callAssistant({ apiKey: settings.apiKey, groqKey: settings.groqKey, broker: brokerFrom(settings), system, messages: [{ role: 'user', content: dump.trim() }], maxTokens: 4096 });
       } catch (e) {
         setParseError(e.code === 'rate'
           ? tx('Free-tier limit hit (per-minute or daily). Wait a minute and retry — daily quotas reset at midnight Pacific.', 'تم بلوغ الحد المجاني (بالدقيقة أو اليومي). انتظر دقيقة وأعد المحاولة — تتجدد الحصة اليومية منتصف الليل بتوقيت المحيط الهادئ.')
@@ -1317,14 +1317,14 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const sendChat = async () => {
     const q = chatInput.trim();
     if (!q || chatBusy) return;
-    if (!settings.apiKey) { setChatErr(tx('The assistant needs an API key — add one under Settings → Backup → AI sorting (Gemini has a free tier).', 'يحتاج المساعد إلى مفتاح — أضفه من الإعدادات ← النسخ ← الفرز الذكي (لدى Gemini خطة مجانية).')); return; }
+    if (!settings.apiKey && !settings.groqKey && !brokerFrom(settings)) { setChatErr(tx('The assistant needs an API key — add one under Settings → Backup → AI sorting (Gemini has a free tier).', 'يحتاج المساعد إلى مفتاح — أضفه من الإعدادات ← النسخ ← الفرز الذكي (لدى Gemini خطة مجانية).')); return; }
     setChatErr(''); setChatBusy(true);
     const prior = chatMsgs.slice(-6).map((m) => ({ role: m.role, content: m.text }));
     setChatMsgs((prev) => [...prev, { role: 'user', text: q }]);
     setChatInput('');
     try {
       const messages = [...prior, { role: 'user', content: `Current state of my planner:\n\n${buildSnapshot()}\n\n---\n${q}` }];
-      const text = await callAssistant({ apiKey: settings.apiKey, groqKey: settings.groqKey, system: ASSISTANT_SYSTEM, messages });
+      const text = await callAssistant({ apiKey: settings.apiKey, groqKey: settings.groqKey, broker: brokerFrom(settings), system: ASSISTANT_SYSTEM, messages });
       const { reply, proposals } = parseAssistantReply(text, chatIds());
       setChatMsgs((prev) => [...prev, { role: 'assistant', text: reply, proposals, applied: {} }]);
     } catch (e) {

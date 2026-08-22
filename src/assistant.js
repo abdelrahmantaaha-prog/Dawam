@@ -200,7 +200,7 @@ const GROQ_MODEL = 'openai/gpt-oss-120b';
 
 const rateError = () => { const e = new Error('rate'); e.code = 'rate'; return e; };
 
-export async function callAssistant({ apiKey, groqKey, system, messages, maxTokens = 1500 }) {
+export async function callAssistant({ apiKey, groqKey, broker, system, messages, maxTokens = 1500 }) {
   const post = (url, key, model) => fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
@@ -214,6 +214,23 @@ export async function callAssistant({ apiKey, groqKey, system, messages, maxToke
     if (!res.ok) throw new Error(`Groq HTTP ${res.status}`);
     return read(res);
   };
+
+  /* The shared key pool speaks the same OpenAI-shaped API, so it is one more
+     URL rather than another code path. It is tried first when configured: it
+     rotates thirty-seven keys and knows which the other apps have spent. Only
+     an outage — network, 5xx, or the worker not being there — sends the call
+     back to the keys on this device. A 401 or a 400 means the same thing on
+     both, so those are reported rather than retried. */
+  if (broker?.url && broker?.token) {
+    try {
+      const res = await post(`${broker.url}/v1/chat/completions`, broker.token, 'gemini-flash-lite-latest');
+      if (res.ok) return read(res);
+      if (res.status !== 404 && res.status < 500 && res.status !== 429) throw new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      if (!apiKey && !groqKey) throw e;
+    }
+    if (!apiKey && !groqKey) throw new Error('pool unavailable');
+  }
 
   if (!apiKey) {
     if (groqKey) return groq(); // Groq-only setup is a fine way to run
