@@ -26,6 +26,11 @@ export default function Rhythm() {
   const [pool, setPool] = useState([]);            // backlog items (unscheduled)
   const [templates, setTemplates] = useState([]);  // preset task templates
   const [selectedDay, setSelectedDay] = useState(0);
+  /* The Plan strip is a continuous window of dates, NOT the stored week: weeks
+     remain the storage and sync unit, but the person plans in days, and a week
+     page made the Friday-to-Saturday move a different gesture from every other
+     day-to-day move. stripStart is simply the first date on show. */
+  const [stripStart, setStripStart] = useState(() => addDays(new Date(), -1));
   const [timings, setTimings] = useState(DEFAULT_TIMINGS);
   const [usingFallback, setUsingFallback] = useState(false);
   const [todayTimings, setTodayTimings] = useState(DEFAULT_TIMINGS);
@@ -146,6 +151,7 @@ export default function Rhythm() {
       setWeekStart(ws);
       const idx = Math.round((today - ws) / 86400000);
       setSelectedDay(idx >= 0 && idx <= 6 ? idx : 0);
+      setStripStart(addDays(today, -1));
       // Preload every stored week into the session cache. localStorage is on-device
       // and synchronous underneath, so this is cheap — and it makes cross-week
       // features (tasks under a Project, overdue) complete instead of limited to
@@ -754,6 +760,15 @@ export default function Rhythm() {
   // cancelled out by a negative one.
   const revokeRef = async (ref) => { const n = await revoke(ledgerRef.current, ref); if (n) { await refreshLedger(); flash(`−${n}`); } };
 
+  /* Start over: every points page goes, with tombstones so sync erases the
+     other devices too instead of handing the history straight back. */
+  const resetPoints = async () => {
+    const keys = await rawList('planner:points:');
+    for (const k of keys) { await rawDelete(k); markDeleted(k); }
+    await refreshLedger();
+    flash(tx('Points reset — a clean slate.', 'صُفّرت النقاط — صفحة جديدة.'));
+  };
+
   const persistRewards = (fn) => persistSettings({ ...settingsRef.current, rewards: fn(settingsRef.current.rewards || []) });
   const addReward = () => persistRewards((prev) => [...prev, { id: uid(), name: '', cost: 100 }]);
   const updReward = (id, patch) => persistRewards((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -1112,6 +1127,7 @@ export default function Rhythm() {
           if (kind === 'task' && taskEl) { const r = taskEl.getBoundingClientRect(); return { type: 'block', id: el.dataset.dropblock, taskId: taskEl.dataset.taskid, after: y > r.top + r.height / 2 }; }
           return { type: 'block', id: el.dataset.dropblock, taskId: null, after: false };
         }
+        if (el.dataset.dropday && kind === 'task') return { type: 'day', iso: el.dataset.dropday };
         if (el.dataset.droppool != null) return { type: 'pool' };
       }
       el = el.parentElement;
@@ -1140,7 +1156,8 @@ export default function Rhythm() {
         if (d.over.type === 'block') {
           if (d.over.taskId && d.over.taskId !== d.id) moveTaskToPosition(d.id, d.over.id, d.over.taskId, d.over.after);
           else if (d.over.id !== d.fromBlock) moveTaskToPosition(d.id, d.over.id, null, false);
-        } else if (d.over.type === 'pool') taskToPool(d.id);
+        } else if (d.over.type === 'day') moveTaskToDate(d.id, d.over.iso);
+        else if (d.over.type === 'pool') taskToPool(d.id);
       } else if (d.kind === 'pool') {
         if (d.over.type === 'block') poolToDay(d.id, selectedDay, d.over.id);
       } else if (d.kind === 'template') {
@@ -1246,12 +1263,42 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const navMinB = addDays(startOfWeek(new Date(), settings.weekStartDay), -28);
   const navMin = navMinA < navMinB ? navMinA : navMinB;
   const navMax = startOfWeek(windowBounds().end, settings.weekStartDay);
-  const shiftWeek = (n) => setWeekStart((w) => { let nw = addDays(w, n * 7); if (nw < navMin) nw = navMin; if (nw > navMax) nw = navMax; return nw; });
-  const canPrev = weekStart > navMin;
-  const canNext = weekStart < navMax;
-  const goToday = () => { const today = logicalDayMid(); const ws = startOfWeek(today, settings.weekStartDay); setWeekStart(ws); setSelectedDay(Math.max(0, Math.min(6, Math.round((today - ws) / 86400000)))); };
-  const rangeLabel = () => { const end = addDays(weekStart, 6); return `${mon(weekStart.getMonth())} ${weekStart.getDate()} – ${mon(end.getMonth())} ${end.getDate()}`; };
-  const dayMeta = (i) => { const d = addDays(weekStart, i); const dt = week.tasks.filter((t) => t.day === i); return { date: d, label: wd(d.getDay()), num: d.getDate(), total: dt.length, done: dt.filter((t) => t.done).length, isToday: sameDay(d, logicalDayMid()) }; };
+  const stripMax = addDays(navMax, 6);
+  const clampDate = (d) => (d < navMin ? navMin : d > stripMax ? stripMax : d);
+  /* Selecting a date picks the week that owns it behind the scenes; every task
+     operation keeps working on "the displayed week" exactly as before. */
+  const selectDate = (d) => {
+    const dd = clampDate(d);
+    const ws = startOfWeek(dd, settings.weekStartDay);
+    setWeekStart(ws);
+    setSelectedDay(Math.round((dd - ws) / 86400000));
+  };
+  const shiftStrip = (n) => {
+    let ns = addDays(stripStart, n);
+    if (ns < navMin) ns = navMin;
+    if (addDays(ns, 6) > stripMax) ns = addDays(stripMax, -6);
+    setStripStart(ns);
+    selectDate(addDays(selectedDate, Math.round((ns - stripStart) / 86400000)));
+  };
+  const canPrev = stripStart > navMin;
+  const canNext = addDays(stripStart, 6) < stripMax;
+  const goToday = () => { const today = logicalDayMid(); setStripStart(addDays(today, -1)); selectDate(today); };
+  const rangeLabel = () => { const end = addDays(stripStart, 6); return `${mon(stripStart.getMonth())} ${stripStart.getDate()} – ${mon(end.getMonth())} ${end.getDate()}`; };
+  /* Which week document owns a date — live state when it is one of the loaded
+     ones, the session cache otherwise, so chip counts stay right across the
+     boundary the strip no longer shows. */
+  const weekDocFor = (d) => {
+    const wsISO = fmtISO(startOfWeek(d, settings.weekStartDay));
+    if (wsISO === fmtISO(weekStart)) return week;
+    if (todayData && wsISO === fmtISO(startOfWeek(logicalDayMid(), settings.weekStartDay))) return todayData;
+    return weeksRef.current[wsISO] || { tasks: [] };
+  };
+  const dateMeta = (d) => {
+    const ws = startOfWeek(d, settings.weekStartDay);
+    const idx = Math.round((d - ws) / 86400000);
+    const dt = (weekDocFor(d).tasks || []).filter((t) => t.day === idx);
+    return { date: d, iso: fmtISO(d), label: wd(d.getDay()), num: d.getDate(), total: dt.length, done: dt.filter((t) => t.done).length, isToday: sameDay(d, logicalDayMid()) };
+  };
 
   /* ---- "right now" derivation ----
      NB: this runs before the not-ready bail-out below, because the Now-queue
@@ -1331,6 +1378,25 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     () => eventsOn(calInstances, addDays(weekStart, selectedDay)),
     [calInstances, weekStart, selectedDay]
   );
+  /* The day flow owns the meetings now: each timed event is assigned to the
+     prayer block its start falls in and handed to that BlockRow, where it is
+     tucked between the tasks by clock time. All-day events stay in a strip —
+     they do not occupy an hour, so they have no seat in the timeline. */
+  const selDayStartMs = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate()).getTime();
+  const selMinOf = (ms) => Math.max(0, Math.min(1439, Math.round((ms - selDayStartMs) / 60000)));
+  const allDayEvents = useMemo(() => selectedDayEvents.filter((e) => e.allDay), [selectedDayEvents]);
+  const eventsByBlock = useMemo(() => {
+    const out = {};
+    for (const e of selectedDayEvents) {
+      if (e.allDay) continue;
+      const startMin = selMinOf(e.startMs);
+      const endMin = e.endMs > selDayStartMs + 86400000 ? 1439 : selMinOf(e.endMs);
+      const bid = activeBlockAt(timings, startMin);
+      (out[bid] = out[bid] || []).push({ ...e, startMin, endMin });
+    }
+    for (const bid of Object.keys(out)) out[bid].sort((a, b) => a.startMin - b.startMin);
+    return out;
+  }, [selectedDayEvents, timings, selDayStartMs]);
 
   /* ---- Trello ----
      Refreshed alongside the calendars. Cards are shown, never imported: one
@@ -1363,6 +1429,28 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     () => dueCards(trelloCards, { withinDays: (settings.trello || {}).withinDays ?? 14 }),
     [trelloCards, settings.trello]
   );
+  /* Cards due on the day being looked at sit inside the timeline at their due
+     hour, next to everything else that hour holds; the rest of the fortnight
+     stays in its own strip below. */
+  const trelloToday = useMemo(() => trelloDue.filter((c) => c.dueMs && sameDay(new Date(c.dueMs), selectedDate)), [trelloDue, selectedDate]);
+  const trelloLater = useMemo(() => trelloDue.filter((c) => !(c.dueMs && sameDay(new Date(c.dueMs), selectedDate))), [trelloDue, selectedDate]);
+  const cardsByBlock = useMemo(() => {
+    const out = {};
+    for (const c of trelloToday) {
+      const dueMin = selMinOf(c.dueMs);
+      const bid = activeBlockAt(timings, dueMin);
+      (out[bid] = out[bid] || []).push({ ...c, dueMin });
+    }
+    for (const bid of Object.keys(out)) out[bid].sort((a, b) => a.dueMin - b.dueMin);
+    return out;
+  }, [trelloToday, timings, selDayStartMs]);
+  /* Meetings running right now, for the Now view — read-only company for the
+     one-thing-at-a-time card, never queue items (a meeting cannot be ticked). */
+  const todayEventsAll = useMemo(() => eventsOn(calInstances, todayMid), [calInstances, fmtISO(todayMid)]); // eslint-disable-line
+  const liveMeetings = useMemo(() => {
+    const nowMs = Date.now() - (nowTick, 0);
+    return todayEventsAll.filter((e) => !e.allDay && e.startMs <= nowMs && e.endMs > nowMs);
+  }, [todayEventsAll, nowTick]);
   // A card becomes an ordinary task in the block the day is looking at. It
   // keeps no link back: Rhythm has read access to that board and nothing more,
   // so pretending the two stay in step would be a lie.
@@ -1400,7 +1488,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const maghribMin = minutesOf(todayTimings.Maghrib) ?? 19 * 60;
   const sunriseMin = minutesOf(todayTimings.Sunrise) ?? 6 * 60;
   const isNight = curMin >= maghribMin || curMin < sunriseMin;
-  const darkOn = settings.autoDark !== false && isNight;
+  const theme = settings.theme || (settings.autoDark === false ? 'light' : 'auto');
+  const darkOn = theme === 'dark' || (theme === 'auto' && isNight);
   setTime24(settings.time24 === true);
   setLang(settings.lang === 'ar' ? 'ar' : 'en');
   const topLuma = 0.299 * sky.top[0] + 0.587 * sky.top[1] + 0.114 * sky.top[2];
@@ -1748,7 +1837,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
 
   // Every hook has now run, so bailing out here keeps their order stable.
   if (!ready) {
-    return (<div style={{ minHeight: 320, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6B6878' }}><Loader2 size={18} className="spin" style={{ marginRight: 8 }} /> Loading your day…</div>);
+    return (<div className="load-screen"><Loader2 size={18} className="spin" style={{ marginRight: 8 }} /> Loading your day…</div>);
   }
   return (
     <div className={`rhythm ${darkOn ? 'dark' : ''}`} dir={isRTL() ? 'rtl' : 'ltr'} lang={LANG}>
@@ -1867,6 +1956,23 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                   <span className="now-one-block live-tag">{tx('scheduled', 'مجدولة')}</span>
                 </div>
                 {liveNow.map((t) => renderCard({ kind: 'task', block: blockById(t.block), t }, { live: true }))}
+              </div>
+            )}
+            {liveMeetings.length > 0 && (
+              <div className="now-one now-live">
+                <div className="now-one-top">
+                  <span className="now-one-label">{tx('In a meeting', 'في اجتماع')}</span>
+                  <span className="now-one-block live-tag">{tx('calendar', 'التقويم')}</span>
+                </div>
+                {liveMeetings.map((e, i) => (
+                  <div key={(e.uid || '') + i} className="now-one-card now-item current live">
+                    <span className="now-dot" style={{ background: 'var(--verdigris)' }} />
+                    <div className="now-col">
+                      <span className="now-item-title">{e.summary || tx('(busy)', '(مشغول)')}</span>
+                      <span className="ttime">{new Date(e.startMs).toTimeString().slice(0, 5)}–{new Date(e.endMs).toTimeString().slice(0, 5)}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
             {nextIsLater ? (
@@ -2007,14 +2113,19 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             range={`${mon(selectedDate.getMonth())} · ${week.tasks.filter((t) => t.day === selectedDay).length} ${week.tasks.filter((t) => t.day === selectedDay).length !== 1 ? tr.tasks : tr.task}${usingFallback ? ` · ${tx('prayer times estimated', 'مواقيت تقديرية')}` : ''}`} />
           <div className="hero-sheet">
         <div className="wknav plan-nav">
-          <button className="icon" onClick={() => shiftWeek(-1)} disabled={!canPrev} aria-label="Previous week">{isRTL() ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}</button>
+          <button className="icon" onClick={() => shiftStrip(-7)} disabled={!canPrev} aria-label={tx('Earlier days', 'أيام أسبق')}>{isRTL() ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}</button>
           <button className="today-btn" onClick={goToday}>{rangeLabel()}</button>
-          <button className="icon" onClick={() => shiftWeek(1)} disabled={!canNext} aria-label="Next week">{isRTL() ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}</button>
+          <button className="icon" onClick={() => shiftStrip(7)} disabled={!canNext} aria-label={tx('Later days', 'أيام لاحقة')}>{isRTL() ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}</button>
         </div>
 
+        {/* Continuous days: any 7 consecutive dates, week boundary invisible.
+            Chips are drop targets — dragging a task onto one moves it to that
+            date, whichever week document it lands in. */}
         <div className="strip">
-          {Array.from({ length: 7 }, (_, i) => dayMeta(i)).map((m, i) => (
-            <button key={i} className={`chip ${i === selectedDay ? 'sel' : ''} ${m.isToday ? 'today' : ''}`} onClick={() => setSelectedDay(i)}>
+          {Array.from({ length: 7 }, (_, i) => dateMeta(addDays(stripStart, i))).map((m) => (
+            <button key={m.iso} data-dropday={m.iso}
+              className={`chip ${sameDay(m.date, selectedDate) ? 'sel' : ''} ${m.isToday ? 'today' : ''} ${drag && drag.kind === 'task' && drag.over && drag.over.type === 'day' && drag.over.iso === m.iso ? 'drop' : ''}`}
+              onClick={() => selectDate(m.date)}>
               <span className="chip-d">{m.label}</span><span className="chip-n">{m.num}</span>{m.total > 0 && <span className="chip-count">{m.done}/{m.total}</span>}
             </button>
           ))}
@@ -2028,21 +2139,20 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           {dayHasSlots && <button className="ghost sm" onClick={clearSlots}><X size={13} /> {tx('Clear slots', 'إزالة الجدولة')}</button>}
         </div>
 
-        {/* What the day already owes someone else. Read-only, and shown here
-            rather than folded into the timeline on purpose: these are not
-            tasks, nothing can be done to them, and the only thing the person
-            needs is to see what "Slot the day" just planned around. */}
-        {selectedDayEvents.length > 0 && (
+        {/* Timed meetings and due-today cards live INSIDE the timeline now.
+            Only what has no hour of its own stays up here: all-day events, and
+            Trello cards due on some other day. */}
+        {allDayEvents.length > 0 && (
           <div className="cal-strip">
-            <div className="cal-strip-h"><Calendar size={12} /> {tx('On your calendar', 'في تقويمك')}</div>
-            <DayEvents events={selectedDayEvents} />
+            <div className="cal-strip-h"><Calendar size={12} /> {tx('All day', 'طوال اليوم')}</div>
+            <DayEvents events={allDayEvents} />
           </div>
         )}
 
-        {trelloDue.length > 0 && (
+        {trelloLater.length > 0 && (
           <div className="cal-strip">
-            <div className="cal-strip-h"><LayoutTemplate size={12} /> {tx('Due on Trello', 'مستحق في ترللو')}</div>
-            <TrelloCards cards={trelloDue} onAdd={addTrelloCard} added={trelloAdded} />
+            <div className="cal-strip-h"><LayoutTemplate size={12} /> {tx('Due later on Trello', 'مستحق لاحقًا في ترللو')}</div>
+            <TrelloCards cards={trelloLater} onAdd={addTrelloCard} added={trelloAdded} />
           </div>
         )}
 
@@ -2053,6 +2163,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               <BlockRow key={b.id} block={b}
                 start={cleanTime(timings[b.startKey]) || ''} end={b.endKey ? cleanTime(timings[b.endKey]) || '' : ''}
                 tasks={tasksFor(selectedDay, b.id)} labelById={labelById}
+                events={eventsByBlock[b.id] || []} cards={cardsByBlock[b.id] || []}
+                onAddCard={addTrelloCard} addedCards={trelloAdded}
                 habits={settings.habits.filter((h) => (h.block || 'morning') === b.id)}
                 habitDate={fmtISO(selectedDate)} onToggleHabit={toggleHabitDay}
                 current={isSelectedToday && b.id === activeId}
@@ -2176,7 +2288,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         <PointsPanel balance={balance} ledger={ledger} rewards={settings.rewards || []}
           onClose={() => setShowPoints(false)}
           onAddReward={addReward} onUpdReward={updReward} onDelReward={delReward}
-          onCashIn={cashIn} onForget={(ref) => revokeRef(ref)} />
+          onCashIn={cashIn} onForget={(ref) => revokeRef(ref)} onReset={resetPoints} />
       )}
 
       {showSettings && (

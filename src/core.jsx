@@ -1,5 +1,5 @@
 /* Rhythm core - pure logic: i18n, dates, prayer math, sky, blocks, model. */
-const APP_VERSION = '2.6';
+const APP_VERSION = '2.7';
 
 /* ------------------------------------------------------------------ */
 /*  i18n — lightweight, module-level translator (same pattern as the   */
@@ -277,7 +277,8 @@ const DEFAULT_SETTINGS = {
   groqKey: '',         // optional Groq key — free-tier fallback when Gemini is down
   brokerUrl: '',       // the shared key pool (keybroker) — one door to every project's keys
   brokerToken: '',     // this app's token for it; the keys above stay as the fallback
-  autoDark: true,      // switch the interface to dark at night (Maghrib→Sunrise)
+  autoDark: true,      // legacy flag, kept for old backups; 'theme' is the setting now
+  theme: 'auto',       // 'auto' (dark at night, Maghrib→Sunrise) | 'light' | 'dark'
   rewards: [],         // what points buy — you set the prices, which is what makes them mean anything
   weekStartDay: 6,
   prayerGate: true,
@@ -388,6 +389,9 @@ function migrateSettings(s) {
   base.brokerToken = typeof s.brokerToken === 'string' ? s.brokerToken : '';
   delete base.aiProvider;
   base.autoDark = s.autoDark !== false;
+  // The old boolean becomes the new three-way switch: auto-dark off meant
+  // "always light"; anything else keeps the automatic behaviour.
+  base.theme = ['auto', 'light', 'dark'].includes(s.theme) ? s.theme : (s.autoDark === false ? 'light' : 'auto');
   base.rewards = Array.isArray(s.rewards) ? s.rewards : [];
   return base;
 }

@@ -27,10 +27,15 @@ const PORT = 9222;
 const DATA_DIR = path.join(HERE, '.smoke-data');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/* By default the dev binary, run against this folder. Set RHYTHM_SMOKE_BIN
+   to a built Rhythm.exe to point the very same test at a packaged release —
+   packaging is where the seam breaks (asar paths, a missing dist), so a
+   release is not done until this passes against the exe. */
+const PACKAGED = process.env.RHYTHM_SMOKE_BIN;
 const electron = spawn(
-  path.join(HERE, 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron'),
-  ['.', `--remote-debugging-port=${PORT}`, `--user-data-dir=${DATA_DIR}`],
-  { cwd: HERE, stdio: 'ignore', shell: process.platform === 'win32' }
+  PACKAGED || path.join(HERE, 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron'),
+  [...(PACKAGED ? [] : ['.']), `--remote-debugging-port=${PORT}`, `--user-data-dir=${DATA_DIR}`],
+  { cwd: HERE, stdio: 'ignore', shell: !PACKAGED && process.platform === 'win32' }
 );
 const bail = (msg) => { console.error(msg); try { electron.kill(); } catch {} process.exit(1); };
 

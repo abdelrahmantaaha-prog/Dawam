@@ -7,6 +7,47 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ---
 
+## [2.7] — 2026-08-25
+
+The week page is gone from view: you plan in days now, and the day plans
+around everything at once. The desktop can hold the whole laptop shut until
+you have named what you are working on.
+
+### Added
+- **Cross-device sync on the desktop.** The Electron shell relays every API
+  call through its main process to the deployment, cookie jar and all, so the
+  same Google account sync the website has now works from rhythm://app —
+  sign in from Settings → Sync. The web deployment needed no changes.
+- **Commitment mode (desktop).** A new Focus setting locks every display
+  behind a full-screen cover whenever no work round is running. The planner
+  window sits above the lock — the way out is naming a task and a duration.
+  A deliberate 2.5-second hold steps out for a few configurable minutes.
+- **Reset points.** Points → Start over erases the balance and the whole
+  ledger, with tombstones so sync clears every device instead of restoring it.
+- **Meetings and due cards live in the timeline.** Timed calendar events and
+  Trello cards due on the day are tucked between the tasks at their clock
+  position, inside their prayer block. All-day events and later dues keep
+  their own strips. An ongoing meeting shows on the Now page.
+- **Theme control.** Auto (dark at night) / Light / Dark, in Settings →
+  General — the old checkbox only knew auto and light.
+
+### Changed
+- **Continuous days replace the week page.** The Plan strip is any seven
+  consecutive dates; the arrows slide it by a week without snapping to a
+  boundary, and dragging a task onto a day chip moves it there — including
+  across the stored week seam, so Friday → Saturday is finally just the next
+  chip over. Weeks remain the storage and sync unit underneath.
+- **The task editor was reorganised.** Schedule and ownership fields sit in
+  their own cards, the focus-lock chips moved into a single row, and the time
+  vault folds shut unless it holds something.
+- Settings tabs wrap instead of scrolling sideways with a hidden scrollbar.
+
+### Fixed
+- Dark mode: the storage warning and the loading screen were unreadable
+  light-only chrome.
+
+---
+
 ## [2.6] — 2026-08-22
 
 The day starts planning around the things you never told it about: the

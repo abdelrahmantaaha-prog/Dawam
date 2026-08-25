@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="lock.css" />
+</head>
+<body>
+  <div class="lock-wrap">
+    <div class="lock-mark">&#9672;</div>
+    <h1>Rhythm holds the day</h1>
+    <p class="lock-sub">The laptop opens when you know what you're working on, and for how long.</p>
+    <div class="lock-actions">
+      <button id="open-rhythm" class="lock-btn primary">Open Rhythm &amp; start a round</button>
+      <button id="hold-out" class="lock-btn ghost">
+        <span class="hold-fill"></span>
+        <span class="hold-text">Hold to step out for <span id="hold-min">5</span> min</span>
+      </button>
+    </div>
+    <p class="lock-note">Stepping out is a hold, not a click &mdash; on purpose.</p>
+  </div>
+  <script src="lock.js"></script>
+</body>
+</html>

@@ -90,6 +90,66 @@ round arrives back in the planner carrying its task id and its measured time.
 About 45 seconds. Rhythm must not already be running — the single-instance lock
 would send the test's copy straight back out.
 
+## Commitment mode
+
+Focus settings → Commitment. While it is on and no round is running, every
+display is covered by a lock screen; the planner window rides above the lock,
+because the way out is through it — name the task, give it a duration, start
+the round. The lock screen's escape is a held press (2.5s), which buys a
+configurable few minutes outside; releasing early resets. All of it lives in
+main.js (`lockWanted`/`showLockScreens`) and `windows/lock.*`.
+
+## Account sync
+
+The planner's origin is rhythm://app, so its own fetch could never carry the
+deployment's session cookie. Every /api call is relayed through the main
+process instead (`sync-fetch`), which has no CORS and no SameSite rules; the
+deployment needed no changes. Sign-in opens a real window on the deployment
+(Settings → Sync), and the cookies land in the app's own session. The server
+address defaults to rhythm-ruby.vercel.app and can be overridden with a
+`syncBase` key in the focus settings file.
+
+## Building an exe
+
+```bash
+npm run desktop:dist
+```
+
+From the repo root. It builds the planner with `RHYTHM_DESKTOP=1` and then runs
+electron-builder, leaving two files in `desktop/release/`:
+
+- **`Rhythm-Setup-<version>.exe`** — the installer. Pick this one. It asks where
+  to install, makes the desktop and Start-menu shortcuts, and installs per-user
+  so it needs no administrator. Uninstalling deliberately leaves your data
+  behind (`deleteAppDataOnUninstall: false`).
+- **`Rhythm-<version>-portable.exe`** — one self-extracting file, nothing
+  installed. Slower to start, because it unpacks itself on every launch. Your
+  plan still lives in `%APPDATA%/Rhythm`, not next to the exe, so the two
+  builds share one set of data.
+
+`npm run desktop:pack` skips the installers and just writes
+`desktop/release/win-unpacked/` — faster when you only want to test the packaged
+app. The build is unsigned, so SmartScreen will warn on first run
+("More info" → "Run anyway").
+
+Three things in the code exist only because of packaging, and they are easy to
+undo by accident:
+
+- The planner build ships as an **extra resource** (`resources/dist`), not inside
+  `app.asar`. `DIST` in `main.js` switches on `app.isPackaged` to find it.
+- The two PowerShell sidecars are **unpacked**. `powershell.exe` is an outside
+  process and cannot read a path inside `app.asar` — `sidecar()` in `poller.js`
+  rewrites `app.asar` to `app.asar.unpacked`.
+- The face model and `@mediapipe/tasks-vision` are unpacked for the same class
+  of reason: the presence window fetches its wasm and model as real files.
+
+Verify a build the same way the source is verified — the smoke test takes a
+binary:
+
+```bash
+RHYTHM_SMOKE_BIN=desktop/release/win-unpacked/Rhythm.exe node desktop/smoke.mjs
+```
+
 ## Notes
 
 - Distraction matching is substring-based on `title + process name + address-bar
@@ -98,6 +158,5 @@ would send the test's copy straight back out.
   killed, no data is lost.
 - Chair detection pauses the round when it cannot see you — worth knowing if a
   round ever looks like it stopped counting.
-- Packaging: add `electron-builder` when an installer is wanted. For daily use
-  a shortcut to `npm run desktop` (or Focus settings → Launch at login) is
-  enough.
+- Chair detection also matters when packaging: the camera window loads its
+  model over `file://`, which is why the model and MediaPipe stay unpacked.

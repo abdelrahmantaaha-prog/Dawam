@@ -38,7 +38,7 @@ function HabitLine({ h, iso, onToggle }) {
 /* ------------------------------------------------------------------ */
 /*  Block row (drop target for tasks, pool items, templates)           */
 /* ------------------------------------------------------------------ */
-function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over }) {
+function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over, events = [], cards = [], onAddCard, addedCards }) {
   const [folded, setFolded] = useState(() => new Set()); // collapsed subtask lists, per task id (session-local)
   const toggleFold = (id) => setFolded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [quick, setQuick] = useState('');
@@ -48,6 +48,23 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
   // Subtasks are NOT reorderable here — that lives in the task's detail editor,
   // so the timeline stays a calm read/check surface.
   const taskDrop = over && over.type === 'block' && over.id === block.id ? over : null;
+  /* Meetings and due cards are fixtures: anchored to the clock, read-only (a
+     card grows an Add button, nothing more). They are tucked between the tasks
+     by start time — before the first task that starts later than they do —
+     while untimed tasks keep their manual order after them. */
+  const fixtures = [
+    ...events.map((e) => ({ kind: 'event', at: e.startMin, e })),
+    ...cards.map((c) => ({ kind: 'card', at: c.dueMin, c })),
+  ].sort((a, b) => a.at - b.at);
+  const rows = [];
+  { let fi = 0;
+    for (const t of tasks) {
+      const ts = tStartMin(t) ?? Infinity;
+      while (fi < fixtures.length && fixtures[fi].at <= ts) rows.push(fixtures[fi++]);
+      rows.push({ kind: 'task', t });
+    }
+    while (fi < fixtures.length) rows.push(fixtures[fi++]);
+  }
   return (
     <div className={`block ${current ? 'active' : ''} ${dragActive ? 'drop-on' : ''} ${dragOver ? 'dragover' : ''}`} style={{ '--accent': block.accent, '--accent-deep': block.accentDeep, '--tint': block.tint }} data-dropblock={block.id}>
       <div className="block-head">
@@ -65,8 +82,29 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
           {habits.map((h) => <HabitLine key={h.id} h={h} iso={habitDate} onToggle={onToggleHabit} />)}
         </div>
       )}
-      {tasks.length === 0 && habits.length === 0 && !adding && <button className="empty" onClick={() => setAdding(true)}>{bHint(block)}</button>}
-      {tasks.map((t) => { const p = labelById(t.projectId); const subs = t.subtasks || [];
+      {tasks.length === 0 && habits.length === 0 && fixtures.length === 0 && !adding && <button className="empty" onClick={() => setAdding(true)}>{bHint(block)}</button>}
+      {rows.map((row, ri) => {
+        if (row.kind === 'event') { const e = row.e; return (
+          <div key={`ev-${e.uid || ''}-${ri}`} className="cal-inline">
+            <Calendar size={14} className="cal-inline-ic" />
+            <div className="cal-inline-col">
+              <span className="cal-inline-title">{e.summary || tx('(busy)', '(مشغول)')}</span>
+              <span className="cal-inline-time">{fmtTime(mm2(e.startMin))}–{fmtTime(mm2(e.endMin))}{e.calName ? ` · ${e.calName}` : ''}</span>
+            </div>
+            <span className="cal-inline-tag">{tx('meeting', 'اجتماع')}</span>
+          </div>); }
+        if (row.kind === 'card') { const c = row.c; const added = addedCards && addedCards.has(c.id); return (
+          <div key={`tr-${c.id}`} className="cal-inline trello">
+            <LayoutTemplate size={14} className="cal-inline-ic" />
+            <div className="cal-inline-col">
+              <span className="cal-inline-title">{c.title}</span>
+              <span className="cal-inline-time">{tx('due', 'تستحق')} {fmtTime(mm2(c.dueMin))}{c.boardName ? ` · ${c.boardName}` : ''}</span>
+            </div>
+            {added
+              ? <span className="cal-inline-tag ok"><Check size={12} /> {tx('added', 'أُضيفت')}</span>
+              : <button className="ghost sm" onClick={() => onAddCard && onAddCard(c)}><Plus size={13} /> {tx('Add', 'أضف')}</button>}
+          </div>); }
+        const t = row.t; const p = labelById(t.projectId); const subs = t.subtasks || [];
         const dBefore = taskDrop && taskDrop.taskId === t.id && !taskDrop.after;
         const dAfter = taskDrop && taskDrop.taskId === t.id && taskDrop.after;
         return (
@@ -349,16 +387,24 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaul
           <input className="title-edit" value={task.title} onChange={(e) => setField('title', e.target.value)} />
           <button className="icon" onClick={onClose}><X size={18} /></button>
         </div>
-        <div className="modal-body">
-          <div className="row2">
-            <label><span>{tx('Label', 'الوسم')}</span><select value={task.projectId || ''} onChange={(e) => setField('projectId', e.target.value || null)}><option value="">{tx('— none —', '— بدون —')}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-            <label><span>{tx('Project', 'المشروع')}</span><select value={task.projectRef || ''} onChange={(e) => setField('projectRef', e.target.value || null)}><option value="">{tx('— none —', '— بدون —')}</option>{allProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
-            <label><span>{tx('Date', 'التاريخ')}</span><input className="time-input" type="date" value={dateISO} onChange={(e) => e.target.value && onMoveDate(e.target.value)} /></label>
-            <label><span>{tx('Block', 'الفترة')}</span><select value={task.block} onChange={(e) => setField('block', e.target.value)}>{BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}</select></label>
-            {/* A hand-set time is the person's own; dropping autoSlot here keeps
-                "Clear slots" and re-slotting from ever overwriting it. */}
-            <label><span>{tx('Start', 'البداية')}</span><input className="time-input" type="time" value={task.start || ''} disabled={vaultLocksTime} onChange={(e) => onChange((t) => ({ ...t, start: e.target.value, autoSlot: null }))} /></label>
-            <label><span>{tx('End', 'النهاية')}</span><input className="time-input" type="time" value={task.end || ''} disabled={vaultLocksTime} onChange={(e) => onChange((t) => ({ ...t, end: e.target.value, autoSlot: null }))} /></label>
+        <div className="modal-body task-edit">
+          <div className="edit-card">
+            <div className="edit-card-h"><Clock size={13} /> {tx('When', 'الموعد')}</div>
+            <div className="edit-grid">
+              <label><span>{tx('Date', 'التاريخ')}</span><input className="time-input" type="date" value={dateISO} onChange={(e) => e.target.value && onMoveDate(e.target.value)} /></label>
+              <label><span>{tx('Block', 'الفترة')}</span><select value={task.block} onChange={(e) => setField('block', e.target.value)}>{BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}</select></label>
+              {/* A hand-set time is the person's own; dropping autoSlot here keeps
+                  "Clear slots" and re-slotting from ever overwriting it. */}
+              <label><span>{tx('Start', 'البداية')}</span><input className="time-input" type="time" value={task.start || ''} disabled={vaultLocksTime} onChange={(e) => onChange((t) => ({ ...t, start: e.target.value, autoSlot: null }))} /></label>
+              <label><span>{tx('End', 'النهاية')}</span><input className="time-input" type="time" value={task.end || ''} disabled={vaultLocksTime} onChange={(e) => onChange((t) => ({ ...t, end: e.target.value, autoSlot: null }))} /></label>
+            </div>
+          </div>
+          <div className="edit-card">
+            <div className="edit-card-h"><Tag size={13} /> {tx('Belongs to', 'تنتمي إلى')}</div>
+            <div className="edit-grid">
+              <label><span>{tx('Label', 'الوسم')}</span><select value={task.projectId || ''} onChange={(e) => setField('projectId', e.target.value || null)}><option value="">{tx('— none —', '— بدون —')}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+              <label><span>{tx('Project', 'المشروع')}</span><select value={task.projectRef || ''} onChange={(e) => setField('projectRef', e.target.value || null)}><option value="">{tx('— none —', '— بدون —')}</option>{allProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+            </div>
           </div>
           {/* The reading, and the override for when the reading is wrong. Auto is
               shown even while overridden so you can always see what you argued
@@ -382,19 +428,18 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaul
             </span>
           </div>
           <div className="editor-actions">
-            <button className="ghost sm" onClick={onToPool}><Inbox size={14} /> {tx('Move to backlog', 'نقل إلى قائمة الانتظار')}</button>
-            <button className="ghost sm" onClick={onSaveTemplate}><Repeat size={14} /> {tx('Save as recurring', 'حفظ كمتكررة')}</button>
+            <button className="ghost sm" onClick={onToPool}><Inbox size={14} /> {tx('To backlog', 'إلى قائمة الانتظار')}</button>
+            <button className="ghost sm" onClick={onSaveTemplate}><Repeat size={14} /> {tx('Make recurring', 'اجعلها متكررة')}</button>
           </div>
-          <div className="sect">
-            <div className="sect-h"><Clock size={13} /> {tx('Focus lock', 'قفل التركيز')}</div>
-            <p className="hint-text" style={{ marginTop: 0, marginBottom: 8 }}>{tx('Lock Rhythm for the duration of this task (e.g. walking). You can end early.', 'اقفل التطبيق طوال مدة هذه المهمة (مثل المشي). يمكنك الإنهاء مبكرًا.')}</p>
-            <div className="focus-choices">
-              {[5, 10, 15, 20, 30, 45].map((mn) => (<button key={mn} className="ghost sm" onClick={() => onFocus(mn)}>{mn}{tx('m', 'د')}</button>))}
-              {tEndMin(task) != null && <button className="ghost sm focus-whole" onClick={() => onFocus(null, true)}>{tx('Until end', 'حتى النهاية')} ({timeLabel(task).split('–')[1] || fmtTime(task.end)})</button>}
-            </div>
+          <div className="edit-focus-row">
+            <span className="edit-focus-label"><Clock size={13} /> {tx('Focus for', 'ركّز لمدة')}</span>
+            {[10, 20, 30, 45].map((mn) => (<button key={mn} className="ghost sm" onClick={() => onFocus(mn)}>{mn}{tx('m', 'د')}</button>))}
+            {tEndMin(task) != null && <button className="ghost sm focus-whole" onClick={() => onFocus(null, true)}>{tx('Until end', 'حتى النهاية')}</button>}
           </div>
-          <div className="sect">
-            <div className="sect-h"><Lock size={13} /> {tx('Time vault', 'خزنة موقّتة')}</div>
+          {/* The vault folds shut: most tasks have no secret, and a closed fold
+              is how a rarely-used lockbox should read. Open when it holds one. */}
+          <details className="edit-fold" open={hasVault(task) || undefined}>
+            <summary><Lock size={13} /> {tx('Time vault', 'خزنة موقّتة')}{hasVault(task) ? <span className="fold-note">{vaultOpen ? tx('open now', 'مفتوحة الآن') : tx('holding something', 'تحوي شيئًا')}</span> : null}</summary>
             <p className="hint-text" style={{ marginTop: 0, marginBottom: 8 }}>
               {tx('Hold something you only want back during this task’s window — it stays hidden until then, and re-hides after. Friction, not a safe: it is stored in plain text on this device and appears in backup exports.',
                 'احتفظ بشيء لا تريده إلا خلال وقت هذه المهمة — يبقى مخفيًا حتى ذلك الحين ثم يُخفى مجددًا. هذا عائق وليس خزنة: يُحفظ كنص عادي على هذا الجهاز ويظهر في النسخ الاحتياطية.')}
@@ -428,7 +473,7 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaul
                 <button className="mini-del" onClick={clearVault} aria-label={tx('Remove', 'إزالة')}><X size={13} /></button>
               </div>
             )}
-          </div>
+          </details>
           <SubtaskEditor subtasks={task.subtasks} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...t.subtasks, { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.filter((s) => s.id !== id) }))} onMove={(id, targetId, after) => onChange((t) => ({ ...t, subtasks: moveById(t.subtasks || [], id, targetId, after) }))} />
           <NotesEditor notes={task.notes || []} onAdd={(n) => onChange((t) => ({ ...t, notes: [...(t.notes || []), n] }))} onUpdate={(id, c) => onChange((t) => ({ ...t, notes: (t.notes || []).map((x) => x.id === id ? { ...x, content: c } : x) }))} onDel={(id) => onChange((t) => ({ ...t, notes: (t.notes || []).filter((x) => x.id !== id) }))} />
         </div>
@@ -475,8 +520,9 @@ function PoolEditor({ item, projects, allProjects = [], onClose, onChange, onDel
 /* The ledger is on screen and not just the balance, on purpose. The
    problem this feature exists to solve is forgetting to reward yourself,
    and a bare number can't show you that you actually did. */
-function PointsPanel({ balance, ledger, rewards, onClose, onAddReward, onUpdReward, onDelReward, onCashIn, onForget }) {
+function PointsPanel({ balance, ledger, rewards, onClose, onAddReward, onUpdReward, onDelReward, onCashIn, onForget, onReset }) {
   const [editing, setEditing] = useState(null);
+  const [confirmReset, setConfirmReset] = useState(false);
   const recent = ledger.slice().reverse().slice(0, 40);
   const kindLabel = { task: tx('task', 'مهمة'), subtask: tx('step', 'خطوة'), habit: tx('habit', 'عادة'), spend: tx('spent', 'صرف') };
   return (
@@ -536,6 +582,22 @@ function PointsPanel({ balance, ledger, rewards, onClose, onAddReward, onUpdRewa
                 {e.kind === 'spend' && <button className="icon sm" onClick={() => onForget(e.ref)} aria-label={tx('Remove', 'إزالة')} title={tx('Logged by mistake?', 'سُجّل بالخطأ؟')}><X size={13} /></button>}
               </li>
             ))}</ul>
+          )}
+
+          {/* Starting over. Deliberately at the very bottom, past the ledger it
+              erases — the whole history goes with the balance, which is the
+              honest version of "from scratch". */}
+          <div className="pts-sec-h danger-h"><span>{tx('Start over', 'البدء من جديد')}</span></div>
+          {confirmReset ? (
+            <div className="pts-reset-confirm">
+              <span>{tx('Erase every point and the whole ledger? This cannot be undone.', 'مسح كل النقاط والسجل كاملًا؟ لا يمكن التراجع.')}</span>
+              <span className="pts-reset-btns">
+                <button className="danger sm" onClick={() => { onReset(); setConfirmReset(false); }}>{tx('Erase it all', 'امسح الكل')}</button>
+                <button className="ghost sm" onClick={() => setConfirmReset(false)}>{tx('Keep it', 'أبقِه')}</button>
+              </span>
+            </div>
+          ) : (
+            <button className="ghost sm pts-reset" onClick={() => setConfirmReset(true)}><Trash2 size={13} /> {tx('Reset points to zero', 'تصفير النقاط')}</button>
           )}
         </div>
         <div className="modal-foot"><button className="primary" onClick={onClose}>{tx('Done', 'تم')}</button></div>

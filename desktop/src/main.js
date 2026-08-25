@@ -10,7 +10,7 @@
    Nothing here reaches the network. The planner talks to its own sync API
    only if the build was given VITE_API_BASE. */
 
-const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, nativeImage, screen, protocol, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, Notification, nativeImage, screen, protocol, shell, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const Store = require('./store');
@@ -22,7 +22,14 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 const DEV = process.argv.includes('--dev');
 const DEV_URL = process.env.RHYTHM_DEV_URL || 'http://127.0.0.1:5199';
-const DIST = path.join(__dirname, '..', '..', 'dist');
+/* Where the planner's built output lives.
+
+   In the repo it is the sibling `dist/` that `npm run desktop:build` writes.
+   A packaged build carries the same folder as an extra resource, so it lands
+   next to app.asar in resources/ rather than two levels up. */
+const DIST = app.isPackaged
+  ? path.join(process.resourcesPath, 'dist')
+  : path.join(__dirname, '..', '..', 'dist');
 
 /* The planner is served from rhythm://app rather than file://.
 
@@ -72,6 +79,9 @@ if (!app.requestSingleInstanceLock()) {
   let breakWins = [];
   let presenceWin = null;
   let awayWins = [];
+  let lockWins = [];
+  let lockHoldUntil = 0;   // a completed hold buys time outside, until this instant
+  let lockTimer = null;
   let lastPresentAt = Date.now();
   let awaySuppressed = false; // manual dismiss holds until the camera sees a face again
   let awayPaused = false; // we paused the session because the chair emptied
@@ -199,6 +209,51 @@ if (!app.requestSingleInstanceLock()) {
     }
   }
 
+  /* ---- commitment lock ----
+     The same full-screen always-on-top pattern as the break and away screens,
+     with one difference: the planner window is allowed ABOVE it, because the
+     way out of the lock is through the planner — plan the task, start the
+     round. showLockScreens raises the planner a level for exactly that. */
+  function lockWanted() {
+    if (!store.data.settings.commitmentMode) return false;
+    if (Date.now() < lockHoldUntil) return false;
+    const s = sessions.getState();
+    return s.phase === 'idle';
+  }
+
+  function showLockScreens() {
+    if (lockWins.length) return;
+    for (const d of screen.getAllDisplays()) {
+      const win = new BrowserWindow({
+        x: d.bounds.x, y: d.bounds.y, width: d.bounds.width, height: d.bounds.height,
+        frame: false, fullscreen: true, alwaysOnTop: true, skipTaskbar: true,
+        backgroundColor: '#0B0F14', icon: icon(),
+        webPreferences: { preload }
+      });
+      win.setAlwaysOnTop(true, 'screen-saver');
+      win.on('close', (e) => { if (!quitting) e.preventDefault(); });
+      win.loadFile(winFile('lock.html'));
+      lockWins.push(win);
+    }
+    // The planner must sit above the lock — it is the door, not a bypass.
+    if (planner && !planner.isDestroyed()) {
+      planner.setAlwaysOnTop(true, 'screen-saver', 1);
+      planner.show();
+      planner.focus();
+    }
+  }
+
+  function hideLockScreens() {
+    for (const win of lockWins) { if (!win.isDestroyed()) win.destroy(); }
+    lockWins = [];
+    if (planner && !planner.isDestroyed()) planner.setAlwaysOnTop(false);
+  }
+
+  function updateLock() {
+    if (lockWanted()) showLockScreens();
+    else hideLockScreens();
+  }
+
   function notify(title, body) {
     if (Notification.isSupported()) {
       new Notification({ title, body, icon: icon() }).show();
@@ -287,6 +342,7 @@ if (!app.requestSingleInstanceLock()) {
 
   function showPlanner() {
     if (!planner || planner.isDestroyed()) createPlanner();
+    if (lockWins.length) planner.setAlwaysOnTop(true, 'screen-saver', 1);
     planner.show();
     planner.focus();
   }
@@ -347,6 +403,7 @@ if (!app.requestSingleInstanceLock()) {
     if (enforcer) enforcer.stop();
     hideBreakScreens();
     hideAwayScreens();
+    hideLockScreens();
     if (presenceWin && !presenceWin.isDestroyed()) presenceWin.destroy();
   });
 
@@ -438,7 +495,13 @@ if (!app.requestSingleInstanceLock()) {
         hideBreakScreens();
       }
       ensurePresenceWindow(s);
+      updateLock();
     });
+
+    // The lock's clock: catches the step-out expiring and the app booting
+    // straight into commitment mode. Cheap enough to just poll.
+    setInterval(updateLock, 2000);
+    updateLock();
 
     // Away watchdog: no face for awaySec during a work session -> blackout.
     setInterval(() => {
@@ -558,9 +621,81 @@ if (!app.requestSingleInstanceLock()) {
       }
       broadcast('data-changed');
       sessions.emitState();
+      updateLock();
       return store.data.settings;
     });
     ipcMain.handle('open-planner', () => showPlanner());
+    ipcMain.handle('lock-step-out', () => {
+      const min = Math.max(1, Math.min(60, Number(store.data.settings.unlockMin) || 5));
+      lockHoldUntil = Date.now() + min * 60000;
+      hideLockScreens();
+      if (lockTimer) clearTimeout(lockTimer);
+      lockTimer = setTimeout(updateLock, min * 60000 + 500);
+      notify('Stepped out', `Rhythm locks again in ${min} minutes.`);
+      return { until: lockHoldUntil };
+    });
+
+    /* ---- account sync ----
+       The planner runs on rhythm://app, which is not the deployment's origin,
+       so its own fetch() could never carry the session cookie (SameSite) and
+       the server would need CORS holes. The main process has neither problem:
+       requests from here go through the session cookie jar with no browser
+       policy attached, so the web deployment needs no changes at all. */
+    const SYNC_BASE_DEFAULT = 'https://rhythm-ruby.vercel.app';
+    const syncBase = () => String(store.data.settings.syncBase || SYNC_BASE_DEFAULT).replace(/\/+$/, '');
+
+    ipcMain.handle('sync-base', () => syncBase());
+    ipcMain.handle('sync-fetch', async (_e, path, init) => {
+      if (!/^\/api\//.test(String(path))) return { ok: false, status: 0, error: 'bad-path' };
+      try {
+        const r = await session.defaultSession.fetch(syncBase() + path, {
+          method: (init && init.method) || 'GET',
+          headers: (init && init.headers) || {},
+          body: init && init.body != null ? init.body : undefined,
+          credentials: 'include',
+        });
+        return { ok: r.ok, status: r.status, body: await r.text() };
+      } catch (e) {
+        return { ok: false, status: 0, error: String((e && e.message) || e) };
+      }
+    });
+
+    /* Sign-in happens in a real window on the deployment itself — the cookies
+       land in this app's session and every later sync-fetch carries them.
+       Google refuses OAuth from a browser that admits to being embedded, so
+       the window drops the Electron token from its user agent. */
+    let authWin = null;
+    ipcMain.handle('sync-signin', () => new Promise((resolve) => {
+      if (authWin && !authWin.isDestroyed()) { authWin.focus(); return resolve({ ok: false, error: 'already-open' }); }
+      const base = syncBase();
+      authWin = new BrowserWindow({
+        width: 520, height: 660, autoHideMenuBar: true, icon: icon(),
+        title: 'Sign in to Rhythm',
+      });
+      authWin.webContents.setUserAgent(authWin.webContents.getUserAgent().replace(/Electron\/\S+\s?/, '').replace(/rhythm-desktop\/\S+\s?/, ''));
+      const done = (url) => {
+        // Back on the deployment's root = the OAuth round trip finished.
+        if (url.startsWith(base) && new URL(url).pathname === '/') {
+          const w = authWin; authWin = null;
+          if (w && !w.isDestroyed()) w.close();
+        }
+      };
+      authWin.webContents.on('did-navigate', (_e2, url) => done(url));
+      authWin.webContents.on('did-redirect-navigation', (_e2, url) => done(url));
+      authWin.on('closed', () => { authWin = null; resolve({ ok: true }); });
+      authWin.loadURL(base + '/api/auth/signin?callbackUrl=' + encodeURIComponent(base + '/'));
+    }));
+
+    /* Local sign-out: drop the deployment's cookies. The JWT session lives in
+       the cookie, so removing it is the whole operation. */
+    ipcMain.handle('sync-signout', async () => {
+      const base = syncBase();
+      const all = await session.defaultSession.cookies.get({ url: base });
+      for (const c of all) {
+        try { await session.defaultSession.cookies.remove(base, c.name); } catch { /* gone already */ }
+      }
+      return { ok: true };
+    });
 
     /* ---- calendar ----
        The planner asks; the main process is the only part of the app that can

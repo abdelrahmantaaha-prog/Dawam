@@ -954,3 +954,55 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .trello-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
 .trello-where{flex-shrink:0;font-size:10.5px;color:var(--faint);max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rhythm.dark .trello-card.late .trello-due{color:#E07A7A}
+
+/* ---- v2.7: continuous days, inline meetings, editor cards, lock ---- */
+
+/* Settings tabs used to scroll sideways with the scrollbar hidden — nine tabs,
+   no affordance, mouse wheels don't scroll X. They wrap instead now. */
+.settings-tabs{flex-wrap:wrap;overflow-x:visible;row-gap:0}
+
+/* A day chip a dragged task is hovering: about to receive it. */
+.chip.drop{border-color:var(--verdigris);box-shadow:0 0 0 2px rgba(62,138,108,.35);background:rgba(62,138,108,.12)}
+.chip.drop .chip-d,.chip.drop .chip-n{color:var(--verdigris)}
+
+/* Meetings and due cards inside the timeline. Same row rhythm as a task, but
+   read-only chrome: a left rail in the block's accent, no checkbox. */
+.cal-inline{display:flex;align-items:center;gap:9px;padding:7px 9px;margin:3px 0;border:1px dashed var(--line);border-inline-start:3px solid var(--accent-deep,var(--verdigris));border-radius:10px;background:var(--soft)}
+.cal-inline-ic{flex-shrink:0;color:var(--accent-deep,var(--verdigris))}
+.cal-inline-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.cal-inline-title{font-size:13.5px;font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+.cal-inline-time{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.cal-inline-tag{font-size:9.5px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);border:1px solid var(--line);border-radius:20px;padding:2px 7px;flex-shrink:0}
+.cal-inline-tag.ok{color:var(--verdigris);border-color:var(--verdigris);display:inline-flex;align-items:center;gap:3px}
+.rhythm.dark .cal-inline{background:rgba(163,175,191,.06)}
+
+/* Task editor: grouped cards instead of one long form. */
+.task-edit .edit-card{border:1px solid var(--line);border-radius:12px;padding:11px 12px 12px;margin-bottom:12px;background:var(--surface)}
+.rhythm.dark .task-edit .edit-card{background:rgba(163,175,191,.05)}
+.edit-card-h{display:flex;align-items:center;gap:6px;font-size:10.5px;font-weight:800;color:var(--faint);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px}
+.edit-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px}
+.edit-grid label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;font-weight:600;color:var(--muted);min-width:0}
+.edit-grid input,.edit-grid select{width:100%;min-width:0;height:34px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);padding:0 8px;font-family:inherit;font-size:13px}
+.edit-focus-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.edit-focus-label{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:var(--muted)}
+.edit-fold{border:1px solid var(--line);border-radius:12px;padding:0;margin-bottom:14px;overflow:hidden}
+.edit-fold summary{display:flex;align-items:center;gap:7px;cursor:pointer;list-style:none;padding:10px 12px;font-size:12px;font-weight:700;color:var(--muted);user-select:none}
+.edit-fold summary::-webkit-details-marker{display:none}
+.edit-fold summary:hover{background:var(--soft)}
+.edit-fold[open] summary{border-bottom:1px solid var(--soft)}
+.edit-fold>*:not(summary){margin-left:12px;margin-right:12px}
+.edit-fold>p:first-of-type{margin-top:10px}
+.edit-fold .vault-row,.edit-fold .inline-add,.edit-fold .vault-warn{margin-bottom:10px}
+.fold-note{margin-inline-start:auto;font-size:10.5px;font-weight:700;color:var(--verdigris)}
+
+/* Points reset */
+.danger-h span{color:#B23A3A}
+.pts-reset{color:#B23A3A;border-color:rgba(178,58,58,.4)}
+.pts-reset-confirm{display:flex;flex-direction:column;gap:8px;border:1px solid rgba(178,58,58,.4);border-radius:11px;padding:10px 12px;font-size:12.5px;color:var(--ink)}
+.pts-reset-btns{display:flex;gap:8px}
+
+/* The storage warning was light-only chrome. */
+.rhythm.dark .warn{background:rgba(156,66,33,.16);border-color:rgba(232,201,181,.25);color:#E8B48F}
+
+/* The loading screen used a hardcoded mid-grey that vanished on dark. */
+.load-screen{min-height:320px;display:flex;align-items:center;justify-content:center;color:var(--muted,#6B6878)}

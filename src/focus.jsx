@@ -415,6 +415,11 @@ function FocusSettings({ api, settings, templates, onSaved }) {
       {toggle('chairDetect', tx('Chair detection (webcam, all local)', 'كشف الكرسي (كاميرا، محليًا بالكامل)'))}
       {num('awaySec', tx('Seconds away before blackout', 'ثواني الغياب قبل الإظلام'), 5, 300)}
 
+      <h4 className="focus-h4">{tx('Commitment', 'الالتزام')}</h4>
+      {toggle('commitmentMode', tx('Lock the whole laptop between rounds', 'قفل الجهاز كله بين الجولات'),
+        tx('Every screen is covered until you start a focus round with a task and a duration. A 2.5-second hold on the lock screen steps out temporarily.', 'تُغطى كل الشاشات حتى تبدأ جولة تركيز بمهمة ومدة. الضغط المطوّل (٢٫٥ ثانية) على شاشة القفل يمنح خروجًا مؤقتًا.'))}
+      {num('unlockMin', tx('Step-out minutes', 'دقائق الخروج المؤقت'), 1, 60, tx('How long a completed hold keeps the laptop open.', 'مدة بقاء الجهاز مفتوحًا بعد الضغط المطوّل.'))}
+
       <h4 className="focus-h4">{tx('Lists', 'القوائم')}</h4>
       {list('distractions', tx('Distractions', 'الملهيات'), tx('Matched against the window title, the app name and the address-bar domain.', 'تُطابق عنوان النافذة واسم التطبيق ونطاق شريط العنوان.'))}
       {list('blocklist', tx('Hard block', 'حظر تام'), tx('Minimized on sight, session or not.', 'تُصغَّر فور ظهورها، بجلسة أو بدونها.'))}

@@ -28,7 +28,12 @@ const DEFAULTS = {
     overlayPos: null,
     // Desktop-only: the planner window is the app's face, so it opens on
     // launch unless the person would rather start in the tray.
-    openPlannerAtStart: true
+    openPlannerAtStart: true,
+    // Commitment mode: while no work round runs, every display is covered by a
+    // lock screen — the laptop opens by naming a task and a duration. The
+    // escape is a deliberate 2.5s hold that buys unlockMin minutes outside.
+    commitmentMode: false,
+    unlockMin: 5
   },
   templates: [],
   history: []

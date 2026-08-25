@@ -24,6 +24,19 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
   skipBreak: () => ipcRenderer.invoke('skip-break'),
   saveSettings: (patch) => ipcRenderer.invoke('save-settings', patch),
   openPlanner: () => ipcRenderer.invoke('open-planner'),
+  // Commitment lock: the held-out escape. Granting it is the main process's
+  // decision; this only reports that the hold completed.
+  lockStepOut: () => ipcRenderer.invoke('lock-step-out'),
+
+  /* Account sync, relayed through the main process — see main.js for why the
+     renderer cannot do this itself. Present only on the desktop; sync.js
+     falls back to plain fetch() everywhere else. */
+  sync: {
+    base: () => ipcRenderer.invoke('sync-base'),
+    request: (path, init) => ipcRenderer.invoke('sync-fetch', path, init),
+    signIn: () => ipcRenderer.invoke('sync-signin'),
+    signOut: () => ipcRenderer.invoke('sync-signout'),
+  },
 
   /* Read-only calendar access. Present only on the desktop, which is exactly
      how the planner decides whether to offer real Google sign-in or fall back

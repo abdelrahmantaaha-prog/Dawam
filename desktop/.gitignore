@@ -1,2 +1,4 @@
 .smoke-data/
 node_modules/
+release/
+.probe*/

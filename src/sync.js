@@ -41,6 +41,26 @@ const API = {
   signOut: `${BASE}/api/auth/signout`,
 };
 
+/* ---------- transport ----------
+   On the desktop every API call goes through the Electron main process: the
+   planner's origin is rhythm://app, so a renderer fetch could never carry the
+   deployment's session cookie. The bridge answers with { ok, status, body };
+   this wraps it back into a Response-shaped object so the callers cannot tell
+   the difference. Everywhere else it is fetch(), with credentials included
+   when the API lives on another origin. */
+const desktopSync = () => (typeof window !== 'undefined' && window.rhythmFocus && window.rhythmFocus.sync) || null;
+
+async function apiFetch(url, init = {}) {
+  const ds = desktopSync();
+  if (ds) {
+    const path = url.startsWith('/') ? url : new URL(url, 'http://x').pathname + new URL(url, 'http://x').search;
+    const r = await ds.request(path, { method: init.method, headers: init.headers, body: init.body });
+    if (r.status === 0) throw new Error(r.error || 'network');
+    return { ok: r.ok, status: r.status, json: async () => JSON.parse(r.body || 'null'), text: async () => r.body };
+  }
+  return fetch(url, { credentials: BASE ? 'include' : 'same-origin', ...init });
+}
+
 /* Local bookkeeping. `meta` is when this device last wrote each key, and it is
    what gives the merge its timestamps; `tombs` remembers keys deleted here so a
    prune isn't undone by the next pull. */
@@ -122,7 +142,7 @@ export async function applyDoc(doc, { onKey } = {}) {
 
 /* ---------- Auth.js handshake ---------- */
 async function csrfToken() {
-  const r = await fetch(API.csrf, { credentials: 'same-origin' });
+  const r = await apiFetch(API.csrf);
   if (!r.ok) throw new Error('csrf-failed');
   const j = await r.json();
   return j.csrfToken;
@@ -148,21 +168,31 @@ async function postForm(action, fields) {
   form.submit();
 }
 
-export const signIn = () => postForm(API.signIn);
-export const signOut = () => postForm(API.signOut);
+/* On the desktop the OAuth round trip runs in a shell window against the
+   deployment itself; a reload afterwards re-probes /api/me and picks the
+   session up. On the web it is Auth.js's own form POST. */
+export const signIn = async () => {
+  const ds = desktopSync();
+  if (ds) { await ds.signIn(); window.location.reload(); return; }
+  return postForm(API.signIn);
+};
+export const signOut = async () => {
+  const ds = desktopSync();
+  if (ds) { await ds.signOut(); window.location.reload(); return; }
+  return postForm(API.signOut);
+};
 
 /* ---------- transport ---------- */
 async function pullDoc() {
-  const r = await fetch(API.sync, { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+  const r = await apiFetch(API.sync, { headers: { Accept: 'application/json' } });
   if (r.status === 401) return { signedOut: true };
   if (!r.ok) throw new Error('pull-' + r.status);
   return r.json();
 }
 
 async function pushDoc(doc) {
-  const r = await fetch(API.sync, {
+  const r = await apiFetch(API.sync, {
     method: 'POST',
-    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ doc }),
   });
@@ -173,7 +203,7 @@ async function pushDoc(doc) {
 }
 
 export async function disconnect() {
-  const r = await fetch(API.sync, { method: 'DELETE', credentials: 'same-origin' });
+  const r = await apiFetch(API.sync, { method: 'DELETE' });
   if (!r.ok) throw new Error('disconnect-failed');
   return r.json();
 }
@@ -222,7 +252,7 @@ export function useSync({ localVersion, onApplied, loaded }) {
     (async () => {
       const url = new URL(API.me, window.location.href).href;
       try {
-        const r = await fetch(API.me, { credentials: BASE ? 'include' : 'same-origin' });
+        const r = await apiFetch(API.me);
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const j = await r.json();
         if (cancelled) return;

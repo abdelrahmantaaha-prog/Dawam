@@ -399,8 +399,13 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
               <p className="hint-text">{tx('Arabic switches the whole app to right-to-left.', 'العربية تحوّل التطبيق بالكامل إلى الاتجاه من اليمين لليسار.')}</p>
             </div>
             <div className="sect">
-              <div className="sect-h">{tx('Dark mode', 'الوضع الداكن')}</div>
-              <label className="toggle"><input type="checkbox" checked={local.autoDark !== false} onChange={(e) => patch({ autoDark: e.target.checked })} /><span>{tx('Switch to dark automatically at night (Maghrib to Sunrise)', 'التبديل إلى الداكن تلقائيًا ليلًا (من المغرب إلى الشروق)')}</span></label>
+              <div className="sect-h">{tx('Appearance', 'المظهر')}</div>
+              <div className="seg time-seg theme-seg">
+                <button className={(local.theme || 'auto') === 'auto' ? 'on' : ''} onClick={() => patch({ theme: 'auto', autoDark: true })}>{tx('Auto', 'تلقائي')}</button>
+                <button className={local.theme === 'light' ? 'on' : ''} onClick={() => patch({ theme: 'light', autoDark: false })}>{tx('Light', 'فاتح')}</button>
+                <button className={local.theme === 'dark' ? 'on' : ''} onClick={() => patch({ theme: 'dark', autoDark: true })}>{tx('Dark', 'داكن')}</button>
+              </div>
+              <p className="hint-text">{tx('Auto follows the sky: dark from Maghrib to Sunrise.', 'التلقائي يتبع السماء: داكن من المغرب إلى الشروق.')}</p>
             </div>
             <div className="sect">
               <div className="sect-h">{tx('Time format', 'صيغة الوقت')}</div>

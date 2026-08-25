@@ -2,11 +2,21 @@ const { spawn } = require('child_process');
 const path = require('path');
 const { EventEmitter } = require('events');
 
+/* powershell.exe is an outside process: it cannot read a file inside app.asar,
+   which is a virtual filesystem only Electron's own fs knows about. The build
+   leaves the .ps1 sidecars unpacked (asarUnpack in package.json) and this
+   points at that copy. Outside a packaged build the path is unchanged. */
+const sidecar = (name) =>
+  path.join(
+    __dirname.replace(`${path.sep}app.asar${path.sep}`, `${path.sep}app.asar.unpacked${path.sep}`),
+    name
+  );
+
 // Polls the foreground window via a persistent PowerShell sidecar
 // (no native npm modules needed). Emits 'sample' with {title, process}.
 function startPoller() {
   const emitter = new EventEmitter();
-  const script = path.join(__dirname, 'active-window.ps1');
+  const script = sidecar('active-window.ps1');
   let ps = null;
   let stopped = false;
 
@@ -47,7 +57,7 @@ function startPoller() {
 // Persistent PowerShell process that executes window commands sent via stdin
 // ("minimize <hwnd>" / "focus <hwnd>"). Used for force-return.
 function startEnforcer() {
-  const script = path.join(__dirname, 'enforcer.ps1');
+  const script = sidecar('enforcer.ps1');
   let ps = null;
   let stopped = false;
 
