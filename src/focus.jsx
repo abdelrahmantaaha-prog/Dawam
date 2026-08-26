@@ -426,7 +426,7 @@ function FocusSettings({ api, settings, templates, onSaved }) {
       {list('freeTimes', tx('Free times', 'أوقات حرة'), tx('20:00-23:00 — or fri,sat 14:00-02:00. The hard block is off inside these.', '20:00-23:00 — أو fri,sat 14:00-02:00. الحظر التام معطّل خلالها.'))}
 
       <h4 className="focus-h4">{tx('This app', 'هذا التطبيق')}</h4>
-      {toggle('launchAtLogin', tx('Launch at login', 'التشغيل مع بدء الجهاز'))}
+      {toggle('launchAtLogin', tx('Start with Windows', 'البدء مع تشغيل ويندوز'), tx('Rhythm launches when you sign in, quietly in the tray. With commitment mode on, the locks are up from the first minute.', 'يبدأ ريذم عند تسجيل الدخول، بهدوء في شريط المهام. مع وضع الالتزام، تكون الأقفال قائمة من الدقيقة الأولى.'))}
       {toggle('openPlannerAtStart', tx('Open the planner window at launch', 'افتح نافذة المخطط عند التشغيل'), tx('Off means Rhythm starts in the tray.', 'إيقافها يعني أن ريذم يبدأ في شريط المهام.'))}
 
       {templates.some((t) => t.verdicts && Object.keys(t.verdicts).length) && (

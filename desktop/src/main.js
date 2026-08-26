@@ -329,7 +329,8 @@ if (!app.requestSingleInstanceLock()) {
     else planner.loadURL('rhythm://app/');
 
     planner.once('ready-to-show', () => {
-      if (store.data.settings.openPlannerAtStart !== false) planner.show();
+      const autostart = process.argv.includes('--autostart');
+      if (store.data.settings.openPlannerAtStart !== false && !autostart) planner.show();
     });
 
     planner.on('close', (e) => {
@@ -412,6 +413,17 @@ if (!app.requestSingleInstanceLock()) {
     protocol.handle('rhythm', serveDist);
     store.load();
     sessions = new SessionManager(store);
+
+    /* Start with Windows: re-asserted on every boot rather than only when the
+       toggle flips, so a reinstall to a new path heals its own registry entry.
+       The --autostart arg lets a login launch open quietly in the tray. */
+    if (app.isPackaged) {
+      app.setLoginItemSettings({
+        openAtLogin: !!store.data.settings.launchAtLogin,
+        path: process.execPath,
+        args: ['--autostart'],
+      });
+    }
 
     createOverlay();
     createPlanner();
@@ -616,8 +628,8 @@ if (!app.requestSingleInstanceLock()) {
       const s = store.data.settings;
       Object.assign(s, patch || {});
       store.save();
-      if (typeof patch.launchAtLogin === 'boolean') {
-        app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin });
+      if (typeof patch.launchAtLogin === 'boolean' && app.isPackaged) {
+        app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin, path: process.execPath, args: ['--autostart'] });
       }
       broadcast('data-changed');
       sessions.emitState();

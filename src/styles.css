@@ -1006,3 +1006,11 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 
 /* The loading screen used a hardcoded mid-grey that vanished on dark. */
 .load-screen{min-height:320px;display:flex;align-items:center;justify-content:center;color:var(--muted,#6B6878)}
+
+/* ---- v2.8: checkable meetings ---- */
+.cal-inline .tcheck{color:var(--verdigris);flex-shrink:0}
+.cal-inline.done{opacity:.68}
+.cal-inline.done .cal-inline-title{text-decoration:line-through;color:var(--faint);font-weight:400}
+.now-cal-meta{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted);margin-top:1px}
+.now-cal-src{color:var(--faint)}
+.now-cal-actions{margin-top:6px}

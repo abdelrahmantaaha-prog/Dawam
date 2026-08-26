@@ -311,6 +311,8 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
   const save = (next) => { setLocal(next); localRef.current = next; onChange(next); };
   const patch = (p) => save({ ...localRef.current, ...p });
   const [exp, setExp] = useState(''); const [imp, setImp] = useState(''); const [busy, setBusy] = useState(false); const [status, setStatus] = useState('');
+  const [linkCode, setLinkCode] = useState(''); const [linkMsg, setLinkMsg] = useState('');
+  const [phoneCode, setPhoneCode] = useState(''); const [phoneMsg, setPhoneMsg] = useState('');
   const doExport = async () => { setBusy(true); setStatus(tx('Preparing…', 'جارٍ التحضير…')); try { setExp(await onExport()); setStatus(''); } catch { setStatus(tx('Export failed.', 'فشل التصدير.')); } setBusy(false); };
   const doCopy = async () => { try { await navigator.clipboard.writeText(exp); setStatus(tx('Copied.', 'تم النسخ.')); } catch { setStatus(tx('Copy blocked — select the text manually.', 'تعذّر النسخ — حدّد النص يدويًا.')); } };
   /* One step: build the export and save it. Two buttons (generate, then
@@ -515,8 +517,18 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                   <button className="primary" onClick={sync.signIn}><KeyRound size={14} /> {tx('Continue with Google', 'المتابعة بحساب Google')}</button>
                 </div>
                 <p className="hint-text" style={{ marginTop: 8 }}>{tx('Staying signed out keeps Rhythm exactly as it is: local-only.', 'البقاء دون تسجيل دخول يُبقي التطبيق كما هو: محلي بالكامل.')}</p>
+                <div className="sect-h" style={{ marginTop: 16 }}><KeyRound size={13} /> {tx('Or link with a code', 'أو اربط برمز')}</div>
+                <p className="hint-text" style={{ marginTop: 0 }}>{tx('On a device where you are already signed in, open Settings → Sync → "Code for another device" and paste it here. Made for the Android app, where Google sign-in cannot run.', 'من جهاز سجّلت الدخول عليه، افتح الإعدادات ← المزامنة ← «رمز لجهاز آخر» والصقه هنا. مصمم لتطبيق أندرويد حيث لا يعمل تسجيل دخول جوجل.')}</p>
+                <div className="cal-add">
+                  <input value={linkCode} onChange={(e) => { setLinkCode(e.target.value); setLinkMsg(''); }} placeholder="dt1.…" aria-label={tx('Link code', 'رمز الربط')} />
+                  <button className="primary sm" disabled={!linkCode.trim()} onClick={async () => {
+                    const r = await sync.linkWithToken(linkCode);
+                    if (r && !r.ok) setLinkMsg(r.error === 'not-a-code' ? tx('That does not look like a link code.', 'لا يبدو هذا رمز ربط.') : r.error === 'code-rejected' ? tx('The server refused that code.', 'رفض الخادم هذا الرمز.') : r.error);
+                  }}>{tx('Link', 'اربط')}</button>
+                </div>
+                {linkMsg && <p className="hint-text vault-warn"><AlertCircle size={12} /> {linkMsg}</p>}
               </>) : (<>
-                <p className="hint-text" style={{ color: 'var(--verdigris)', fontWeight: 700 }}><KeyRound size={12} /> {tx('Signed in as', 'مسجّل باسم')} {sync.user.email || sync.user.name}</p>
+                <p className="hint-text" style={{ color: 'var(--verdigris)', fontWeight: 700 }}><KeyRound size={12} /> {sync.user.linked ? tx('Linked to your account with a device code.', 'مرتبط بحسابك برمز جهاز.') : `${tx('Signed in as', 'مسجّل باسم')} ${sync.user.email || sync.user.name}`}</p>
                 <p className="hint-text" style={{ marginTop: 4 }}>
                   {tx('Status', 'الحالة')}: <code>{sync.status}</code>
                   {sync.lastSync ? <> · {tx('last sync', 'آخر مزامنة')} {new Date(sync.lastSync).toLocaleTimeString()}</> : null}
@@ -528,6 +540,20 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                   <button className="danger sm" onClick={sync.stopSync}>{tx('Stop syncing & remove cloud copy', 'إيقاف المزامنة وحذف النسخة السحابية')}</button>
                 </div>
                 <p className="hint-text" style={{ marginTop: 6 }}>{tx('Stopping deletes the cloud copy only — this device keeps everything.', 'الإيقاف يحذف النسخة السحابية فقط — يحتفظ هذا الجهاز بكل شيء.')}</p>
+                {!sync.user.linked && (<>
+                  <div className="sect-h" style={{ marginTop: 16 }}><KeyRound size={13} /> {tx('Code for another device', 'رمز لجهاز آخر')}</div>
+                  <p className="hint-text" style={{ marginTop: 0 }}>{tx('For the Android app: generate a code here, paste it there under Settings → Sync. It works like a password for your planner data — share it with no one.', 'لتطبيق أندرويد: أنشئ رمزًا هنا والصقه هناك في الإعدادات ← المزامنة. يعمل كلمة سر لبيانات مخططك — لا تشاركه مع أحد.')}</p>
+                  {phoneCode ? (
+                    <div className="vault-row open">
+                      <code className="vault-value" style={{ overflowWrap: 'anywhere' }}>{phoneCode}</code>
+                      <button className="ghost sm" onClick={async () => { try { await navigator.clipboard.writeText(phoneCode); setPhoneMsg(tx('Copied.', 'تم النسخ.')); } catch { setPhoneMsg(tx('Copy blocked — select it manually.', 'تعذّر النسخ — حدده يدويًا.')); } }}><Copy size={13} /> {tx('Copy', 'نسخ')}</button>
+                      <button className="mini-del" onClick={() => { setPhoneCode(''); setPhoneMsg(''); }} aria-label={tx('Hide', 'إخفاء')}><X size={13} /></button>
+                    </div>
+                  ) : (
+                    <button className="ghost sm" onClick={async () => { setPhoneMsg(''); try { setPhoneCode(await sync.mintPhoneCode()); } catch (e) { setPhoneMsg(String(e.message || e)); } }}><KeyRound size={13} /> {tx('Generate code', 'أنشئ رمزًا')}</button>
+                  )}
+                  {phoneMsg && <p className="hint-text" style={{ marginTop: 6 }}>{phoneMsg}</p>}
+                </>)}
               </>)}
               {sync && sync.error && <p className="hint-text vault-warn" style={{ marginTop: 8 }}><AlertCircle size={12} /> {sync.error}</p>}
 

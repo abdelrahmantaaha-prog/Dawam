@@ -7,6 +7,35 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ---
 
+## [2.8] — 2026-08-25
+
+The calendar stays read-only toward Google — and stops being read-only toward
+you. And the phone finally gets a road to your account.
+
+### Added
+- **Meetings are checkable, focusable, and live in Now.** Rhythm never writes
+  to a calendar, but it now keeps its own done-marks (per-day pages, synced,
+  occurrence-aware for recurring events). A meeting appears in Now when its
+  hour arrives: running ones sit under "In a meeting" with a check and a
+  "Focus until it ends" button, ended-unchecked ones take a place in the
+  queue at their clock position like any unfinished task, and future ones
+  wait their turn. Every inline meeting row in the Plan timeline has a check.
+  Meetings also appear in the desktop focus picker, sized to what remains.
+- **Link a phone with a code.** Google sign-in cannot run inside the Android
+  WebView, so a signed-in device now mints a device code (Settings → Sync →
+  "Code for another device") that the APK pastes once to join the account —
+  a Bearer token over CORS, no cookies involved. The Android build points at
+  the deployment automatically.
+- **Start with Windows.** The login item is re-asserted on every boot (so a
+  reinstall heals its registry entry) and a login launch starts quietly in
+  the tray. With commitment mode on, the locks are up from the first minute.
+- The Android release keystore now exists (generated locally with openssl —
+  PKCS12, so no JDK was needed) and the four signing secrets are set on the
+  repo, so CI builds come out release-signed. The keystore lives OUTSIDE the
+  repo in `../rhythm-signing/` — back it up; losing it orphans every install.
+
+---
+
 ## [2.7] — 2026-08-25
 
 The week page is gone from view: you plan in days now, and the day plans

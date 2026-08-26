@@ -30,7 +30,19 @@ import { rawList, rawGet, rawSet, rawDelete } from './storage.js';
 
    Note this only fixes the data calls. Cookie-based sign-in from a different
    origin is a separate problem (see README → Sync in the APK). */
-const BASE = (import.meta.env && import.meta.env.VITE_API_BASE) || '';
+/* Inside the Android shell the page's own origin is the WebView's localhost,
+   so same-origin API calls can never reach a backend — the deployment is the
+   default there. VITE_API_BASE still overrides for any build that needs to. */
+const CAP_NATIVE = typeof window !== 'undefined' && window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+const NATIVE_DEFAULT = 'https://rhythm-ruby.vercel.app';
+const BASE = (import.meta.env && import.meta.env.VITE_API_BASE) || (CAP_NATIVE ? NATIVE_DEFAULT : '');
+
+/* The device token that links this install to an account without cookies —
+   see the server's device-token notes. Deliberately NOT a planner: key, so it
+   never travels through sync itself. */
+const DEVICE_TOKEN_KEY = 'rhythm:sync:deviceToken';
+export const deviceToken = () => { try { return localStorage.getItem(DEVICE_TOKEN_KEY) || ''; } catch { return ''; } };
+const setDeviceToken = (t) => { try { t ? localStorage.setItem(DEVICE_TOKEN_KEY, t) : localStorage.removeItem(DEVICE_TOKEN_KEY); } catch { /* full */ } };
 export const apiBase = () => BASE;
 
 const API = {
@@ -58,7 +70,9 @@ async function apiFetch(url, init = {}) {
     if (r.status === 0) throw new Error(r.error || 'network');
     return { ok: r.ok, status: r.status, json: async () => JSON.parse(r.body || 'null'), text: async () => r.body };
   }
-  return fetch(url, { credentials: BASE ? 'include' : 'same-origin', ...init });
+  const dt = deviceToken();
+  const headers = dt ? { ...(init.headers || {}), Authorization: `Bearer ${dt}` } : init.headers;
+  return fetch(url, { credentials: BASE ? 'include' : 'same-origin', ...init, headers });
 }
 
 /* Local bookkeeping. `meta` is when this device last wrote each key, and it is
@@ -177,10 +191,35 @@ export const signIn = async () => {
   return postForm(API.signIn);
 };
 export const signOut = async () => {
+  // A token-linked device signs out by forgetting the token.
+  if (deviceToken()) { setDeviceToken(''); window.location.reload(); return; }
   const ds = desktopSync();
   if (ds) { await ds.signOut(); window.location.reload(); return; }
   return postForm(API.signOut);
 };
+
+/* Paste-a-code linking: prove the token against /api/me before keeping it, so
+   a typo fails loudly here instead of as silent 401s forever after. */
+export async function linkWithToken(raw) {
+  const t = String(raw || '').trim();
+  if (!/^dt1\./.test(t)) return { ok: false, error: 'not-a-code' };
+  const r = await fetch(`${BASE}/api/me`, { headers: { Authorization: `Bearer ${t}` } });
+  if (!r.ok) return { ok: false, error: 'HTTP ' + r.status };
+  const j = await r.json();
+  if (!j.user) return { ok: false, error: 'code-rejected' };
+  setDeviceToken(t);
+  window.location.reload();
+  return { ok: true };
+}
+
+/* Minting the code for a phone — only works with a cookie session, which is
+   exactly the point. */
+export async function mintPhoneCode() {
+  const r = await apiFetch(`${BASE}/api/device-token`, { method: 'POST' });
+  if (!r.ok) throw new Error('mint-' + r.status);
+  const j = await r.json();
+  return j.token;
+}
 
 /* ---------- transport ---------- */
 async function pullDoc() {

@@ -11,7 +11,7 @@
 
 import express from "express";
 import { ExpressAuth, getSession } from "@auth/express";
-import { authConfig, authConfigured, userIdFrom } from "./_auth.js";
+import { authConfig, authConfigured, userIdFrom, mintDeviceToken, bearerFrom } from "./_auth.js";
 import { isConfigured as dbConfigured, getDoc, insertDoc, updateDoc, deleteDoc } from "./_db.js";
 import { pushDocument } from "./_sync-core.js";
 import { readFeed } from "./_ics.js";
@@ -32,6 +32,25 @@ app.use(express.json({ limit: "8mb" }));
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "same-origin");
+  next();
+});
+
+/* ---------- CORS, for the app shells only ----------
+   The Android WebView serves the app from its own localhost origin, so its
+   requests here are cross-origin. They authenticate with a Bearer header and
+   never with cookies, which is what makes this safe to allow: no
+   Allow-Credentials, so the browser will not attach the session cookie
+   cross-origin, and the cookie path keeps its same-origin CSRF posture. */
+const APP_ORIGINS = new Set(["https://localhost", "http://localhost", "capacitor://localhost"]);
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && APP_ORIGINS.has(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+    res.setHeader("Vary", "Origin");
+    res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
+    if (req.method === "OPTIONS") return res.status(204).end();
+  }
   next();
 });
 
@@ -79,12 +98,18 @@ async function session(req) {
 
 async function requireUser(req, res) {
   const s = await session(req);
-  const id = userIdFrom(s);
+  let id = userIdFrom(s);
+  let email = (s && s.user && s.user.email) || null;
+  // No cookie session: a linked device may be speaking with its token.
+  if (!id && authConfigured()) {
+    id = bearerFrom(req);
+    email = null;
+  }
   if (!id) {
     res.status(401).json({ error: "signed-out" });
     return null;
   }
-  return { id, email: s.user && s.user.email };
+  return { id, email };
 }
 
 /* ---------- capability probe ----------
@@ -92,12 +117,29 @@ async function requireUser(req, res) {
 app.get("/api/me", async (req, res) => {
   const s = await session(req);
   res.setHeader("Cache-Control", "no-store");
+  let user = s && s.user ? { id: userIdFrom(s), name: s.user.name, email: s.user.email, image: s.user.image } : null;
+  if (!user && authConfigured()) {
+    const id = bearerFrom(req);
+    if (id) user = { id, linked: true };
+  }
   res.json({
     sync: authConfigured() && dbConfigured(),
     auth: authConfigured(),
     db: dbConfigured(),
-    user: s && s.user ? { id: userIdFrom(s), name: s.user.name, email: s.user.email, image: s.user.image } : null,
+    user,
   });
+});
+
+/* ---------- linking a phone ----------
+   Cookie session only, deliberately: a leaked device token must not be able
+   to mint tokens. The token is shown once on the signed-in device and pasted
+   on the phone; treat it like a password. */
+app.post("/api/device-token", rateLimit(10, 60_000), async (req, res) => {
+  const s = await session(req);
+  const id = userIdFrom(s);
+  if (!id) return res.status(401).json({ error: "signed-out" });
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ token: mintDeviceToken(id) });
 });
 
 /* ---------- calendar relay ----------

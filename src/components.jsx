@@ -38,7 +38,7 @@ function HabitLine({ h, iso, onToggle }) {
 /* ------------------------------------------------------------------ */
 /*  Block row (drop target for tasks, pool items, templates)           */
 /* ------------------------------------------------------------------ */
-function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over, events = [], cards = [], onAddCard, addedCards }) {
+function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over, events = [], cards = [], onAddCard, addedCards, onToggleCalEvent }) {
   const [folded, setFolded] = useState(() => new Set()); // collapsed subtask lists, per task id (session-local)
   const toggleFold = (id) => setFolded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [quick, setQuick] = useState('');
@@ -85,8 +85,10 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
       {tasks.length === 0 && habits.length === 0 && fixtures.length === 0 && !adding && <button className="empty" onClick={() => setAdding(true)}>{bHint(block)}</button>}
       {rows.map((row, ri) => {
         if (row.kind === 'event') { const e = row.e; return (
-          <div key={`ev-${e.uid || ''}-${ri}`} className="cal-inline">
-            <Calendar size={14} className="cal-inline-ic" />
+          <div key={`ev-${e.uid || ''}-${ri}`} className={`cal-inline ${e.done ? 'done' : ''}`}>
+            {onToggleCalEvent
+              ? <button className="tcheck" onClick={() => onToggleCalEvent(e.key)} aria-label={tx('Mark attended', 'تم الحضور')}>{e.done ? <CheckCircle2 size={17} /> : <Circle size={17} />}</button>
+              : <Calendar size={14} className="cal-inline-ic" />}
             <div className="cal-inline-col">
               <span className="cal-inline-title">{e.summary || tx('(busy)', '(مشغول)')}</span>
               <span className="cal-inline-time">{fmtTime(mm2(e.startMin))}–{fmtTime(mm2(e.endMin))}{e.calName ? ` · ${e.calName}` : ''}</span>

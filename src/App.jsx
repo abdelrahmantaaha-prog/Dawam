@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3 } from 'lucide-react';
 import {brokerFrom, hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
-import { useSync, markDirty, markDeleted, apiBase } from './sync.js';
+import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken } from './sync.js';
 import { readLedger, balanceOf, award, revoke, spend } from './points.js';
 import { updateWidget } from './widget.js';
 import { writeNowFile } from './nowfile.js';
@@ -11,6 +11,7 @@ import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, parseAssistantRep
 import { loadDurations, durationFor, rememberDuration } from './durations.js';
 import { FocusView, isDesktop, useRoundEnded } from './focus.jsx';
 import { loadFeeds, saveFeeds, refreshAll, loadInstances, busyOn, eventsOn } from './calsync.js';
+import { calKey, loadCalDone, toggleCalDone, pruneCalDone } from './caldone.js';
 import { DayEvents } from './calview.jsx';
 import { TrelloCards } from './trelloview.jsx';
 import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
@@ -50,6 +51,10 @@ export default function Rhythm() {
   const [calInstances, setCalInstances] = useState([]);
   const [calReport, setCalReport] = useState([]);
   const [calBusy, setCalBusy] = useState(false);
+  /* Rhythm's own done-marks for calendar events — the calendar itself is never
+     written to. Keyed by day ISO, loaded for the two days on screen (today and
+     the selected one); `refresh` re-runs this after sync lands new pages. */
+  const [calDone, setCalDone] = useState({});
   // Trello, same shape of problem: a cached copy of someone else's system,
   // refreshed on a timer, never written to.
   const [trelloCards, setTrelloCards] = useState([]);
@@ -281,6 +286,27 @@ export default function Rhythm() {
 
   useEffect(() => { const id = setInterval(() => setNowTick((x) => x + 1), 30000); return () => clearInterval(id); }, []);
 
+  useEffect(() => {
+    if (!ready) return undefined;
+    let alive = true;
+    (async () => {
+      const isos = [...new Set([fmtISO(logicalDayMid()), fmtISO(addDays(weekStart, selectedDay))])];
+      const out = {};
+      for (const iso of isos) out[iso] = await loadCalDone(iso);
+      if (alive) setCalDone(out);
+    })();
+    return () => { alive = false; };
+  }, [ready, weekStart, selectedDay, refresh, logicalDayMid]);
+
+  const toggleMeeting = async (iso, key) => {
+    const on = await toggleCalDone(iso, key);
+    setCalDone((prev) => {
+      const day = { ...(prev[iso] || {}) };
+      if (on) day[key] = Date.now(); else delete day[key];
+      return { ...prev, [iso]: day };
+    });
+  };
+
 
   /* ---- persistence ---- */
   const persistWeek = useCallback((next) => {
@@ -357,6 +383,7 @@ export default function Rhythm() {
       if (k.startsWith('planner:prayers:')) { const d = new Date(k.slice('planner:prayers:'.length) + 'T00:00:00'); if (isNaN(d) || d < addDays(today, -2)) await rawDelete(k); }
       else if (k.startsWith("planner:week:")) { const d = new Date(k.slice(13) + "T00:00:00"); if (!isNaN(d) && d < winStartWeek) { await rawDelete(k); markDeleted(k); } }
     }
+    await pruneCalDone(winStartWeek);
   };
 
   /* ---- label helpers (labels are the colored task tags) ---- */
@@ -1392,11 +1419,12 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       const startMin = selMinOf(e.startMs);
       const endMin = e.endMs > selDayStartMs + 86400000 ? 1439 : selMinOf(e.endMs);
       const bid = activeBlockAt(timings, startMin);
-      (out[bid] = out[bid] || []).push({ ...e, startMin, endMin });
+      const key = calKey(e);
+      (out[bid] = out[bid] || []).push({ ...e, startMin, endMin, key, done: !!((calDone[fmtISO(selectedDate)] || {})[key]) });
     }
     for (const bid of Object.keys(out)) out[bid].sort((a, b) => a.startMin - b.startMin);
     return out;
-  }, [selectedDayEvents, timings, selDayStartMs]);
+  }, [selectedDayEvents, timings, selDayStartMs, calDone]); // eslint-disable-line
 
   /* ---- Trello ----
      Refreshed alongside the calendars. Cards are shown, never imported: one
@@ -1444,13 +1472,25 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     for (const bid of Object.keys(out)) out[bid].sort((a, b) => a.dueMin - b.dueMin);
     return out;
   }, [trelloToday, timings, selDayStartMs]);
-  /* Meetings running right now, for the Now view — read-only company for the
-     one-thing-at-a-time card, never queue items (a meeting cannot be ticked). */
+  /* Today's meetings, as Rhythm sees them: read-only toward the calendar, but
+     checkable, focusable, and present in Now once their hour arrives.
+       - running now and unchecked  → the "In a meeting" live card
+       - ended and unchecked        → a queue item at its clock position, so a
+                                      meeting can no more silently vanish than
+                                      a task can
+       - not started yet            → nowhere in Now (it shows when time comes)
+       - checked                    → done, wherever it was */
   const todayEventsAll = useMemo(() => eventsOn(calInstances, todayMid), [calInstances, fmtISO(todayMid)]); // eslint-disable-line
-  const liveMeetings = useMemo(() => {
-    const nowMs = Date.now() - (nowTick, 0);
-    return todayEventsAll.filter((e) => !e.allDay && e.startMs <= nowMs && e.endMs > nowMs);
-  }, [todayEventsAll, nowTick]);
+  const calDoneToday = calDone[fmtISO(todayMid)] || {};
+  const timedToday = todayEventsAll
+    .filter((e) => !e.allDay)
+    .map((e) => { const key = calKey(e); return { ...e, key, done: !!calDoneToday[key] }; });
+  const nowMsTick = Date.now() + nowTick * 0; // nowTick keeps this live across the half-minute ticks
+  const liveMeetings = timedToday.filter((m) => !m.done && m.startMs <= nowMsTick && m.endMs > nowMsTick);
+  const pastMeetings = timedToday.filter((m) => !m.done && m.endMs <= nowMsTick);
+  const startedOrDoneMeetings = timedToday.filter((m) => m.done || m.startMs <= nowMsTick);
+  const fmtMs = (ms) => fmtTime(new Date(ms).toTimeString().slice(0, 5));
+  const meetingFocusMin = (m) => Math.max(1, Math.round((m.endMs - Math.max(m.startMs, Date.now())) / 60000));
   // A card becomes an ordinary task in the block the day is looking at. It
   // keeps no link back: Rhythm has read access to that board and nothing more,
   // so pretending the two stay in step would be a lie.
@@ -1464,9 +1504,15 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
      What can be focused on: today's unfinished tasks, sized by their own slot
      when they have one and by what past rounds taught us when they don't. A
      vaulted task is left out — its point is a time window, not a work session. */
-  const focusTasks = nowList
-    .filter((t) => !t.done && !hasVault(t))
-    .map((t) => ({ id: t.id, title: t.title, minutes: spanOf(t) || durationFor(t.title) || null, when: timeLabel(t) }));
+  const focusTasks = [
+    ...nowList
+      .filter((t) => !t.done && !hasVault(t))
+      .map((t) => ({ id: t.id, title: t.title, minutes: spanOf(t) || durationFor(t.title) || null, when: timeLabel(t) })),
+    // Meetings still ahead or running: a round sized to what remains of them.
+    ...timedToday
+      .filter((m) => !m.done && m.endMs > Date.now())
+      .map((m) => ({ id: `cal:${m.key}`, title: m.summary || tx('Meeting', 'اجتماع'), minutes: meetingFocusMin(m), when: `${fmtMs(m.startMs)}–${fmtMs(m.endMs)}` })),
+  ];
   // Measured time is stronger evidence than a slot the person drew, so it is
   // written after toggleDone's own guess — but still as 'kept', so a duration
   // they typed themselves is never overwritten by a round that ran short.
@@ -1671,15 +1717,32 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     return st != null && en != null && inWindow(st, en, curMin);
   });
   const liveIds = new Set(liveNow.map((t) => t.id));
+  const todayStartMsQ = new Date(todayMid.getFullYear(), todayMid.getMonth(), todayMid.getDate()).getTime();
+  const mStartMin = (m) => Math.max(0, Math.min(1439, Math.round((m.startMs - todayStartMsQ) / 60000)));
+  const pastByBlock = {};
+  for (const m of pastMeetings) {
+    const bid = activeBlockAt(todayTimings, mStartMin(m));
+    (pastByBlock[bid] = pastByBlock[bid] || []).push(m);
+  }
+  for (const bid of Object.keys(pastByBlock)) pastByBlock[bid].sort((a, b) => a.startMs - b.startMs);
   const queue = [];
   for (const b of BLOCKS) {
     if (PRAYER_BLOCKS.includes(b.id) && blockIdx(b.id) <= activeIdx && !prayersToday[b.id]) queue.push({ kind: 'prayer', block: b });
     for (const h of habitsOf(b.id)) if (!habitDoneOn(h, nowHabitISO)) queue.push({ kind: 'habit', block: b, h });
-    for (const t of nowList.filter((t) => t.block === b.id && !t.done && !liveIds.has(t.id))) queue.push({ kind: 'task', block: b, t });
+    // An ended, unchecked meeting takes its place among the tasks by clock
+    // time — the same tucking rule the Plan timeline uses.
+    const ms = pastByBlock[b.id] || [];
+    let mi = 0;
+    for (const t of nowList.filter((t) => t.block === b.id && !t.done && !liveIds.has(t.id))) {
+      const ts = tStartMin(t) ?? Infinity;
+      while (mi < ms.length && mStartMin(ms[mi]) <= ts) queue.push({ kind: 'cal', block: b, m: ms[mi++] });
+      queue.push({ kind: 'task', block: b, t });
+    }
+    while (mi < ms.length) queue.push({ kind: 'cal', block: b, m: ms[mi++] });
   }
   const startedPrayers = PRAYER_BLOCKS.filter((pid) => blockIdx(pid) <= activeIdx).length;
-  const totalN = nowList.length + (settings.habits || []).length + startedPrayers;
-  const doneN = totalN - queue.length - liveNow.length;
+  const totalN = nowList.length + (settings.habits || []).length + startedPrayers + startedOrDoneMeetings.length;
+  const doneN = totalN - queue.length - liveNow.length - liveMeetings.length;
   const next = queue[0] || null;
   // Everything up to and through the current period is clear when the head of
   // the queue belongs to a LATER block. Then it stops being "do this now" and
@@ -1698,16 +1761,16 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const ongoingText = liveNow.length > 0
     ? { title: liveNow[0].title, body: `${tx('Happening now', 'يحدث الآن')} · ${timeLabel(liveNow[0])}` }
     : caughtUp
-      ? { title: tx("You're all caught up.", 'أنجزت كل ما عليك الآن.'), body: next ? `${tx('Next', 'التالي')}: ${next.kind === 'task' ? next.t.title : next.kind === 'habit' ? next.h.name : bName(next.block)} · ${bName(next.block)}` : '' }
+      ? { title: tx("You're all caught up.", 'أنجزت كل ما عليك الآن.'), body: next ? `${tx('Next', 'التالي')}: ${next.kind === 'task' ? next.t.title : next.kind === 'habit' ? next.h.name : next.kind === 'cal' ? (next.m.summary || tx('Meeting', 'اجتماع')) : bName(next.block)} · ${bName(next.block)}` : '' }
       : next
-        ? { title: next.kind === 'task' ? next.t.title : next.kind === 'habit' ? next.h.name : tx(`${next.block.name} prayer`, `صلاة ${next.block.ar}`), body: `${bName(next.block)}${queue.length > 1 ? ` · ${queue.length - 1} ${tx('more today', 'أخرى اليوم')}` : ''}` }
+        ? { title: next.kind === 'task' ? next.t.title : next.kind === 'habit' ? next.h.name : next.kind === 'cal' ? (next.m.summary || tx('Meeting', 'اجتماع')) : tx(`${next.block.name} prayer`, `صلاة ${next.block.ar}`), body: `${bName(next.block)}${queue.length > 1 ? ` · ${queue.length - 1} ${tx('more today', 'أخرى اليوم')}` : ''}` }
         : totalN > 0 ? { title: tx('All done for today. Rest easy.', 'أنجزت كل شيء اليوم. ارتَح.'), body: '' } : null;
   const ongoingKey = ongoingText ? `${ongoingText.title} ${ongoingText.body}` : '';
 
   /* Home-screen widget. Same headline as the ongoing notification, plus the
      next couple of items so the widget answers "and then what?" at a glance
      without becoming the full list the Now page deliberately refuses to be. */
-  const widgetLabel = (it) => (it.kind === 'task' ? it.t.title : it.kind === 'habit' ? it.h.name : tx(`${it.block.name} prayer`, `صلاة ${it.block.ar}`));
+  const widgetLabel = (it) => (it.kind === 'task' ? it.t.title : it.kind === 'habit' ? it.h.name : it.kind === 'cal' ? (it.m.summary || tx('Meeting', 'اجتماع')) : tx(`${it.block.name} prayer`, `صلاة ${it.block.ar}`));
   const widgetUpcoming = queue.slice(1, 3).map(widgetLabel);
   const widgetPayload = ongoingText
     ? { title: ongoingText.title, body: ongoingText.body, upcoming: widgetUpcoming.length ? `${tx('then', 'ثم')}: ${widgetUpcoming.join(' · ')}` : '' }
@@ -1881,6 +1944,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           if (!it) return 'none';
           if (it.kind === 'prayer') return `p:${it.block.id}`;
           if (it.kind === 'habit') return `h:${it.h.id}`;
+          if (it.kind === 'cal') return `c:${it.m.key}`;
           const s = (it.t.subtasks || []).find((x) => !x.done);
           return `t:${it.t.id}:${s ? s.id : 'main'}`;
         };
@@ -1900,6 +1964,15 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               <HabitLine h={it.h} iso={nowHabitISO} onToggle={(id, iso) => advanceNow(k, () => toggleHabitDay(id, iso))} />
             </div>
           );
+          if (it.kind === 'cal') { const m = it.m; return (
+            <div key={k} className={`now-one-card now-item current ${cls}`}>
+              <button className="tcheck big" onClick={() => advanceNow(k, () => toggleMeeting(fmtISO(todayMid), m.key))} aria-label={tx('Mark attended', 'تم الحضور')}><Circle size={22} /></button>
+              <div className="now-col">
+                <span className="now-item-title">{m.summary || tx('Meeting', 'اجتماع')}</span>
+                <span className="now-cal-meta"><Calendar size={12} /> <span className="ttime">{fmtMs(m.startMs)}–{fmtMs(m.endMs)}</span>{m.calName ? <span className="now-cal-src"> · {m.calName}</span> : null}</span>
+              </div>
+            </div>
+          ); }
           const t = it.t;
           const tSubs = t.subtasks || [];
           const sub = tSubs.find((s) => !s.done) || null;
@@ -1964,12 +2037,17 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                   <span className="now-one-label">{tx('In a meeting', 'في اجتماع')}</span>
                   <span className="now-one-block live-tag">{tx('calendar', 'التقويم')}</span>
                 </div>
-                {liveMeetings.map((e, i) => (
-                  <div key={(e.uid || '') + i} className="now-one-card now-item current live">
-                    <span className="now-dot" style={{ background: 'var(--verdigris)' }} />
+                {liveMeetings.map((m) => (
+                  <div key={m.key} className={`now-one-card now-item current live ${nowLeaving === `c:${m.key}` ? 'leaving' : ''}`}>
+                    <button className="tcheck big" onClick={() => advanceNow(`c:${m.key}`, () => toggleMeeting(fmtISO(todayMid), m.key))} aria-label={tx('Mark attended', 'تم الحضور')}><Circle size={22} /></button>
                     <div className="now-col">
-                      <span className="now-item-title">{e.summary || tx('(busy)', '(مشغول)')}</span>
-                      <span className="ttime">{new Date(e.startMs).toTimeString().slice(0, 5)}–{new Date(e.endMs).toTimeString().slice(0, 5)}</span>
+                      <span className="now-item-title">{m.summary || tx('Meeting', 'اجتماع')}</span>
+                      <span className="now-cal-meta"><Calendar size={12} /> <span className="ttime">{fmtMs(m.startMs)}–{fmtMs(m.endMs)}</span>{m.calName ? <span className="now-cal-src"> · {m.calName}</span> : null}</span>
+                      <div className="now-cal-actions">
+                        <button className="ghost sm" onClick={() => startFocus({ id: `cal:${m.key}`, title: m.summary || tx('Meeting', 'اجتماع') }, meetingFocusMin(m))}>
+                          <AlarmClock size={13} /> {tx('Focus until it ends', 'ركّز حتى نهايته')}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -2165,6 +2243,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 tasks={tasksFor(selectedDay, b.id)} labelById={labelById}
                 events={eventsByBlock[b.id] || []} cards={cardsByBlock[b.id] || []}
                 onAddCard={addTrelloCard} addedCards={trelloAdded}
+                onToggleCalEvent={(key) => toggleMeeting(fmtISO(selectedDate), key)}
                 habits={settings.habits.filter((h) => (h.block || 'morning') === b.id)}
                 habitDate={fmtISO(selectedDate)} onToggleHabit={toggleHabitDay}
                 current={isSelectedToday && b.id === activeId}
@@ -2296,7 +2375,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           templates={templates} onAddTemplate={addTemplate} onUpdTemplate={updTemplate} onDelTemplate={delTemplate}
           onExport={buildExport} onImport={applyImport}
           onSetPin={setPin}
-          sync={sync}
+          sync={{ ...sync, linkWithToken, mintPhoneCode, isLinkedDevice: !!deviceToken() }}
           notify={notifyState} onEnableNotify={enableNotify} onTestNotify={testNotify} onRecheck={probeNotify}
           storageOk={storageOk} onClose={() => setShowSettings(false)}
           onClearDay={() => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.day !== selectedDay) }); flash(tx('Day cleared.', 'تم مسح اليوم.')); }}
