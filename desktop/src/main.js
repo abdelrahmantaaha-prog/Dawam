@@ -74,6 +74,21 @@ if (!app.requestSingleInstanceLock()) {
   let overlay = null;
   let tray = null;
   let quitting = false;
+  /* Uncloseable, deliberately.
+
+     Rhythm is what holds the day together, so a day cannot begin by closing
+     it. Every window's close button already hides rather than destroys; this
+     flag finishes the job by refusing app.quit() itself, and the tray has no
+     Quit for it to be asked from.
+
+     Two doors stay open, both on purpose. Windows signing out or shutting
+     down sets this true — refusing there would hold the whole machine
+     hostage. And a --dev launch starts true, because development cannot mean
+     reaching for Task Manager on every reload; a packaged build launched with
+     --dev only points itself at a dev server that is not running, so it is no
+     bypass. Everyone else's way out is Task Manager or the uninstaller — the
+     same weight as any other decision you should have to mean. */
+  let allowQuit = DEV;
   let poller = null;
   let enforcer = null;
   let breakWins = [];
@@ -381,13 +396,11 @@ if (!app.requestSingleInstanceLock()) {
           click: () => sessions.stop()
         },
         { type: 'separator' },
-        {
-          label: 'Quit Rhythm',
-          click: () => {
-            quitting = true;
-            app.quit();
-          }
-        }
+        // No Quit. The item that used to live here was the one reflex that
+        // could end the day early, so it is gone outside of development.
+        ...(DEV
+          ? [{ label: 'Quit Rhythm (dev)', click: () => app.quit() }]
+          : [{ label: 'Rhythm stays open', enabled: false }])
       ])
     );
   }
@@ -398,7 +411,15 @@ if (!app.requestSingleInstanceLock()) {
     // Tray app: keep running with no windows.
   });
 
-  app.on('before-quit', () => {
+  // Signing out or shutting down. Rhythm holds the day, not the machine.
+  app.on('session-end', () => { allowQuit = true; });
+
+  app.on('before-quit', (e) => {
+    if (!allowQuit) {
+      // Something asked the app to end and it was not the OS. Stay in the tray.
+      e.preventDefault();
+      return;
+    }
     quitting = true;
     if (poller) poller.stop();
     if (enforcer) enforcer.stop();
@@ -411,19 +432,54 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     app.setAppUserModelId('app.rhythm.desktop');
     protocol.handle('rhythm', serveDist);
+
+    /* The microphone, and nothing else.
+
+       Electron's default is to grant whatever a page asks for, which is a poor
+       default for a window that loads a custom scheme — so this narrows it to
+       one permission from one origin instead. The planner needs 'media' for
+       dictation.
+
+       Worth being exact about why, because the obvious guess is wrong: this
+       Chromium DOES define webkitSpeechRecognition, and starting it DOES open
+       the microphone. It then fails — the open-source build carries no
+       credentials for Google's speech service. desktop/mic-probe.mjs drives
+       the real window and logs "start -> audiostart -> error:network -> end".
+       So the page retires that lane the first time it says so and records a
+       clip instead, and that is plain getUserMedia.
+
+       Both handlers are needed. The request handler answers the prompt;
+       the check handler answers enumerateDevices and the permissions API,
+       which decide whether the page thinks it has a microphone at all. */
+    const micOrigin = (url) => typeof url === 'string' && (url.startsWith('rhythm://') || url.startsWith(DEV_URL));
+    session.defaultSession.setPermissionRequestHandler((wc, permission, callback, details) => {
+      callback(permission === 'media' && micOrigin(details?.requestingUrl || wc?.getURL?.()));
+    });
+    session.defaultSession.setPermissionCheckHandler((wc, permission, requestingOrigin) => (
+      permission === 'media' && micOrigin(requestingOrigin || wc?.getURL?.())
+    ));
     store.load();
     sessions = new SessionManager(store);
 
-    /* Start with Windows: re-asserted on every boot rather than only when the
-       toggle flips, so a reinstall to a new path heals its own registry entry.
-       The --autostart arg lets a login launch open quietly in the tray. */
+    /* Start with Windows, always. Since the app cannot be closed, signing out
+       would otherwise be the loophole that closes it — a reboot is not a
+       decision to be rid of Rhythm for the day. Re-asserted on every boot
+       rather than only when a toggle flips, so a reinstall to a new path heals
+       its own registry entry. The --autostart arg lets a login launch open
+       quietly in the tray. */
+    store.data.settings.launchAtLogin = true;
     if (app.isPackaged) {
       app.setLoginItemSettings({
-        openAtLogin: !!store.data.settings.launchAtLogin,
+        openAtLogin: true,
         path: process.execPath,
         args: ['--autostart'],
       });
     }
+
+    /* No application menu. Its File > Quit is a second exit, and the planner
+       already hides its menu bar; Chromium keeps the editing shortcuts either
+       way. Development keeps the default menu, and its reload with it. */
+    if (!DEV) Menu.setApplicationMenu(null);
 
     createOverlay();
     createPlanner();
@@ -627,10 +683,8 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('save-settings', (_e, patch) => {
       const s = store.data.settings;
       Object.assign(s, patch || {});
+      s.launchAtLogin = true; // not a toggle any more — see whenReady
       store.save();
-      if (typeof patch.launchAtLogin === 'boolean' && app.isPackaged) {
-        app.setLoginItemSettings({ openAtLogin: patch.launchAtLogin, path: process.execPath, args: ['--autostart'] });
-      }
       broadcast('data-changed');
       sessions.emitState();
       updateLock();

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3 } from 'lucide-react';
+import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3, Mic, Square, ListChecks } from 'lucide-react';
 import {brokerFrom, hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken } from './sync.js';
@@ -7,7 +7,8 @@ import { readLedger, balanceOf, award, revoke, spend } from './points.js';
 import { updateWidget } from './widget.js';
 import { writeNowFile } from './nowfile.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence, scheduleWakeAlarm, cancelWakeAlarm, pendingWakeAlarm } from './notify.js';
-import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, parseAssistantReply, parseEstimates, callAssistant } from './assistant.js';
+import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, describeProposal, parseAssistantReply, parseEstimates, callAssistant } from './assistant.js';
+import { useDictation } from './dictation.js';
 import { loadDurations, durationFor, rememberDuration } from './durations.js';
 import { FocusView, isDesktop, useRoundEnded } from './focus.jsx';
 import { loadFeeds, saveFeeds, refreshAll, loadInstances, busyOn, eventsOn } from './calsync.js';
@@ -94,6 +95,52 @@ export default function Rhythm() {
   const [chatInput, setChatInput] = useState('');
   const [chatBusy, setChatBusy] = useState(false);
   const [chatErr, setChatErr] = useState('');
+
+  /* ---- dictation ----------------------------------------------------
+     Two microphones, one engine. Where the browser has SpeechRecognition
+     (Chrome, Safari) the words appear live and cost nothing; in the Android
+     WebView and the Electron shell, which have no such thing, the clip is
+     recorded and transcribed by Gemini through the shared key pool. The hook
+     hides which of the two ran — a caller only ever gets text.
+
+     The base ref is what makes dictating INTO half-typed text work: live
+     recognition reports the whole utterance every time, so without a
+     remembered prefix each new word would wipe what was already there. */
+  const dictationError = (e) => {
+    const m = String((e && e.message) || e);
+    // Two engines, two vocabularies for the same refusal: getUserMedia
+    // rejects with NotAllowedError (normalised to 'denied' by the hook), Web
+    // Speech reports 'not-allowed'. Both mean the person said no, or the
+    // browser said it for them.
+    if (m === 'denied' || m === 'not-allowed') return tx('Microphone permission was refused.', 'رُفض إذن الميكروفون.');
+    if (m === 'audio-capture') return tx('No microphone found.', 'لا يوجد ميكروفون.');
+    if (m === 'no-speech') return tx("Didn't catch that — try again.", 'لم أسمع شيئًا — حاول مرة أخرى.');
+    if (m === 'unsupported') return tx('This device has no microphone this app can use.', 'لا يوجد ميكروفون يمكن للتطبيق استخدامه على هذا الجهاز.');
+    if (m === 'no API key' || m === 'pool unavailable') return tx('Dictation here needs a key — add one under Settings → AI sorting.', 'يحتاج الإملاء إلى مفتاح — أضفه من الإعدادات ← الفرز الذكي.');
+    if (m === 'rate') return tx('Rate limit hit — wait a moment and try again.', 'تم بلوغ حد المعدل — انتظر قليلًا وأعد المحاولة.');
+    if (m === 'network' || m === 'service-not-allowed') return tx('Speech recognition is unavailable right now.', 'خدمة التعرف على الكلام غير متاحة الآن.');
+    return tx(`Dictation failed (${m}).`, `فشل الإملاء (${m}).`);
+  };
+  const chatBaseRef = useRef('');
+  const chatMic = useDictation({
+    lang: settings.lang, apiKey: settings.apiKey, broker: brokerFrom(settings),
+    onText: (t) => setChatInput(chatBaseRef.current ? `${chatBaseRef.current} ${t}` : t),
+    onError: (e) => setChatErr(dictationError(e)),
+  });
+  const toggleChatMic = () => {
+    if (chatMic.state === 'idle') { chatBaseRef.current = chatInput.trim(); setChatErr(''); }
+    chatMic.toggle();
+  };
+  const dumpBaseRef = useRef('');
+  const dumpMic = useDictation({
+    lang: settings.lang, apiKey: settings.apiKey, broker: brokerFrom(settings),
+    onText: (t) => setDump(dumpBaseRef.current ? `${dumpBaseRef.current}\n${t}` : t),
+    onError: (e) => setParseError(dictationError(e)),
+  });
+  const toggleDumpMic = () => {
+    if (dumpMic.state === 'idle') { dumpBaseRef.current = dump.trim(); setParseError(''); }
+    dumpMic.toggle();
+  };
   const toggleFoldTask = (id) => setFoldedTasks((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   // Checking off the Now card plays it out to the left, THEN commits the change
   // so the next item slides in from the right. Committing first would swap the
@@ -812,15 +859,19 @@ export default function Rhythm() {
 
   /* ---- structuring the day into strict slots ---- */
   const [slotBusy, setSlotBusy] = useState(false);
-  const structureSelectedDay = async () => {
+  // dayIdx is 0-6 within the week on screen; omitted means the selected day.
+  // The assistant can name any day, so this can no longer read the selection
+  // out of the closure and call it the answer.
+  const structureSelectedDay = async (dayIdxArg) => {
     if (slotBusy) return;
-    const isToday = sameDay(addDays(weekStart, selectedDay), logicalDayMid());
+    const dayIdx = dayIdxArg == null ? selectedDay : dayIdxArg;
+    const isToday = sameDay(addDays(weekStart, dayIdx), logicalDayMid());
     const n = new Date(); const nowMin = n.getHours() * 60 + n.getMinutes();
     // Re-running re-flows: anything the last run placed goes back to floating
     // (its auto times stripped) instead of standing as an obstacle. 'end' marks
     // a start-only pin whose start is the person's and only the end was ours.
     let dayTasks = week.tasks
-      .filter((t) => t.day === selectedDay && !t.done)
+      .filter((t) => t.day === dayIdx && !t.done)
       .map((t) => (t.autoSlot === 'both' ? { ...t, start: '', end: '' } : t.autoSlot === 'end' ? { ...t, end: '' } : t));
 
     /* Sizing order: memory, then AI, then heuristic.
@@ -866,7 +917,7 @@ export default function Rhythm() {
     // as hard walls, and the opening minutes of each prayer block held for
     // the prayer itself.
     const { slots, unplaced } = structureDay(dayTasks, timings, isToday ? nowMin : null, {
-      busy: calBusyFor(addDays(weekStart, selectedDay)),
+      busy: calBusyFor(addDays(weekStart, dayIdx)),
       prayerReserveMin: (settings.calendar || {}).prayerReserveMin ?? 15,
     });
     // ONE write carrying both the estimate cache and the slots, built from the
@@ -900,10 +951,11 @@ export default function Rhythm() {
       ? `${slots.length} ${tx('slotted', 'تمت جدولتها')} · ${unplaced.length} ${tx("didn't fit", 'لم تتسع لها')}${sizedNote}`
       : `${slots.length} ${tx('tasks slotted. Follow the clock.', 'مهمة جُدولت. اتبع الساعة.')}${sizedNote}`);
   };
-  const clearSlots = () => {
+  const clearSlots = (dayIdxArg) => {
+    const dayIdx = dayIdxArg == null ? selectedDay : dayIdxArg;
     persistWeek({
       ...week,
-      tasks: week.tasks.map((t) => (t.day !== selectedDay || !t.autoSlot ? t
+      tasks: week.tasks.map((t) => (t.day !== dayIdx || !t.autoSlot ? t
         : t.autoSlot === 'end' ? { ...t, end: '', autoSlot: null }
         : { ...t, start: '', end: '', autoSlot: null })),
     });
@@ -1574,7 +1626,19 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const gatePenaltyLeft = gatePenaltyTs ? Math.ceil((PRAYER_HARD_MIN * 60000 - (Date.now() - gatePenaltyTs)) / 60000) : 0;
   const gateHardLeft = Math.max(gateArrivalLeft, gatePenaltyLeft > 0 ? gatePenaltyLeft : 0);
   /* ---- planning assistant (chat; proposes, never writes) ---- */
-  const chatIds = () => ({ taskIds: (weekRef.current.tasks || []).map((t) => t.id), poolIds: (poolRef.current || []).map((p) => p.id), todayISO: fmtISO(todayMid) });
+  /* Everything the assistant is allowed to name. An id that isn't in here is
+     dropped by validateProposal, so this list — not the prompt — is what
+     actually decides what a proposal can reach. Prayer "habits" are omitted
+     deliberately: they are not real habit records, and mark_prayer exists so
+     the assistant never has to pretend otherwise. */
+  const chatIds = () => ({
+    taskIds: (weekRef.current.tasks || []).map((t) => t.id),
+    poolIds: (poolRef.current || []).map((p) => p.id),
+    habitIds: (settings.habits || []).map((h) => h.id),
+    projectIds: (settings.projects || []).map((p) => p.id),
+    recurringIds: (templates || []).map((t) => t.id),
+    todayISO: fmtISO(todayMid),
+  });
   const buildSnapshot = () => {
     const todayISO = fmtISO(todayMid);
     const projName = (t) => (settings.projects.find((p) => p.id === t.projectRef) || {}).name || (labelById(t.projectId) || {}).name || '';
@@ -1585,17 +1649,32 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       dayDates: Array.from({ length: 7 }, (_, i) => fmtISO(addDays(weekStart, i))),
       todayISO,
       timings, activeBlock: activeId,
-      tasks: (week.tasks || []).filter((t) => t.day === selectedDay).map((t) => ({ id: t.id, block: t.block, time: timeLabel(t), done: t.done, title: t.title, project: projName(t), subtasks: (t.subtasks || []).length })),
+      shownDate: fmtISO(selectedDate),
+      // Sorted by day so the grouping headers come out in order; the week is
+      // exactly the set of ids chatIds() will accept, so the two agree.
+      tasks: (week.tasks || []).slice().sort((a, b) => (a.day - b.day) || (a.order - b.order)).map((t) => ({
+        id: t.id, date: fmtISO(addDays(weekStart, Number(t.day) || 0)),
+        block: t.block, time: timeLabel(t), done: t.done, title: t.title, project: projName(t),
+        // Numbered rather than id'd: complete_step names a position, which
+        // costs one integer instead of a uid per subtask in every snapshot.
+        steps: (t.subtasks || []).map((sub) => ({ title: sub.title, done: !!sub.done })),
+      })),
       pool: (pool || []).map((p) => ({ id: p.id, title: p.title, done: !!p.done })),
-      habits: [...prayerHabits, ...(settings.habits || [])].map((h) => ({ name: h.name, block: h.block || 'morning', streak: habitStreak(h, todayISO), doneToday: habitDoneOn(h, todayISO), builtin: !!h.prayer })),
+      recurring: (templates || []).map((t) => ({ id: t.id, title: t.title, block: t.block, time: t.start ? `${t.start}${t.end ? `-${t.end}` : ''}` : '' })),
+      habits: [...prayerHabits, ...(settings.habits || [])].map((h) => ({ id: h.id, name: h.name, block: h.block || 'morning', streak: habitStreak(h, todayISO), doneToday: habitDoneOn(h, todayISO), builtin: !!h.prayer })),
       prayersDone: PRAYER_BLOCKS.filter((pid) => prayersToday[pid]),
       overdue: (overdue || []).map((o) => ({ title: o.t.title, when: `${wd(o.date.getDay())} ${o.date.getDate()} ${mon(o.date.getMonth())}` })),
       projects: (settings.projects || []).map((p) => {
         const pc = projectPace(p);
         const status = p.completedAt ? 'completed' : pc.notStarted ? 'not started' : pc.onPace === true ? 'on pace' : pc.onPace === false ? 'behind' : 'in progress';
-        return { name: p.name, target: p.target, done: pc.done, unit: p.unit || 'units', status, perDay: pc.perDay ? Math.ceil(pc.perDay) : null, daysLeft: pc.daysLeft };
+        return { id: p.id, name: p.name, target: p.target, done: pc.done, unit: p.unit || 'units', status, perDay: pc.perDay ? Math.ceil(pc.perDay) : null, daysLeft: pc.daysLeft };
       }),
       labels: (settings.labels || []).map((l) => l.name),
+      rewards: (settings.rewards || []).map((r) => ({ id: r.id, name: r.name, cost: r.cost })),
+      balance,
+      view,
+      alarm: alarmAt ? `${pad(alarmAt.getHours())}:${pad(alarmAt.getMinutes())}` : '',
+      options: { lang: settings.lang, theme: settings.theme || 'auto', time24: !!settings.time24, prayerGate: settings.prayerGate !== false },
     });
   };
   const sendChat = async () => {
@@ -1618,38 +1697,253 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     }
     setChatBusy(false);
   };
-  // Applying is always a deliberate, per-proposal act by the person.
-  const applyProposal = (msgIdx, pIdx) => {
-    const p = chatMsgs[msgIdx]?.proposals?.[pIdx]; if (!p) return;
-    // Every date here is absolute and may land outside the week on screen —
-    // "move it to Saturday" on a Friday means NEXT Saturday, a different week
-    // document. Routing through the date-aware helpers is what makes that work;
-    // a bare day index could only ever address the displayed week, and 0 would
-    // silently mean the Saturday six days BEHIND.
-    if (p.kind === 'add_task') addTaskOnDate(p.date, p.block, p.title, { start: p.start || '', end: p.end || '' });
-    else if (p.kind === 'move_task') { mutateTask(p.taskId, (t) => ({ ...t, block: p.block })); moveTaskToDate(p.taskId, p.date); }
-    else if (p.kind === 'complete_task') mutateTask(p.taskId, (t) => ({ ...t, done: true }));
-    else if (p.kind === 'task_to_backlog') taskToPool(p.taskId);
-    else if (p.kind === 'backlog_to_day') poolToDayOnDate(p.poolId, p.date, p.block);
-    setChatMsgs((prev) => prev.map((m, i) => (i === msgIdx ? { ...m, applied: { ...(m.applied || {}), [pIdx]: 'done' } } : m)));
+  /* ---------------------------------------------------------------- */
+  /*  Applying what the assistant proposed                              */
+  /* ---------------------------------------------------------------- */
+  /* Applying is always a deliberate act by the person — the model never
+     reaches the plan on its own. What HAS changed is the reach: an approved
+     proposal can now touch anything the app itself can, so this is one
+     dispatcher rather than a five-line if-chain, and every branch goes
+     through the same helper the buttons use. Going through toggleDone rather
+     than setting done:true is the whole reason a task the assistant ticks off
+     still pays its points.
+
+     Returns true when the change landed. False means "not applied" — the
+     proposal keeps its buttons instead of claiming a change that never
+     happened. */
+
+  // A task's label is written by name; the label list is created on demand,
+  // exactly as the brain-dump sorter does it.
+  const labelIdFor = (name) => {
+    if (!name) return null;
+    const cur = settingsRef.current.labels || [];
+    const found = cur.find((l) => (l.name || '').toLowerCase() === name.toLowerCase());
+    if (found) return found.id;
+    const np = { id: uid(), name, color: LABEL_SWATCHES[cur.length % LABEL_SWATCHES.length] };
+    setSettings((prev) => { const n = { ...prev, labels: [...(prev.labels || []), np] }; saveKey('planner:settings', n); return n; });
+    return np.id;
+  };
+  // Functional, so several approved proposals in a row can't each write over
+  // the one before from a stale snapshot.
+  const patchSettings = (patch) => setSettings((prev) => { const n = { ...prev, ...patch }; saveKey('planner:settings', n); return n; });
+
+  // Where an absolute date lands in the week on screen, or -1 for elsewhere.
+  const dayIdxOf = (iso) => {
+    const d = parseISO(iso);
+    if (!d || Number.isNaN(d.getTime())) return -1;
+    const i = Math.round((d - weekStart) / 86400000);
+    return i >= 0 && i <= 6 ? i : -1;
+  };
+  const liveTask = (id) => (weekRef.current.tasks || []).find((t) => t.id === id) || null;
+
+  const applyAction = async (p) => {
+    switch (p.kind) {
+      /* ---- tasks on a day ---- */
+      case 'add_task':
+        await addTaskOnDate(p.date, p.block, p.title, { start: p.start || '', end: p.end || '', subtasks: p.steps || null, projectId: labelIdFor(p.label) });
+        return true;
+      // Every date here is absolute and may land outside the week on screen —
+      // "move it to Saturday" on a Friday means NEXT Saturday, a different
+      // week document. Routing through the date-aware helpers is what makes
+      // that work; a bare day index could only ever address the displayed
+      // week, and 0 would silently mean the Saturday six days BEHIND.
+      case 'move_task':
+        if (!liveTask(p.taskId)) return false;
+        mutateTask(p.taskId, (t) => ({ ...t, block: p.block }));
+        await moveTaskToDate(p.taskId, p.date);
+        return true;
+      case 'edit_task': {
+        if (!liveTask(p.taskId)) return false;
+        const patch = {};
+        if (p.title) patch.title = p.title;
+        // A hand-given time is the person's, so it drops the auto-slot mark
+        // the same way editing it in the task editor would.
+        if (p.start) { patch.start = p.start; patch.time = ''; patch.autoSlot = null; }
+        if (p.end) { patch.end = p.end; patch.time = ''; patch.autoSlot = null; }
+        const label = p.label ? labelIdFor(p.label) : null;
+        if (label) patch.projectId = label;
+        if (!Object.keys(patch).length) return false;
+        mutateTask(p.taskId, (t) => ({ ...t, ...patch }));
+        return true;
+      }
+      case 'complete_task': { const t = liveTask(p.taskId); if (!t) return false; if (!t.done) toggleDone(p.taskId); return true; }
+      case 'reopen_task': { const t = liveTask(p.taskId); if (!t) return false; if (t.done) toggleDone(p.taskId); return true; }
+      case 'delete_task': if (!liveTask(p.taskId)) return false; removeTask(p.taskId); return true;
+      case 'task_to_backlog': if (!liveTask(p.taskId)) return false; taskToPool(p.taskId); return true;
+      case 'add_step':
+        if (!liveTask(p.taskId)) return false;
+        mutateTask(p.taskId, (t) => ({ ...t, subtasks: [...(t.subtasks || []), ...mkSubs([p.title])] }));
+        return true;
+      case 'complete_step': {
+        // The model names a position, not an id — that is what the snapshot
+        // showed it. Resolve it against the live task, and refuse if the list
+        // has changed underneath.
+        const t = liveTask(p.taskId);
+        const sub = t && (t.subtasks || [])[p.step - 1];
+        if (!sub) return false;
+        if (!sub.done) toggleSub(p.taskId, sub.id);
+        return true;
+      }
+
+      /* ---- backlog ---- */
+      case 'add_backlog': addPoolItem(p.title, { subtasks: p.steps || null }); return true;
+      case 'backlog_to_day':
+        if (!(poolRef.current || []).some((x) => x.id === p.poolId)) return false;
+        await poolToDayOnDate(p.poolId, p.date, p.block);
+        return true;
+      case 'complete_backlog': {
+        const it = (poolRef.current || []).find((x) => x.id === p.poolId);
+        if (!it) return false;
+        if (!it.done) togglePoolDone(p.poolId);
+        return true;
+      }
+      case 'delete_backlog':
+        if (!(poolRef.current || []).some((x) => x.id === p.poolId)) return false;
+        removePoolItem(p.poolId);
+        return true;
+
+      /* ---- recurring task definitions ---- */
+      case 'add_recurring': addTemplate({ title: p.title, block: p.block, start: p.start || '', end: p.end || '' }); return true;
+      case 'recurring_to_day': {
+        const tpl = (templates || []).find((t) => t.id === p.recurringId);
+        if (!tpl) return false;
+        // Copied by value, exactly as templateToDay does — a recurring task is
+        // a definition, and editing it later must not reach into what it made.
+        await addTaskOnDate(p.date, p.block || tpl.block, tpl.title, {
+          projectId: tpl.projectId, start: tpl.start || '', end: tpl.end || '', time: tpl.time || '',
+          templateId: tpl.id, subtasks: [...(tpl.subtasks || [])],
+        });
+        return true;
+      }
+      case 'delete_recurring':
+        if (!(templates || []).some((t) => t.id === p.recurringId)) return false;
+        delTemplate(p.recurringId);
+        return true;
+
+      /* ---- habits and prayers ---- */
+      case 'add_habit': { const h = addHabit(); updHabit(h.id, { name: p.name, block: p.block }); return true; }
+      case 'mark_habit':
+        if (!(settingsRef.current.habits || []).some((h) => h.id === p.habitId)) return false;
+        toggleAnyHabitDay(p.habitId, p.date);
+        return true;
+      case 'delete_habit':
+        if (!(settingsRef.current.habits || []).some((h) => h.id === p.habitId)) return false;
+        delHabit(p.habitId);
+        return true;
+      case 'mark_prayer': { const d = parseISO(p.date); if (!d) return false; await togglePrayer(p.prayer, d); return true; }
+
+      /* ---- long-term projects ---- */
+      case 'add_project': {
+        const np = addProjectItem();
+        updProjectItem(np.id, {
+          name: p.name,
+          ...(p.target ? { target: p.target } : {}),
+          ...(p.unit ? { unit: p.unit } : {}),
+          ...(p.deadline ? { deadline: p.deadline } : {}),
+          ...(p.goal ? { goal: p.goal } : {}),
+        });
+        return true;
+      }
+      case 'log_project':
+        if (!(settingsRef.current.projects || []).some((x) => x.id === p.projectId)) return false;
+        logProgress(p.projectId, p.amount, p.note || '');
+        return true;
+      case 'complete_project':
+        if (!(settingsRef.current.projects || []).some((x) => x.id === p.projectId)) return false;
+        updProjectItem(p.projectId, { completedAt: fmtISO(new Date()) });
+        return true;
+
+      /* ---- points ---- */
+      case 'add_reward': persistRewards((prev) => [...prev, { id: uid(), name: p.name, cost: p.cost }]); return true;
+
+      /* ---- the day as a whole ---- */
+      case 'slot_day': {
+        const i = dayIdxOf(p.date);
+        // Slotting reads and rewrites one week document, and that is the one
+        // on screen. Rather than silently slotting the wrong day, go there and
+        // leave the proposal standing for a second press.
+        if (i < 0) { selectDate(parseISO(p.date)); flash(tx('Opened that day — approve again to slot it.', 'فُتح ذلك اليوم — وافق مرة أخرى لتوزيعه.')); return false; }
+        await structureSelectedDay(i);
+        return true;
+      }
+      case 'clear_slots': {
+        const i = dayIdxOf(p.date);
+        if (i < 0) { selectDate(parseISO(p.date)); flash(tx('Opened that day — approve again to clear it.', 'فُتح ذلك اليوم — وافق مرة أخرى لمسحه.')); return false; }
+        clearSlots(i);
+        return true;
+      }
+      case 'start_focus': { const t = liveTask(p.taskId); if (!t) return false; startFocus(t, p.minutes || 25, false); return true; }
+      case 'set_alarm': { const m = minutesOf(p.at); if (m == null) return false; await setWake(m, p.label || tx('Wake up', 'استيقظ')); return true; }
+      case 'cancel_alarm': await clearWake(); return true;
+      case 'overdue_to_today':
+        if (!overdue.length) { flash(tx('Nothing overdue.', 'لا متأخرات.')); return false; }
+        await moveAllOverdueToToday();
+        return true;
+
+      /* ---- moving around, and settings ---- */
+      case 'go_to_date': { const d = parseISO(p.date); if (!d) return false; selectDate(d); setView('plan'); return true; }
+      case 'open_view':
+        // The focus screen is the desktop shell's; on a phone there is nothing
+        // behind that door, and opening a blank one is worse than saying so.
+        if (p.view === 'focus' && !isDesktop()) { flash(tx('Focus mode is on the desktop app.', 'وضع التركيز في تطبيق سطح المكتب.')); return false; }
+        setView(p.view);
+        return true;
+      case 'set_language': changeLang(p.lang); return true;
+      case 'set_theme': patchSettings({ theme: p.theme }); return true;
+      case 'set_option': patchSettings({ [p.option]: p.on }); return true;
+
+      default: return false;
+    }
+  };
+
+  const [applyBusy, setApplyBusy] = useState(false);
+  const markApplied = (msgIdx, pIdx, state) => setChatMsgs((prev) => prev.map((m, i) => (i === msgIdx ? { ...m, applied: { ...(m.applied || {}), [pIdx]: state } } : m)));
+
+  const applyProposal = async (msgIdx, pIdx) => {
+    const msg = chatMsgs[msgIdx];
+    const prop = msg?.proposals?.[pIdx];
+    if (!prop || applyBusy || (msg.applied || {})[pIdx]) return;
+    setApplyBusy(true);
+    let ok = false;
+    try { ok = await applyAction(prop); }
+    catch { flash(tx('Could not apply that.', 'تعذّر التطبيق.')); }
+    setApplyBusy(false);
+    if (!ok) return;
+    markApplied(msgIdx, pIdx, 'done');
     flash(tx('Applied.', 'تم التطبيق.'));
   };
-  const dismissProposal = (msgIdx, pIdx) => setChatMsgs((prev) => prev.map((m, i) => (i === msgIdx ? { ...m, applied: { ...(m.applied || {}), [pIdx]: 'skip' } } : m)));
-  const describeProposal = (p) => {
-    const bn = (id) => bName(blockById(id));
-    // Name the date, not just the weekday: the target may be in another week,
-    // and "Saturday" alone would read as the Saturday already on screen.
-    const dn = (iso) => { const d = parseISO(iso); return d && !Number.isNaN(d.getTime()) ? `${wdFull(d.getDay())} ${d.getDate()} ${mon(d.getMonth())}` : '?'; };
-    const tTitle = (id) => ((weekRef.current.tasks || []).find((t) => t.id === id) || {}).title || '?';
-    const pTitle = (id) => ((poolRef.current || []).find((x) => x.id === id) || {}).title || '?';
-    switch (p.kind) {
-      case 'add_task': return `${tx('Add', 'أضف')} “${p.title}” → ${dn(p.date)} · ${bn(p.block)}${p.start ? ` · ${fmtTime(p.start)}` : ''}`;
-      case 'move_task': return `${tx('Move', 'انقل')} “${tTitle(p.taskId)}” → ${dn(p.date)} · ${bn(p.block)}`;
-      case 'complete_task': return `${tx('Mark done', 'علّم كمنجز')}: “${tTitle(p.taskId)}”`;
-      case 'task_to_backlog': return `${tx('To backlog', 'إلى قائمة الانتظار')}: “${tTitle(p.taskId)}”`;
-      case 'backlog_to_day': return `${tx('Schedule', 'جدولة')} “${pTitle(p.poolId)}” → ${dn(p.date)} · ${bn(p.block)}`;
-      default: return p.kind;
+
+  /* Approving one at a time is the honest default, and it stays the default.
+     But dictating "move all of today to tomorrow" and then tapping eight
+     buttons is not consent, it is a chore — so there is one button that walks
+     the same list through the same code path, in order. Anything that refuses
+     stays pending rather than being marked done. */
+  const applyAllProposals = async (msgIdx) => {
+    const msg = chatMsgs[msgIdx];
+    if (!msg || applyBusy) return;
+    const list = msg.proposals || [];
+    const applied = { ...(msg.applied || {}) };
+    setApplyBusy(true);
+    let n = 0;
+    for (let i = 0; i < list.length; i++) {
+      if (applied[i]) continue;
+      try { if (await applyAction(list[i])) { applied[i] = 'done'; n++; } }
+      catch { /* leave it pending, and keep going */ }
     }
+    setChatMsgs((prev) => prev.map((m, ix) => (ix === msgIdx ? { ...m, applied } : m)));
+    setApplyBusy(false);
+    flash(n ? `${n} ${tx('applied.', 'طُبّقت.')}` : tx('Nothing could be applied.', 'تعذّر تطبيق أي شيء.'));
+  };
+
+  const dismissProposal = (msgIdx, pIdx) => markApplied(msgIdx, pIdx, 'skip');
+
+  /* Titles the description needs and only the app knows. */
+  const proposalNames = {
+    task: (id) => ((weekRef.current.tasks || []).find((t) => t.id === id) || {}).title,
+    pool: (id) => ((poolRef.current || []).find((x) => x.id === id) || {}).title,
+    habit: (id) => ((settings.habits || []).find((h) => h.id === id) || {}).name,
+    project: (id) => ((settings.projects || []).find((x) => x.id === id) || {}).name,
+    recurring: (id) => ((templates || []).find((t) => t.id === id) || {}).title,
   };
 
   const confirmOath = () => {
@@ -2288,7 +2582,24 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             placeholder={tx(`e.g.\nCall the CBE press office tomorrow morning\nQ3 banking feature — chase Mamoun for the Wego numbers\nRead the IMF Egypt note (someday)`, `مثال:\nاتصل بالمكتب الصحفي للبنك المركزي غدًا صباحًا\nملف مصرفي للربع الثالث — تابع مأمون بشأن أرقام Wego\nاقرأ مذكرة صندوق النقد عن مصر (لاحقًا)`)} />
           <div className="dump-actions">
             {parseError && <span className="err"><AlertCircle size={13} /> {parseError}</span>}
-            <button className="primary" disabled={parsing || !dump.trim()} onClick={runParse}>{parsing ? <><Loader2 size={15} className="spin" /> {tx('Sorting…', 'جارٍ الفرز…')}</> : <><Sparkles size={15} /> {tx('Sort it', 'افرزها')}</>}</button>
+            {/* Speaking is how a brain dump actually happens — it is a list of
+                things half-remembered on the way somewhere, not a paragraph
+                anyone sits down to type. */}
+            {dumpMic.available && (
+              <button
+                className={`mic-btn ${dumpMic.state}`}
+                onClick={toggleDumpMic}
+                disabled={dumpMic.state === 'transcribing' || parsing}
+                style={dumpMic.state === 'listening' ? { '--mic-level': dumpMic.level } : undefined}
+                aria-label={dumpMic.state === 'listening' ? tx('Stop dictating', 'أوقف الإملاء') : tx('Dictate', 'إملاء')}
+                title={dumpMic.state === 'listening' ? tx('Stop dictating', 'أوقف الإملاء') : tx('Dictate', 'إملاء')}
+              >
+                {dumpMic.state === 'transcribing' ? <Loader2 size={16} className="spin" />
+                  : dumpMic.state === 'listening' ? <Square size={14} />
+                    : <Mic size={17} />}
+              </button>
+            )}
+            <button className="primary" disabled={parsing || dumpMic.busy || !dump.trim()} onClick={runParse}>{parsing ? <><Loader2 size={15} className="spin" /> {tx('Sorting…', 'جارٍ الفرز…')}</> : <><Sparkles size={15} /> {tx('Sort it', 'افرزها')}</>}</button>
           </div>
           {preview && (
             <div className="preview">
@@ -2518,9 +2829,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             <div className="modal-body chat-body">
               {chatMsgs.length === 0 && (
                 <div className="chat-empty">
-                  <p>{tx('Ask about your day. It can see today\u2019s tasks, habits, prayers, overdue and projects — and it proposes changes you approve one by one.', 'اسأل عن يومك. يرى مهام اليوم والعادات والصلوات والمتأخرات والمشاريع — ويقترح تغييرات توافق عليها واحدًا تلو الآخر.')}</p>
+                  <p>{tx('Ask about your day, or just say what you want changed — tasks, backlog, recurring tasks, habits, prayers, projects, points, the alarm, even the settings. Every change is proposed, and nothing happens until you approve it.', 'اسأل عن يومك، أو قل ببساطة ما تريد تغييره — المهام وقائمة الانتظار والمهام المتكررة والعادات والصلوات والمشاريع والنقاط والمنبه وحتى الإعدادات. كل تغيير يُقترح فقط، ولا يحدث شيء قبل موافقتك.')}</p>
                   <div className="chat-suggests">
-                    {[tx('What should I focus on today?', 'على ماذا أركّز اليوم؟'), tx('Am I overcommitted?', 'هل حمّلت نفسي أكثر من اللازم؟'), tx('What am I slipping on this week?', 'ما الذي أتراجع فيه هذا الأسبوع؟')].map((sg) => (
+                    {[tx('What should I focus on today?', 'على ماذا أركّز اليوم؟'), tx('Am I overcommitted?', 'هل حمّلت نفسي أكثر من اللازم؟'), tx('Move everything left today to tomorrow', 'انقل ما تبقى اليوم إلى الغد'), tx('Slot my day', 'وزّع يومي')].map((sg) => (
                       <button key={sg} className="ghost sm" onClick={() => setChatInput(sg)}>{sg}</button>
                     ))}
                   </div>
@@ -2531,20 +2842,25 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                   <div className="chat-bubble">{m.text}</div>
                   {m.role === 'assistant' && (m.proposals || []).length > 0 && (
                     <div className="chat-props">
+                      {(m.proposals || []).filter((_, i) => !(m.applied || {})[i]).length > 1 && (
+                        <button className="ghost sm chat-apply-all" onClick={() => applyAllProposals(mi)} disabled={applyBusy}>
+                          <ListChecks size={13} /> {tx('Approve all', 'وافق على الكل')} ({(m.proposals || []).filter((_, i) => !(m.applied || {})[i]).length})
+                        </button>
+                      )}
                       {m.proposals.map((p, pi) => {
                         const state = (m.applied || {})[pi];
                         return (
                           <div key={pi} className={`chat-prop ${state || ''}`}>
                             <div className="chat-prop-main">
-                              <span className="chat-prop-desc">{describeProposal(p)}</span>
+                              <span className="chat-prop-desc">{describeProposal(p, proposalNames)}</span>
                               {p.why && <span className="chat-prop-why">{p.why}</span>}
                             </div>
                             {state === 'done' ? <span className="chat-prop-state"><CheckCircle2 size={14} /> {tx('applied', 'طُبّق')}</span>
                               : state === 'skip' ? <span className="chat-prop-state muted">{tx('dismissed', 'تم التجاهل')}</span>
                                 : (
                                   <span className="chat-prop-actions">
-                                    <button className="primary sm" onClick={() => applyProposal(mi, pi)}>{tx('Approve', 'موافقة')}</button>
-                                    <button className="ghost sm" onClick={() => dismissProposal(mi, pi)}>{tx('No', 'لا')}</button>
+                                    <button className="primary sm" onClick={() => applyProposal(mi, pi)} disabled={applyBusy}>{tx('Approve', 'موافقة')}</button>
+                                    <button className="ghost sm" onClick={() => dismissProposal(mi, pi)} disabled={applyBusy}>{tx('No', 'لا')}</button>
                                   </span>
                                 )}
                           </div>
@@ -2558,10 +2874,25 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               {chatErr && <p className="hint-text" style={{ color: '#9C4221' }}>{chatErr}</p>}
             </div>
             <div className="modal-foot chat-foot">
+              {chatMic.available && (
+                <button
+                  className={`mic-btn ${chatMic.state}`}
+                  onClick={toggleChatMic}
+                  disabled={chatMic.state === 'transcribing' || chatBusy}
+                  style={chatMic.state === 'listening' ? { '--mic-level': chatMic.level } : undefined}
+                  aria-label={chatMic.state === 'listening' ? tx('Stop dictating', 'أوقف الإملاء') : tx('Dictate', 'إملاء')}
+                  title={chatMic.state === 'listening' ? tx('Stop dictating', 'أوقف الإملاء') : tx('Dictate', 'إملاء')}
+                >
+                  {chatMic.state === 'transcribing' ? <Loader2 size={16} className="spin" />
+                    : chatMic.state === 'listening' ? <Square size={14} />
+                      : <Mic size={17} />}
+                </button>
+              )}
               <input className="chat-input" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-                placeholder={tx('Ask about your day…', 'اسأل عن يومك…')} aria-label={tx('Message', 'رسالة')} />
-              <button className="primary" onClick={sendChat} disabled={chatBusy || !chatInput.trim()}>{tx('Send', 'إرسال')}</button>
+                placeholder={chatMic.state === 'listening' ? tx('Listening…', 'أستمع…') : chatMic.state === 'transcribing' ? tx('Writing it down…', 'أكتب ما قلته…') : tx('Ask, or tell it what to change…', 'اسأل، أو قل ما تريد تغييره…')}
+                aria-label={tx('Message', 'رسالة')} />
+              <button className="primary" onClick={sendChat} disabled={chatBusy || chatMic.busy || !chatInput.trim()}>{tx('Send', 'إرسال')}</button>
             </div>
           </div>
         </div>

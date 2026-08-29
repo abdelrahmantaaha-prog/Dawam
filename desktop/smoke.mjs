@@ -14,7 +14,7 @@
    It takes about 45 seconds: a stopped round is only logged when it ran for
    more than 30, and that logging is exactly what is under test. */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -37,7 +37,22 @@ const electron = spawn(
   [...(PACKAGED ? [] : ['.']), `--remote-debugging-port=${PORT}`, `--user-data-dir=${DATA_DIR}`],
   { cwd: HERE, stdio: 'ignore', shell: !PACKAGED && process.platform === 'win32' }
 );
-const bail = (msg) => { console.error(msg); try { electron.kill(); } catch {} process.exit(1); };
+/* Kill the tree, not the handle.
+
+   On Windows the dev binary is electron.cmd behind a shell, so electron.kill()
+   ends cmd and leaves the app running — and the app has no Quit of its own to
+   fall back on, so a half-killed run means a stray tray icon that only Task
+   Manager can clear. taskkill /T takes the children with it. */
+function stop() {
+  try {
+    if (process.platform === 'win32' && electron.pid) {
+      spawnSync('taskkill', ['/pid', String(electron.pid), '/T', '/F'], { stdio: 'ignore' });
+    }
+    electron.kill();
+  } catch { /* already gone */ }
+}
+
+const bail = (msg) => { console.error(msg); stop(); process.exit(1); };
 
 async function plannerTarget() {
   for (let i = 0; i < 60; i++) {
@@ -145,7 +160,7 @@ try {
 const failed = results.filter((r) => !r.pass).length;
 console.log(failed ? `\n${failed} FAILED of ${results.length}` : `\nAll ${results.length} checks passed.`);
 ws.close();
-try { electron.kill(); } catch {}
+stop();
 await sleep(500);
 try { fs.rmSync(DATA_DIR, { recursive: true, force: true }); } catch { /* Windows may still hold it; harmless */ }
 process.exit(failed ? 1 : 0);

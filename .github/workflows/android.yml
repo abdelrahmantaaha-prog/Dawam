@@ -21,6 +21,8 @@ jobs:
     # testable below.
     env:
       KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      BROKER_URL: ${{ secrets.VITE_BROKER_URL }}
+      BROKER_TOKEN: ${{ secrets.VITE_BROKER_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -36,6 +38,26 @@ jobs:
       # Fail fast on logic regressions before spending time on Gradle.
       - name: Unit tests
         run: npm test
+
+      # The shared key pool, baked in so the APK has AI out of the box.
+      #
+      # .env.local is gitignored — deliberately, it is where the local build
+      # keeps this — so without this step a CI-built APK shipped with no pool
+      # address at all and every AI feature asked for a key the phone did not
+      # have. Set VITE_BROKER_URL and VITE_BROKER_TOKEN as repository secrets.
+      #
+      # This token ends up readable inside the APK. That is understood and is
+      # why the pool issues one per app: it is revocable on its own, without
+      # taking the other eleven down. Missing secrets are not an error — the
+      # build just produces an APK whose keys come from its Settings screen.
+      - name: Point the build at the shared key pool
+        if: env.BROKER_URL != '' && env.BROKER_TOKEN != ''
+        run: |
+          {
+            echo "VITE_BROKER_URL=$BROKER_URL"
+            echo "VITE_BROKER_TOKEN=$BROKER_TOKEN"
+          } > .env.local
+          echo "Key pool configured for this build."
 
       # Vite build first: `cap sync` copies dist/ into the Android assets, and
       # dist/ is gitignored so it never exists at checkout time.

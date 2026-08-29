@@ -1,9 +1,12 @@
 /* The assistant's parser is the safety boundary: nothing reaches the plan
    unless it validates AND the person approves. Test it like it matters. */
 import { describe, it, expect } from 'vitest';
-import { parseAssistantReply, validateProposal, buildDaySnapshot, parseEstimates } from '../src/assistant.js';
+import { ACTIONS, MAX_PROPOSALS, parseAssistantReply, validateProposal, buildDaySnapshot, describeProposal, parseEstimates, ASSISTANT_SYSTEM } from '../src/assistant.js';
 
-const IDS = { taskIds: ['t1', 't2'], poolIds: ['p1'], todayISO: '2026-08-14' };
+const IDS = {
+  taskIds: ['t1', 't2'], poolIds: ['p1'], habitIds: ['h1'], projectIds: ['j1'], recurringIds: ['r1'],
+  todayISO: '2026-08-14',
+};
 
 describe('validateProposal', () => {
   it('accepts a well-formed add_task', () => {
@@ -77,9 +80,9 @@ describe('parseAssistantReply', () => {
     expect(r.proposals).toHaveLength(1);
     expect(r.proposals[0].taskId).toBe('t1');
   });
-  it('caps proposals at five', () => {
-    const many = Array.from({ length: 9 }, () => ({ kind: 'complete_task', taskId: 't1', why: 'w' }));
-    expect(parseAssistantReply(JSON.stringify({ reply: 'r', proposals: many }), IDS).proposals).toHaveLength(5);
+  it('caps proposals at the documented maximum', () => {
+    const many = Array.from({ length: MAX_PROPOSALS + 4 }, () => ({ kind: 'complete_task', taskId: 't1', why: 'w' }));
+    expect(parseAssistantReply(JSON.stringify({ reply: 'r', proposals: many }), IDS).proposals).toHaveLength(MAX_PROPOSALS);
   });
   it('falls back to plain text when there is no JSON', () => {
     const r = parseAssistantReply('I think you should rest today.', IDS);
@@ -138,5 +141,122 @@ describe('parseEstimates — the model advises, this decides', () => {
     expect(parseEstimates('{"id":"t1","minutes":30}', IDS)).toBe(null); // object, not array
     expect(parseEstimates('[{"id":"t1","minutes":"soon"}]', IDS)).toBe(null);
     expect(parseEstimates(null, IDS)).toBe(null);
+  });
+});
+
+/* The action table is now the contract: the prompt is generated from it and
+   the validator walks it. These guard the two ways that can go wrong — a row
+   naming a type that doesn't exist, and an action the prompt never mentions. */
+describe('the action table', () => {
+  it('reaches every part of the app the person can reach by hand', () => {
+    const kinds = ACTIONS.map((a) => a.kind);
+    for (const k of ['add_task', 'delete_task', 'add_step', 'complete_step', 'add_backlog',
+      'add_recurring', 'recurring_to_day', 'add_habit', 'mark_habit', 'mark_prayer',
+      'add_project', 'log_project', 'add_reward', 'slot_day', 'start_focus', 'set_alarm',
+      'overdue_to_today', 'go_to_date', 'open_view', 'set_language', 'set_theme', 'set_option']) {
+      expect(kinds).toContain(k);
+    }
+    expect(new Set(kinds).size).toBe(kinds.length); // no duplicate rows
+  });
+
+  it('tells the model about every action it will accept', () => {
+    for (const a of ACTIONS) expect(ASSISTANT_SYSTEM).toContain(`"kind":"${a.kind}"`);
+  });
+
+  it('accepts a valid instance of every action, and rejects it stripped of its ids', () => {
+    const sample = {
+      add_task: { title: 'x', block: 'asr', date: '2026-08-15' },
+      move_task: { taskId: 't1', block: 'asr', date: '2026-08-15' },
+      edit_task: { taskId: 't1', title: 'renamed' },
+      complete_task: { taskId: 't1' },
+      reopen_task: { taskId: 't1' },
+      delete_task: { taskId: 't1' },
+      task_to_backlog: { taskId: 't1' },
+      add_step: { taskId: 't1', title: 'step' },
+      complete_step: { taskId: 't1', step: 2 },
+      add_backlog: { title: 'x' },
+      backlog_to_day: { poolId: 'p1', block: 'asr', date: '2026-08-15' },
+      complete_backlog: { poolId: 'p1' },
+      delete_backlog: { poolId: 'p1' },
+      add_recurring: { title: 'x', block: 'fajr' },
+      recurring_to_day: { recurringId: 'r1', date: '2026-08-15' },
+      delete_recurring: { recurringId: 'r1' },
+      add_habit: { name: 'Quran', block: 'fajr' },
+      mark_habit: { habitId: 'h1', date: '2026-08-14' },
+      delete_habit: { habitId: 'h1' },
+      mark_prayer: { prayer: 'asr', date: '2026-08-14' },
+      add_project: { name: 'Book' },
+      log_project: { projectId: 'j1', amount: 12 },
+      complete_project: { projectId: 'j1' },
+      add_reward: { name: 'Coffee', cost: 100 },
+      slot_day: { date: '2026-08-14' },
+      clear_slots: { date: '2026-08-14' },
+      start_focus: { taskId: 't1' },
+      set_alarm: { at: '05:30' },
+      cancel_alarm: {},
+      overdue_to_today: {},
+      go_to_date: { date: '2026-08-16' },
+      open_view: { view: 'plan' },
+      set_language: { lang: 'ar' },
+      set_theme: { theme: 'dark' },
+      set_option: { option: 'time24', on: true },
+    };
+    for (const a of ACTIONS) {
+      const body = sample[a.kind];
+      expect(body, `no sample for ${a.kind}`).toBeTruthy();
+      expect(validateProposal({ kind: a.kind, ...body, why: 'w' }, IDS), a.kind).toBeTruthy();
+    }
+  });
+
+  it('refuses ids the snapshot never showed it', () => {
+    expect(validateProposal({ kind: 'mark_habit', habitId: 'ghost', date: '2026-08-14' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'log_project', projectId: 'ghost', amount: 1 }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'recurring_to_day', recurringId: 'ghost', date: '2026-08-14' }, IDS)).toBe(null);
+    // Prayer "habits" are not habit records; mark_prayer is the only way in.
+    expect(validateProposal({ kind: 'mark_habit', habitId: 'prayer:fajr', date: '2026-08-14' }, IDS)).toBe(null);
+  });
+
+  it('refuses settings values outside the whitelist', () => {
+    expect(validateProposal({ kind: 'set_option', option: 'pin', on: false }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'set_option', option: 'time24', on: 'yes' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'set_theme', theme: 'neon' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'set_language', lang: 'fr' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'open_view', view: 'settings' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'mark_prayer', prayer: 'morning', date: '2026-08-14' }, IDS)).toBe(null);
+  });
+
+  it('drops an edit that would change nothing', () => {
+    expect(validateProposal({ kind: 'edit_task', taskId: 't1', why: 'w' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'edit_task', taskId: 't1', start: '09:00' }, IDS)).toMatchObject({ start: '09:00' });
+  });
+
+  it('clamps and rejects numbers the way the app can survive', () => {
+    expect(validateProposal({ kind: 'start_focus', taskId: 't1', minutes: 99999 }, IDS).minutes).toBe(600);
+    expect(validateProposal({ kind: 'start_focus', taskId: 't1', minutes: 0 }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'complete_step', taskId: 't1', step: 0 }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'complete_step', taskId: 't1', step: 1.5 }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'log_project', projectId: 'j1', amount: -5 }, IDS).amount).toBe(-5);
+    expect(validateProposal({ kind: 'set_alarm', at: '25:00' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'set_alarm', at: '05:70' }, IDS)).toBe(null);
+  });
+
+  it('keeps subtask lists as strings and drops the rest', () => {
+    const r = validateProposal({ kind: 'add_task', title: 'x', block: 'asr', date: '2026-08-15', steps: ['a', { title: 'b' }, 42, ''] }, IDS);
+    expect(r.steps).toEqual(['a', 'b']);
+    expect(validateProposal({ kind: 'add_backlog', title: 'x', steps: 'not an array' }, IDS)).toBe(null);
+  });
+});
+
+describe('describeProposal', () => {
+  const names = { task: () => 'Write the column', pool: () => 'Read the note', habit: () => 'Quran', project: () => 'Book', recurring: () => 'Standup' };
+  it('names the thing, not the id', () => {
+    expect(describeProposal({ kind: 'complete_task', taskId: 't1' }, names)).toContain('Write the column');
+    expect(describeProposal({ kind: 'log_project', projectId: 'j1', amount: 12 }, names)).toContain('Book');
+  });
+  it('has a line for every action in the table', () => {
+    for (const a of ACTIONS) {
+      const text = describeProposal({ kind: a.kind, date: '2026-08-15', block: 'asr', prayer: 'asr', view: 'plan', lang: 'ar', theme: 'dark', option: 'time24', on: true, at: '05:30', title: 'T', name: 'N', cost: 5, amount: 3, step: 1 }, names);
+      expect(text, a.kind).not.toBe(a.kind); // the fallback means an unwritten case
+    }
   });
 });

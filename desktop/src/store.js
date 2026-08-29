@@ -24,7 +24,9 @@ const DEFAULTS = {
     breakScreen: true,
     chairDetect: true,
     awaySec: 10,
-    launchAtLogin: false,
+    // Forced true by main.js: the desktop app has no Quit, so a sign-out
+    // must not become the way to close it. Kept here so the file reads true.
+    launchAtLogin: true,
     overlayPos: null,
     // Desktop-only: the planner window is the app's face, so it opens on
     // launch unless the person would rather start in the tray.

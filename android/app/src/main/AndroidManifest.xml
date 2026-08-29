@@ -54,6 +54,22 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!--
+      Dictation. The WebView has no SpeechRecognition, so the assistant records
+      a clip and has it transcribed; that is plain getUserMedia, and Capacitor's
+      BridgeWebChromeClient turns the page's request into an Android runtime
+      prompt — but only for permissions the app actually declares. Without
+      these two it denies without ever asking, which looks exactly like a
+      broken microphone button.
+
+      MODIFY_AUDIO_SETTINGS rides along because Capacitor requests the pair
+      together; both are asked for at the moment the mic is first tapped, never
+      at launch. No audio is stored: the clip lives in memory for the length of
+      one request and is released with the stream.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+
+    <!--
       Exact alarms. The local-notifications plugin contributes POST_NOTIFICATIONS,
       WAKE_LOCK and RECEIVE_BOOT_COMPLETED, but NOT these — and without them
       Android 12+ refuses setExactAndAllowWhileIdle, so a timed-task reminder

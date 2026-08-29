@@ -93,10 +93,82 @@ The import path accepts every prior backup schema and migrates in place.
 
 ## AI features (optional)
 
-The brain-dump sorter, the planning assistant and task sizing all share one
-transport: **Google Gemini (free tier) primary, Groq (free tier) as an
-automatic fallback**. Keys live under **Settings → Backup → AI features**,
+The brain-dump sorter, the planning assistant, dictation and task sizing all
+share one transport: **Google Gemini (free tier) primary, Groq (free tier) as an
+automatic fallback**, with the shared key pool in front of both when this copy
+is pointed at one. Keys live under **Settings → Backup → AI features**,
 stored only on this device.
+
+### The assistant can change anything you can
+
+It reads a snapshot of the week — every task with its id, the backlog,
+recurring tasks, habits, prayers, overdue, projects, rewards, the alarm and
+your settings — and answers in plain language. When a change would help it
+proposes one, and **nothing happens until you approve it**: per proposal, or
+with the one *Approve all* button when a single sentence meant several changes.
+
+The set of things it can propose is a table in `src/assistant.js` —
+`ACTIONS` — and it is the whole contract. The prompt the model reads is
+generated from that table, and `validateProposal` walks the same table to
+check what comes back, so the two cannot drift apart. Roughly: add / move /
+edit / complete / reopen / delete a task, add and tick subtasks, everything the
+backlog and recurring tasks do, habits and prayers, projects and progress,
+rewards, slotting a day, focus sessions, the wake alarm, pulling overdue
+forward, moving around the app, and the language / theme / clock / prayer-gate
+settings.
+
+Two rails hold, whatever it says:
+
+- **Only ids the snapshot showed it.** A proposal naming anything else is
+  dropped before it can be displayed, so an invented id can never reach a
+  week document. Overdue tasks from earlier weeks have no ids in the
+  snapshot — `overdue_to_today` is the only way to reach them.
+- **Values are whitelisted, not trusted.** Periods, dates, times, views,
+  themes and settings keys are each checked against a fixed list; numbers are
+  clamped. A malformed proposal is dropped rather than guessed at.
+
+### Dictation
+
+Both the assistant and the brain dump have a microphone, in the browser and on
+a phone. Which engine runs depends on what the shell offers, and the app does
+not ask you to care:
+
+- **Web Speech** where the browser has it (Chrome, Safari). Words appear as
+  you say them, and it costs no model tokens.
+- **Record and transcribe** everywhere else. The Android WebView Capacitor
+  runs in has no `SpeechRecognition` at all. Electron is sneakier: it defines
+  the interface and opens the microphone, then fails with `error:network`,
+  because the open-source Chromium it is built from carries no credentials for
+  Google's speech service. A feature check cannot see that, so the live lane is
+  believed until it says otherwise and retired for the session when it does —
+  the handover happens inside the same press, so the person just keeps talking.
+  The clip is re-encoded in the page as 16 kHz mono WAV (Chrome records
+  `audio/webm;codecs=opus`, which Gemini's API does not list as accepted) and
+  sent to Gemini for transcription — through the key pool when one is
+  configured. Nothing is stored: the clip lives in memory for one request.
+
+  `node desktop/mic-probe.mjs` launches the real desktop window and prints
+  what it offers, what Web Speech actually does when started, and whether the
+  mic button rendered. That is where the Electron behaviour above was measured
+  rather than assumed.
+
+English and Egyptian Arabic both work, and so does mixing them in one
+sentence. The Android build declares `RECORD_AUDIO`, asked for the first time
+you tap the mic; the desktop app grants `media` to its own origin and nothing
+else.
+
+### The shared key pool
+
+`VITE_BROKER_URL` and `VITE_BROKER_TOKEN` (or **Settings → key pool address
+/ token**) point this copy at *keybroker*, which rotates the keys every project
+in this folder shares and remembers the cooldowns they have all discovered.
+It is tried first; the keys above are what answers when it cannot be reached.
+A browser has nowhere to hide a token, so Rhythm holds its own — revocable on
+its own without taking the other apps down.
+
+For CI-built APKs, set the same two names as repository secrets: `.env.local`
+is gitignored, so without them the build ships with no pool and every AI
+feature asks for a key the phone does not have.
 
 - **Gemini** — get a key at aistudio.google.com/apikey, no card needed. Rhythm
   calls Flash-Lite via the `gemini-flash-lite-latest` alias (with a pinned
