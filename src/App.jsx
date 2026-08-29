@@ -15,6 +15,8 @@ import { loadFeeds, saveFeeds, refreshAll, loadInstances, busyOn, eventsOn } fro
 import { calKey, loadCalDone, toggleCalDone, pruneCalDone } from './caldone.js';
 import { DayEvents } from './calview.jsx';
 import { CalendarView } from './calendarview.jsx';
+import { KanbanBoard } from './kanban.jsx';
+import { columnOf, isMove, patchFor } from './board.js';
 import { rangeOf } from './calgrid.js';
 import { loadCalProjects, setCalProject, pruneCalProjects } from './calproj.js';
 import { TrelloCards } from './trelloview.jsx';
@@ -75,6 +77,8 @@ export default function Rhythm() {
   const [calProjects, setCalProjects] = useState({});
   const [calPicked, setCalPicked] = useState(null);
   const [calTasks, setCalTasks] = useState({});   // ISO -> tasks, for the range on screen
+  const [boardProject, setBoardProject] = useState(null);  // project id, when its board is open
+  const [boardReady, setBoardReady] = useState(false);
   // Trello, same shape of problem: a cached copy of someone else's system,
   // refreshed on a timer, never written to.
   const [trelloCards, setTrelloCards] = useState([]);
@@ -487,16 +491,32 @@ export default function Rhythm() {
     const scan = (wk, wsISO) => (wk?.tasks || []).forEach((tk) => {
       if (tk.projectRef === projId && !seen.has(tk.id)) {
         seen.add(tk.id);
-        out.push({ id: tk.id, title: tk.title, done: !!tk.done, wsISO, day: tk.day, date: addDays(parseISO(wsISO), tk.day), block: tk.block, kind: 'task' });
+        out.push({ id: tk.id, title: tk.title, done: !!tk.done, board: tk.board || null, wsISO, day: tk.day, date: addDays(parseISO(wsISO), tk.day), block: tk.block, kind: 'task' });
       }
     });
     const curISO = fmtISO(weekStart);
     scan(weekRef.current, curISO);
     Object.entries(weeksRef.current).forEach(([iso, wk]) => { if (iso !== curISO) scan(wk, iso); });
-    poolRef.current.forEach((it) => { if (it.projectRef === projId && !seen.has(it.id)) { seen.add(it.id); out.push({ id: it.id, title: it.title, done: !!it.done, wsISO: null, day: null, date: null, block: null, kind: 'pool' }); } });
+    poolRef.current.forEach((it) => { if (it.projectRef === projId && !seen.has(it.id)) { seen.add(it.id); out.push({ id: it.id, title: it.title, done: !!it.done, board: it.board || null, wsISO: null, day: null, date: null, block: null, kind: 'pool' }); } });
     out.sort((a, b) => (a.date && b.date ? a.date - b.date : a.date ? -1 : b.date ? 1 : 0));
     return { tasks: out, total: out.length, done: out.filter((x) => x.done).length };
   };
+  /* Patch a project task where it actually lives — it may be in a week that
+     isn't on screen, or in the backlog. The board moves cards with this, which
+     is why moving a card is an ordinary task edit rather than a second record
+     that could drift out of step with the Now queue. */
+  const patchProjectTask = (ref, patch) => {
+    if (ref.kind === 'pool') { mutatePoolItem(ref.id, (it) => ({ ...it, ...patch })); bumpRefresh(); return; }
+    if (!ref.wsISO) return;
+    const wk = ref.wsISO === fmtISO(weekStart) ? weekRef.current : weeksRef.current[ref.wsISO];
+    if (!wk) return;
+    const next = { ...wk, tasks: (wk.tasks || []).map((tk) => (tk.id === ref.id ? { ...tk, ...patch } : tk)) };
+    weeksRef.current[ref.wsISO] = next;
+    saveKey(`planner:week:${ref.wsISO}`, next);
+    if (ref.wsISO === fmtISO(weekStart)) { weekRef.current = next; setWeek(next); }
+    bumpRefresh();
+  };
+
   // Toggle a project task's done state in whatever week it lives in.
   const toggleProjectTask = (ref) => {
     if (ref.kind === 'pool') { togglePoolDone(ref.id); return; }
@@ -1512,6 +1532,36 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     })();
     return () => { cancelled = true; };
   }, [ready, view, calMode, calDate, settings.weekStartDay, refresh, localVersion]);
+
+  /* projectTaskList only sees weeks already in the session cache, which is
+     fine for a summary line and wrong for a board — a card in a week nobody
+     happened to open would simply not be there, and a board that silently
+     omits cards is worse than no board. So opening one sweeps a window of
+     weeks into the cache first. Bounded rather than unbounded: the planner's
+     own navigation window is what the rest of the app considers reachable. */
+  const BOARD_WEEKS_BACK = 12, BOARD_WEEKS_FWD = 12;
+  useEffect(() => {
+    if (!ready || !boardProject) { setBoardReady(false); return; }
+    let cancelled = false;
+    (async () => {
+      const here = startOfWeek(logicalDayMid(), settings.weekStartDay);
+      for (let i = -BOARD_WEEKS_BACK; i <= BOARD_WEEKS_FWD; i++) {
+        if (cancelled) return;
+        await readWeek(fmtISO(addDays(here, i * 7)));
+      }
+      if (!cancelled) { setBoardReady(true); bumpRefresh(); }
+    })();
+    return () => { cancelled = true; };
+  }, [ready, boardProject, settings.weekStartDay]);
+
+  useEffect(() => { if (view !== 'projects') setBoardProject(null); }, [view]);
+
+  const moveBoardCard = useCallback((card, col) => {
+    if (!isMove(card, col)) return;
+    // Through the same fields the rest of the app reads, so a card moved to
+    // Done is genuinely a task ticked off.
+    patchProjectTask(card, patchFor(col));
+  }, [weekStart]);
 
   const calSettings = settings.calendar || {};
   // What the scheduler must not schedule over, for the day being looked at.
@@ -2729,12 +2779,35 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         />
       )}
 
+      {/* A project's board takes over the Projects screen rather than opening
+          in a modal: it is a work surface, and a board in a dialog on a phone
+          is three columns in a letterbox. */}
+      {view === 'projects' && boardProject && (() => {
+        const proj = (settings.projects || []).find((x) => x.id === boardProject);
+        if (!proj) return null;
+        return (
+          <KanbanBoard
+            project={proj}
+            cards={projectTaskList(proj.id).tasks}
+            onMove={moveBoardCard}
+            onOpenTask={openProjectTask}
+            onBack={() => setBoardProject(null)}
+            /* New cards land in the backlog: a board card does not need a day,
+               and forcing one would make "add a task" a scheduling decision. */
+            onAddTask={() => {
+              const it = addPoolItem(tx('New task', 'مهمة جديدة'), {});
+              if (it) { mutatePoolItem(it.id, (x) => ({ ...x, projectRef: proj.id })); setEditingPool(it.id); }
+            }}
+          />
+        );
+      })()}
+
       {/* PROJECTS (long-term) */}
-      {view === 'projects' && (
+      {view === 'projects' && !boardProject && (
         <ProjectsView
           projects={settings.projects}
           sky={sky} stars={stars} heroLight={heroLight}
-          onAdd={addProjectItem} onUpd={updProjectItem} onDel={delProjectItem}
+          onAdd={addProjectItem} onUpd={updProjectItem} onDel={delProjectItem} onBoard={setBoardProject}
           onLog={logProgress} taskList={projectTaskList}
           onToggleTask={toggleProjectTask} onOpenTask={openProjectTask}
         />

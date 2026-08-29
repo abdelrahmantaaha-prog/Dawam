@@ -965,6 +965,51 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 /* ---- Calendars (read-only) -------------------------------------------
    Deliberately quiet: these are not tasks, nothing can be done to them
    from here, and they must not compete with the day's own work. */
+/* ---- Kanban board ----
+   Three columns that scroll horizontally on a phone rather than squeezing to
+   nothing: a card you cannot read is not a board. */
+.kb{max-width:1100px;margin:0 auto;padding:0 12px 90px}
+.kb-head{display:flex;align-items:center;gap:9px;padding:12px 0}
+.kb-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0}
+.kb-title{font-size:16px;font-weight:800;color:var(--ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kb-count{font-size:11px;font-weight:700;color:var(--muted)}
+
+.kb-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:start}
+.kb-col{display:flex;flex-direction:column;min-height:180px;border:1px solid var(--line);border-radius:12px;background:var(--soft);overflow:hidden}
+.kb-col.over{border-color:var(--verdigris);background:var(--panel)}
+.kb-col-h{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:8px 11px;border-bottom:1px solid var(--line);
+  font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.kb-col-n{background:var(--panel);border-radius:9px;padding:1px 7px;font-size:11px;color:var(--ink)}
+.kb-col-body{display:flex;flex-direction:column;gap:7px;padding:9px}
+
+.kb-card{display:flex;align-items:stretch;gap:4px;border:1px solid var(--line);border-inline-start:3px solid var(--verdigris);
+  border-radius:10px;background:var(--panel);cursor:grab}
+.kb-card:active{cursor:grabbing}
+.kb-card.done{opacity:.6}
+.kb-card.done .kb-card-t{text-decoration:line-through}
+.kb-card-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;padding:8px 9px;background:none;border:0;
+  text-align:start;font-family:inherit;cursor:pointer;color:inherit}
+.kb-card-t{font-size:13px;font-weight:600;color:var(--ink);overflow-wrap:anywhere}
+.kb-card-m{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:var(--faint)}
+.kb-card-move{display:flex;flex-direction:column;justify-content:center;gap:2px;padding-inline-end:4px}
+.kb-card-move .icon.sm{width:22px;height:22px;border-radius:6px}
+.kb-card-move .icon.sm:disabled{opacity:.25;cursor:default}
+
+.kb-empty{margin:4px 2px;font-size:11.5px;color:var(--faint)}
+.kb-add{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:8px;border:1px dashed var(--line);
+  border-radius:10px;background:none;color:var(--muted);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.kb-add:hover{border-color:var(--verdigris);color:var(--verdigris)}
+.kb-hint{max-width:520px;margin:14px auto 0;text-align:center}
+
+.proj-board-btn{margin-inline-start:auto;display:inline-flex;align-items:center;gap:5px}
+.proj-lanes{font-variant-numeric:tabular-nums;font-size:10.5px;color:var(--faint);font-weight:700}
+.proj-tasks-h{display:flex;align-items:center;gap:8px}
+
+@media (max-width:640px){
+  .kb-cols{grid-template-columns:repeat(3,78vw);overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:6px}
+  .kb-col{scroll-snap-align:start}
+}
+
 /* ---- Calendar view (Day / Week / Month) ----
    The hour grid is absolutely positioned inside a column of known height, so
    an event's top and height are just minutes x a constant — no flex maths that
