@@ -1,10 +1,11 @@
 /* The assistant's parser is the safety boundary: nothing reaches the plan
    unless it validates AND the person approves. Test it like it matters. */
 import { describe, it, expect, afterEach } from 'vitest';
-import { ACTIONS, MAX_PROPOSALS, parseAssistantReply, validateProposal, buildDaySnapshot, describeProposal, parseEstimates, callAssistant, ASSISTANT_SYSTEM } from '../src/assistant.js';
+import { ACTIONS, MAX_PROPOSALS, MAX_SERIES, SERIES_DEFAULT_DAYS, seriesDates, parseAssistantReply, validateProposal, buildDaySnapshot, describeProposal, parseEstimates, callAssistant, ASSISTANT_SYSTEM } from '../src/assistant.js';
 
 const IDS = {
   taskIds: ['t1', 't2'], poolIds: ['p1'], habitIds: ['h1'], projectIds: ['j1'], recurringIds: ['r1'],
+  projects: [{ id: 'j1', name: 'The Book' }],
   todayISO: '2026-08-14',
 };
 
@@ -166,6 +167,7 @@ describe('the action table', () => {
   it('accepts a valid instance of every action, and rejects it stripped of its ids', () => {
     const sample = {
       add_task: { title: 'x', block: 'asr', date: '2026-08-15' },
+      add_task_series: { title: 'x', block: 'asr', from: '2026-08-15' },
       move_task: { taskId: 't1', block: 'asr', date: '2026-08-15' },
       edit_task: { taskId: 't1', title: 'renamed' },
       complete_task: { taskId: 't1' },
@@ -309,5 +311,130 @@ describe('telling a rejected pool token from an outage', () => {
   it('reports a rate limit as rate, from either lane', async () => {
     stub(() => reply(429));
     await expect(ask({ apiKey: 'AIza-local' })).rejects.toMatchObject({ code: 'rate' });
+  });
+});
+
+/* Repeats.
+
+   The arithmetic is pure and lives beside the action table because the same
+   function answers two questions that must never disagree: how many tasks the
+   description promises, and how many actually get written. */
+describe('seriesDates', () => {
+  it('defaults to one week when no end date was given', () => {
+    // The person's own rule. A model asked to invent an end date invents a
+    // different one each time, and being asked "until when?" is the thing they
+    // said they did not want.
+    const d = seriesDates({ from: '2026-08-30' });
+    expect(d).toHaveLength(SERIES_DEFAULT_DAYS);
+    expect(d[0]).toBe('2026-08-30');
+    expect(d[d.length - 1]).toBe('2026-09-05');
+  });
+
+  it('honours an end date when there is one', () => {
+    expect(seriesDates({ from: '2026-08-30', until: '2026-09-02' }))
+      .toEqual(['2026-08-30', '2026-08-31', '2026-09-01', '2026-09-02']);
+  });
+
+  it('steps by everyDays — 7 is weekly', () => {
+    expect(seriesDates({ from: '2026-08-30', until: '2026-09-27', everyDays: 7 }))
+      .toEqual(['2026-08-30', '2026-09-06', '2026-09-13', '2026-09-20', '2026-09-27']);
+    expect(seriesDates({ from: '2026-08-30', until: '2026-09-05', everyDays: 2 }))
+      .toEqual(['2026-08-30', '2026-09-01', '2026-09-03', '2026-09-05']);
+  });
+
+  it('treats named weekdays as a filter, not a stride', () => {
+    // "Every Monday and Thursday" is not a fixed number of days apart, so a
+    // stride cannot express it.
+    const d = seriesDates({ from: '2026-08-30', until: '2026-09-13', weekdays: ['mon', 'thu'] });
+    expect(d).toEqual(['2026-08-31', '2026-09-03', '2026-09-07', '2026-09-10']);
+  });
+
+  it('lets weekdays win over everyDays rather than combining them', () => {
+    const d = seriesDates({ from: '2026-08-30', until: '2026-09-13', weekdays: ['fri'], everyDays: 3 });
+    expect(d.every((iso) => new Date(`${iso}T00:00`).getDay() === 5)).toBe(true);
+  });
+
+  it('caps a runaway range instead of writing hundreds of tasks', () => {
+    // "Daily until the end of the year" is a sentence someone will say.
+    expect(seriesDates({ from: '2026-08-30', until: '2027-08-30' })).toHaveLength(MAX_SERIES);
+  });
+
+  it('returns nothing for a range that runs backwards or a bad date', () => {
+    expect(seriesDates({ from: '2026-08-30', until: '2026-08-01' })).toEqual([]);
+    expect(seriesDates({ from: 'tomorrow' })).toEqual([]);
+    expect(seriesDates({})).toEqual([]);
+  });
+});
+
+describe('add_task_series and projects', () => {
+  it('validates a bare series and fills in nothing it was not told', () => {
+    const r = validateProposal({ kind: 'add_task_series', title: 'Gym', block: 'asr', from: '2026-08-15', why: 'w' }, IDS);
+    expect(r).toMatchObject({ kind: 'add_task_series', title: 'Gym', block: 'asr', from: '2026-08-15' });
+    expect(r.until).toBeUndefined();          // the default lives in seriesDates, not in the record
+    expect(seriesDates(r)).toHaveLength(7);
+  });
+
+  it('drops a series that would land on no days at all', () => {
+    expect(validateProposal({ kind: 'add_task_series', title: 'x', block: 'asr', from: '2026-08-20', until: '2026-08-15' }, IDS)).toBe(null);
+  });
+
+  it('rejects a cadence outside anything a person means', () => {
+    expect(validateProposal({ kind: 'add_task_series', title: 'x', block: 'asr', from: '2026-08-15', everyDays: 0 }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'add_task_series', title: 'x', block: 'asr', from: '2026-08-15', everyDays: 1000 }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'add_task_series', title: 'x', block: 'asr', from: '2026-08-15', weekdays: ['funday'] }, IDS)).toBe(null);
+  });
+
+  it('normalises weekday names people actually write', () => {
+    const r = validateProposal({ kind: 'add_task_series', title: 'x', block: 'asr', from: '2026-08-15', weekdays: ['Monday', 'WED', 'mon'] }, IDS);
+    expect(r.weekdays).toEqual(['mon', 'wed']);
+  });
+
+  it('attaches a long-term project only when the id is real', () => {
+    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', date: '2026-08-15', project: 'j1' }, IDS).project).toBe('j1');
+    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', date: '2026-08-15', project: 'ghost' }, IDS)).toBe(null);
+  });
+
+  it('keeps label and project as separate things', () => {
+    // label is a free-text tag created on demand; project is an id that must
+    // already exist. Conflating them is how a task ends up tagged "Book" and
+    // linked to nothing.
+    const r = validateProposal({ kind: 'add_task', title: 'x', block: 'asr', date: '2026-08-15', label: 'Deep work', project: 'j1' }, IDS);
+    expect(r.label).toBe('Deep work');
+    expect(r.project).toBe('j1');
+  });
+
+  it('describes a series by its real count and range', () => {
+    const text = describeProposal({ kind: 'add_task_series', title: 'Gym', block: 'asr', from: '2026-08-30' }, {});
+    expect(text).toContain('×7');
+    expect(text).toContain('30 Aug');
+    expect(text).toContain('5 Sep');
+  });
+});
+
+describe('naming a project the way a person does', () => {
+  it('accepts the name the snapshot printed, not just the id', () => {
+    // The model echoes the person's own words: asked to link something to
+    // "The Book", it answers project:"The Book". Rejecting that dropped the
+    // whole proposal — and a dropped proposal is invisible, so the reply still
+    // said "added under The Book" while nothing appeared on the day.
+    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', date: '2026-08-15', project: 'The Book' }, IDS).project).toBe('j1');
+    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', date: '2026-08-15', project: 'the book' }, IDS).project).toBe('j1');
+    expect(validateProposal({ kind: 'log_project', projectId: 'The Book', amount: 3 }, IDS).projectId).toBe('j1');
+  });
+
+  it('resolves a name on a series too', () => {
+    const r = validateProposal({ kind: 'add_task_series', title: 'x', block: 'asr', from: '2026-08-15', project: 'The Book' }, IDS);
+    expect(r.project).toBe('j1');
+  });
+
+  it('still refuses a project that exists under neither spelling', () => {
+    expect(validateProposal({ kind: 'add_task', title: 'x', block: 'asr', date: '2026-08-15', project: 'The Novel' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'log_project', projectId: 'ghost', amount: 1 }, IDS)).toBe(null);
+  });
+
+  it('leaves task and backlog ids strict', () => {
+    // Projects are few and deliberately named. Task titles are neither, so
+    // matching those by text would be a coin toss between duplicates.
+    expect(validateProposal({ kind: 'complete_task', taskId: 'Write the column' }, IDS)).toBe(null);
   });
 });

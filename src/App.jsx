@@ -7,7 +7,7 @@ import { readLedger, balanceOf, award, revoke, spend } from './points.js';
 import { updateWidget } from './widget.js';
 import { writeNowFile } from './nowfile.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence, scheduleWakeAlarm, cancelWakeAlarm, pendingWakeAlarm } from './notify.js';
-import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, describeProposal, parseAssistantReply, parseEstimates, callAssistant } from './assistant.js';
+import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, describeProposal, parseAssistantReply, parseEstimates, callAssistant, seriesDates } from './assistant.js';
 import { useDictation } from './dictation.js';
 import { loadDurations, durationFor, rememberDuration } from './durations.js';
 import { FocusView, isDesktop, useRoundEnded } from './focus.jsx';
@@ -679,7 +679,8 @@ export default function Rhythm() {
     if (!title || !title.trim()) return;
     await putTaskOnDate(dateISO, {
       id: uid(), title: title.trim(), day: 0, block: blockId,
-      projectId: extra.projectId || null, time: extra.time || '', start: extra.start || '', end: extra.end || '',
+      projectId: extra.projectId || null, projectRef: extra.projectRef || null,
+      time: extra.time || '', start: extra.start || '', end: extra.end || '',
       templateId: extra.templateId || null, done: false,
       subtasks: extra.subtasks ? mkSubs(extra.subtasks.map((s) => (typeof s === 'string' ? s : s.title))) : [],
       notes: extra.notes || [], order: extra.order != null ? extra.order : (timeOrder(extra.time) + Date.now() % 1000),
@@ -1645,6 +1646,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     poolIds: (poolRef.current || []).map((p) => p.id),
     habitIds: (settings.habits || []).map((h) => h.id),
     projectIds: (settings.projects || []).map((p) => p.id),
+    // Names too: the model routinely answers with the one the person said.
+    projects: (settings.projects || []).map((p) => ({ id: p.id, name: p.name })),
     recurringIds: (templates || []).map((t) => t.id),
     todayISO: fmtISO(todayMid),
   });
@@ -1750,8 +1753,32 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     switch (p.kind) {
       /* ---- tasks on a day ---- */
       case 'add_task':
-        await addTaskOnDate(p.date, p.block, p.title, { start: p.start || '', end: p.end || '', subtasks: p.steps || null, projectId: labelIdFor(p.label) });
+        await addTaskOnDate(p.date, p.block, p.title, {
+          start: p.start || '', end: p.end || '', subtasks: p.steps || null,
+          // Two different things that both read as "project" in conversation:
+          // projectId is the coloured label, projectRef is the long-term
+          // project with a target. The editor's Project dropdown writes the
+          // second one, so that is what "assign it to my book project" means.
+          projectId: labelIdFor(p.label), projectRef: p.project || null,
+        });
         return true;
+      /* One sentence, many days. Sequential on purpose: putTaskOnDate reads
+         weekRef/weeksRef and persistWeek writes them back synchronously, so
+         each task sees the one before it — a Promise.all here would have every
+         write build on the same stale week and keep only the last. */
+      case 'add_task_series': {
+        const dates = seriesDates(p);
+        if (!dates.length) return false;
+        const labelId = labelIdFor(p.label);
+        for (const iso of dates) {
+          await addTaskOnDate(iso, p.block, p.title, {
+            start: p.start || '', end: p.end || '',
+            projectId: labelId, projectRef: p.project || null,
+          });
+        }
+        flash(`${dates.length} × "${p.title}" ${tx('added.', 'أُضيفت.')}`);
+        return true;
+      }
       // Every date here is absolute and may land outside the week on screen —
       // "move it to Saturday" on a Friday means NEXT Saturday, a different
       // week document. Routing through the date-aware helpers is what makes
@@ -1813,7 +1840,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         return true;
 
       /* ---- recurring task definitions ---- */
-      case 'add_recurring': addTemplate({ title: p.title, block: p.block, start: p.start || '', end: p.end || '' }); return true;
+      case 'add_recurring': addTemplate({ title: p.title, block: p.block, start: p.start || '', end: p.end || '', projectId: labelIdFor(p.label) }); return true;
       case 'recurring_to_day': {
         const tpl = (templates || []).find((t) => t.id === p.recurringId);
         if (!tpl) return false;

@@ -14,13 +14,23 @@
 /*  about and the schema this file enforces cannot drift apart, which   */
 /*  is exactly what went wrong when they were two hand-written lists.   */
 /* ------------------------------------------------------------------ */
-import { BLOCKS, PRAYER_BLOCKS, bName, blockById, firstJsonObject, fmtTime, mon, parseISO, tx, wdFull } from './core.jsx';
+import { BLOCKS, PRAYER_BLOCKS, addDays, bName, blockById, firstJsonObject, fmtISO, fmtTime, mon, parseISO, tx, wdFull } from './core.jsx';
 
 const BLOCK_IDS = BLOCKS.map((b) => b.id);
 export const VIEWS = ['now', 'plan', 'overdue', 'focus'];
 const THEMES = ['auto', 'light', 'dark'];
 const LANGS_OK = ['en', 'ar'];
 const TOGGLES = ['time24', 'prayerGate'];
+export const WEEKDAY_IDS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+/* A repeat with no end date runs for a week. That is the person's own rule,
+   and it belongs here rather than in the prompt: a model asked to invent an
+   end date will invent a different one every time, and "until when?" is
+   exactly the question they said they did not want to be asked. */
+export const SERIES_DEFAULT_DAYS = 7;
+/* And a ceiling, because "daily until the end of the year" is a sentence
+   someone will say, and three hundred tasks is not what they meant. */
+export const MAX_SERIES = 60;
 
 /* ------------------------------------------------------------------ */
 /*  Field types                                                         */
@@ -84,11 +94,37 @@ const TYPES = {
   amount: (v) => { const n = Number(v); return Number.isFinite(n) && n !== 0 ? Math.max(-100000, Math.min(100000, Math.round(n * 100) / 100)) : null; },
   /* 1-based, as the snapshot prints them. */
   stepNo: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 50 ? n : null; },
+  /* Days between repeats: 1 daily, 7 weekly, 14 fortnightly, and anything
+     else they actually say. */
+  seriesStep: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 90 ? n : null; },
+  weekdays: (v) => {
+    if (!Array.isArray(v)) return null;
+    const out = [...new Set(v.map((d) => String(d || '').slice(0, 3).toLowerCase()))].filter((d) => WEEKDAY_IDS.includes(d));
+    return out.length ? out : null;
+  },
   taskId: idIn('taskIds'),
   poolId: idIn('poolIds'),
   habitId: idIn('habitIds'),
-  projectId: idIn('projectIds'),
   recurringId: idIn('recurringIds'),
+  /* A project by id, or by the name printed next to it.
+   *
+   * Ids only was the strict-and-wrong choice. Asked to "link it to The Book
+   * project", the model answers "project":"The Book" — it is echoing the
+   * person's own words, and the name is right there in the snapshot beside the
+   * id. Rejecting that dropped the whole proposal *silently*, so the reply
+   * said "I've added it under The Book" and nothing appeared. A dropped
+   * proposal is invisible by design; that is fine for a hallucinated id and
+   * badly wrong for a correct answer in the other allowed spelling.
+   *
+   * Names only work because projects are few and deliberately named. Task and
+   * backlog titles are neither, which is why they stay id-only. */
+  projectId: (v, ctx) => {
+    const s = str(v);
+    if (!s) return null;
+    if ((ctx.projectIds || []).includes(s)) return s;
+    const hit = (ctx.projects || []).find((p) => String(p.name || '').trim().toLowerCase() === s.toLowerCase());
+    return hit ? hit.id : null;
+  },
 };
 
 /* ------------------------------------------------------------------ */
@@ -99,7 +135,8 @@ const TYPES = {
 
 export const ACTIONS = [
   // --- tasks on a day ---
-  { kind: 'add_task', fields: { title: 'text', block: 'block', date: 'date', start: 'hm0?', end: 'hm0?', label: 'text?', steps: 'texts?' }, doc: 'put a new task on a day' },
+  { kind: 'add_task', fields: { title: 'text', block: 'block', date: 'date', start: 'hm0?', end: 'hm0?', label: 'text?', project: 'projectId?', steps: 'texts?' }, doc: 'put a new task on a day; "project" links it to a long-term project by id' },
+  { kind: 'add_task_series', fields: { title: 'text', block: 'block', from: 'date', until: 'date?', everyDays: 'seriesStep?', weekdays: 'weekdays?', start: 'hm0?', end: 'hm0?', label: 'text?', project: 'projectId?' }, doc: 'repeat one task on a cadence: everyDays 1 = daily, 7 = weekly, or name weekdays instead. Omit "until" and it runs one week', check: (o) => seriesDates(o).length > 0 },
   { kind: 'move_task', fields: { taskId: 'taskId', block: 'block', date: 'date' }, doc: 'move an existing task to another day and/or period' },
   { kind: 'edit_task', fields: { taskId: 'taskId', title: 'text?', start: 'hm0?', end: 'hm0?', label: 'text?' }, doc: 'rename or re-time a task; give only the fields that change', needsOne: ['title', 'start', 'end', 'label'] },
   { kind: 'complete_task', fields: { taskId: 'taskId' }, doc: 'tick a task off' },
@@ -116,7 +153,7 @@ export const ACTIONS = [
   { kind: 'delete_backlog', fields: { poolId: 'poolId' }, doc: 'drop a backlog item' },
 
   // --- recurring task definitions ---
-  { kind: 'add_recurring', fields: { title: 'text', block: 'block', start: 'hm0?', end: 'hm0?' }, doc: 'define a recurring task they can drop onto any day' },
+  { kind: 'add_recurring', fields: { title: 'text', block: 'block', start: 'hm0?', end: 'hm0?', label: 'text?' }, doc: 'define a REUSABLE recurring task, placed on days by hand later. To actually put a repeating task on the calendar now, use add_task_series instead' },
   { kind: 'recurring_to_day', fields: { recurringId: 'recurringId', date: 'date', block: 'block?' }, doc: 'place a recurring task on a day' },
   { kind: 'delete_recurring', fields: { recurringId: 'recurringId' }, doc: 'remove a recurring task definition' },
 
@@ -149,6 +186,27 @@ export const ACTIONS = [
   { kind: 'set_theme', fields: { theme: 'theme' }, doc: 'light, dark, or automatic by sunset' },
   { kind: 'set_option', fields: { option: 'toggle', on: 'bool' }, doc: 'time24 = 24-hour clock; prayerGate = the prayer gate that blocks the app until the prayer is marked' },
 ];
+
+/* Which days a repeat actually lands on. Pure, so the description a person
+   approves and the tasks that get written come from the same arithmetic —
+   "×7, Sat 30 Aug -> Fri 5 Sep" is not a guess about what will happen, it is
+   the list. */
+export function seriesDates(p) {
+  const from = parseISO(p.from);
+  if (!from || Number.isNaN(from.getTime())) return [];
+  const until = p.until ? parseISO(p.until) : addDays(from, SERIES_DEFAULT_DAYS - 1);
+  if (!until || Number.isNaN(until.getTime()) || until < from) return [];
+  const wanted = Array.isArray(p.weekdays) && p.weekdays.length ? new Set(p.weekdays) : null;
+  // Named weekdays are a filter over every day, not a stride — "every Monday
+  // and Thursday" is not a fixed number of days apart.
+  const step = wanted ? 1 : Math.max(1, Number(p.everyDays) || 1);
+  const out = [];
+  for (let d = from; d <= until && out.length < MAX_SERIES; d = addDays(d, step)) {
+    if (wanted && !wanted.has(WEEKDAY_IDS[d.getDay()])) continue;
+    out.push(fmtISO(d));
+  }
+  return out;
+}
 
 const BY_KIND = new Map(ACTIONS.map((a) => [a.kind, a]));
 
@@ -208,6 +266,20 @@ Rules:
   something to the day after the last day listed, give the next day's date.
   WEEK DAYS in the snapshot gives you each shown day's date.
 - "step" in complete_step is the number printed beside that subtask.
+- To put a repeating task on the calendar, use add_task_series. Leave "until"
+  out unless they named an end — an omitted "until" already means one week,
+  and inventing a date they did not give is worse than the default.
+- add_recurring only DEFINES a reusable task; it puts nothing on any day.
+- "project" attaches a task to a long-term project. Give its id or its exact
+  name from the PROJECTS list. Whenever the request mentions something that
+  appears in PROJECTS, that task MUST carry "project" — saying so in "reply"
+  is not the same as setting the field, and a task without it is linked to
+  nothing. This applies to add_task and add_task_series alike.
+    "put chapter 4 on Monday under The Book"
+      -> {"kind":"add_task","title":"Chapter 4","block":"morning",
+          "date":"...","project":"The Book","why":"..."}
+- "label" is a different thing: a free-text tag, created on demand, for work
+  that is not one of their projects.
 - "why" is a short phrase (<= 10 words) explaining the change.
 - When one request means several changes, propose them all — but never more
   than ${MAX_PROPOSALS} at once, and propose nothing unless it clearly helps. An empty
@@ -322,6 +394,8 @@ export function validateProposal(p, ctx = {}) {
   }
   // "Change nothing" is not a change worth showing anyone.
   if (action.needsOne && !action.needsOne.some((f) => out[f])) return null;
+  // A repeat that lands on no days at all is not a proposal, it is a typo.
+  if (action.check && !action.check(out)) return null;
 
   out.why = str(p.why) || '';
   return out;
@@ -361,7 +435,18 @@ export function describeProposal(p, names = {}) {
   const at = (x) => (x.start ? ` · ${fmtTime(x.start)}${x.end ? `–${fmtTime(x.end)}` : ''}` : '');
 
   switch (p.kind) {
-    case 'add_task': return `${tx('Add', 'أضف')} ${q(p.title)} → ${when(p)}${at(p)}`;
+    case 'add_task': return `${tx('Add', 'أضف')} ${q(p.title)} → ${when(p)}${at(p)}${p.project ? ` · ${J(p.project)}` : ''}`;
+    case 'add_task_series': {
+      const days = seriesDates(p);
+      const cadence = p.weekdays && p.weekdays.length
+        ? p.weekdays.join('/')
+        : (p.everyDays || 1) === 1 ? tx('daily', 'يوميًا')
+          : (p.everyDays === 7 ? tx('weekly', 'أسبوعيًا') : `${tx('every', 'كل')} ${p.everyDays} ${tx('days', 'أيام')}`);
+      // The count and the real range, because "until" was very likely a
+      // default this person never typed.
+      const range = days.length ? `${dn(days[0])} → ${dn(days[days.length - 1])}` : '?';
+      return `${tx('Add', 'أضف')} ${q(p.title)} ×${days.length} · ${cadence} · ${range} · ${bn(p.block)}${at(p)}${p.project ? ` · ${J(p.project)}` : ''}`;
+    }
     case 'move_task': return `${tx('Move', 'انقل')} ${T(p.taskId)} → ${when(p)}`;
     case 'edit_task': {
       const bits = [];
@@ -382,7 +467,7 @@ export function describeProposal(p, names = {}) {
     case 'complete_backlog': return `${tx('Mark done', 'علّم كمنجز')}: ${P(p.poolId)}`;
     case 'delete_backlog': return `${tx('Delete from backlog', 'احذف من قائمة الانتظار')}: ${P(p.poolId)}`;
 
-    case 'add_recurring': return `${tx('New recurring task', 'مهمة متكررة جديدة')} ${q(p.title)} · ${bn(p.block)}${at(p)}`;
+    case 'add_recurring': return `${tx('New reusable recurring task', 'مهمة متكررة قابلة لإعادة الاستخدام')} ${q(p.title)} · ${bn(p.block)}${at(p)}`;
     case 'recurring_to_day': return `${tx('Place', 'ضع')} ${R(p.recurringId)} → ${dn(p.date)}${p.block ? ` · ${bn(p.block)}` : ''}`;
     case 'delete_recurring': return `${tx('Delete recurring task', 'احذف المهمة المتكررة')}: ${R(p.recurringId)}`;
 
