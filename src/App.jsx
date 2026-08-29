@@ -16,7 +16,7 @@ import { calKey, loadCalDone, toggleCalDone, pruneCalDone } from './caldone.js';
 import { DayEvents } from './calview.jsx';
 import { CalendarView } from './calendarview.jsx';
 import { KanbanBoard } from './kanban.jsx';
-import { columnOf, isMove, patchFor } from './board.js';
+import { columnsOf, isMove, patchFor } from './board.js';
 import { rangeOf } from './calgrid.js';
 import { loadCalProjects, setCalProject, pruneCalProjects } from './calproj.js';
 import { TrelloCards } from './trelloview.jsx';
@@ -1557,11 +1557,12 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   useEffect(() => { if (view !== 'projects') setBoardProject(null); }, [view]);
 
   const moveBoardCard = useCallback((card, col) => {
-    if (!isMove(card, col)) return;
+    const proj = (settingsRef.current.projects || []).find((x) => x.id === boardProject);
+    if (!isMove(card, col, columnsOf(proj))) return;
     // Through the same fields the rest of the app reads, so a card moved to
     // Done is genuinely a task ticked off.
     patchProjectTask(card, patchFor(col));
-  }, [weekStart]);
+  }, [weekStart, boardProject]);
 
   const calSettings = settings.calendar || {};
   // What the scheduler must not schedule over, for the day being looked at.
@@ -2794,6 +2795,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             onBack={() => setBoardProject(null)}
             /* New cards land in the backlog: a board card does not need a day,
                and forcing one would make "add a task" a scheduling decision. */
+            onColumns={(cols) => updProjectItem(proj.id, { columns: cols })}
             onAddTask={() => {
               const it = addPoolItem(tx('New task', 'مهمة جديدة'), {});
               if (it) { mutatePoolItem(it.id, (x) => ({ ...x, projectRef: proj.id })); setEditingPool(it.id); }

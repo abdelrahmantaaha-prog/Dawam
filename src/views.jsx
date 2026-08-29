@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Rows3 } from 'lucide-react';
-import { boardSummary } from './board.js';
+import { boardSummary, columnsOf } from './board.js';
 import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 
@@ -156,7 +156,7 @@ function ProjectCard({ p, open, onOpen, onUpd, onDel, onLog, taskInfo, onToggleT
   const hasTarget = Number(p.target) > 0; // numeric targets are optional
   const submitLog = () => { const n = Number(amt); if (!n) return; onLog(n, note.trim()); setAmt(''); setNote(''); };
   const tasks = (taskInfo && taskInfo.tasks) || [];
-  const lanes = boardSummary(tasks);
+  const lanes = boardSummary(tasks, columnsOf(p));
   // Pace status: green (ahead/on), amber (a little behind), red (well behind)
   let statusClass = 'neutral', statusText = hasTarget ? tx('no deadline set', 'لا موعد نهائي') : tx('in progress', 'قيد التنفيذ');
   if (completed) { statusClass = 'done'; statusText = tx('completed', 'مكتمل'); }
@@ -206,7 +206,7 @@ function ProjectCard({ p, open, onOpen, onUpd, onDel, onLog, taskInfo, onToggleT
             {onBoard && (
               <button className="ghost sm proj-board-btn" onClick={onBoard}>
                 <Rows3 size={13} /> {tx('Board', 'اللوحة')}
-                <span className="proj-lanes">{lanes.todo}/{lanes.doing}/{lanes.done}</span>
+                <span className="proj-lanes">{lanes.lanes.map((l) => l.n).join('/')}</span>
               </button>
             )}
           </div>
