@@ -965,6 +965,73 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 /* ---- Calendars (read-only) -------------------------------------------
    Deliberately quiet: these are not tasks, nothing can be done to them
    from here, and they must not compete with the day's own work. */
+/* ---- Calendar view (Day / Week / Month) ----
+   The hour grid is absolutely positioned inside a column of known height, so
+   an event's top and height are just minutes x a constant — no flex maths that
+   drifts as the window resizes. */
+.calv{max-width:1100px;margin:0 auto;padding:0 12px 90px;display:flex;flex-direction:column;min-height:0}
+.calv-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:10px 0}
+.calv-nav{display:flex;align-items:center;gap:6px}
+.calv-title{font-size:15px;font-weight:800;color:var(--ink);min-width:150px;text-align:center}
+.calv-modes{flex-shrink:0}
+
+.calv-alldays{display:flex;border-bottom:1px solid var(--line)}
+.calv-gutter-h{width:52px;flex-shrink:0}
+.calv-adcol{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;padding:6px 4px;border-inline-start:1px solid var(--line)}
+.calv-adcol.today{background:var(--soft)}
+.calv-dayhead{display:flex;flex-direction:column;align-items:center;gap:1px;background:none;border:0;cursor:pointer;color:inherit;font-family:inherit}
+.calv-dh-w{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.calv-dh-n{font-size:16px;font-weight:800;color:var(--ink)}
+.calv-adcol.today .calv-dh-n{color:var(--verdigris)}
+.calv-adchip{font-size:10.5px;padding:2px 5px;border-radius:6px;background:var(--soft);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.calv-scroll{overflow-y:auto;overflow-x:hidden;max-height:62vh;border-radius:0 0 12px 12px}
+.calv-grid{display:flex;position:relative}
+.calv-gutter{width:52px;flex-shrink:0;position:relative}
+.calv-hour{position:absolute;inset-inline-end:6px;transform:translateY(-50%);font-size:10px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
+.calv-col{flex:1;min-width:0;position:relative;border-inline-start:1px solid var(--line)}
+.calv-hourline{position:absolute;inset-inline:0;border-top:1px solid var(--line);opacity:.55}
+.calv-now{position:absolute;inset-inline:0;border-top:2px solid #9C4221;z-index:3}
+.calv-now::before{content:'';position:absolute;inset-inline-start:-3px;top:-4px;width:6px;height:6px;border-radius:50%;background:#9C4221}
+
+.calv-item{position:absolute;overflow:hidden;display:flex;flex-direction:column;gap:1px;
+  padding:2px 5px;border:1px solid var(--line);border-inline-start:3px solid var(--verdigris);
+  border-radius:7px;background:var(--panel);cursor:pointer;text-align:start;font-family:inherit;z-index:2}
+.calv-item.event{background:var(--soft)}
+.calv-item.task{background:var(--panel);border-inline-start-style:dashed}
+.calv-item.done{opacity:.55;text-decoration:line-through}
+.calv-item:hover{border-color:var(--verdigris);z-index:4}
+.calv-item-t{font-size:11px;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.calv-item-w{font-size:9.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.calv-item-p{position:absolute;top:3px;inset-inline-end:3px;width:6px;height:6px;border-radius:50%}
+
+.calv-month{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;background:var(--line);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.calv-mhead{background:var(--soft);padding:6px 4px;text-align:center;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.calv-cell{min-height:88px;background:var(--panel);border:0;padding:4px;display:flex;flex-direction:column;gap:3px;align-items:stretch;cursor:pointer;font-family:inherit;text-align:start}
+.calv-cell.out{background:var(--soft);opacity:.6}
+.calv-cell.today .calv-cell-n{background:var(--verdigris);color:#fff;border-radius:50%}
+.calv-cell-n{align-self:flex-start;font-size:11.5px;font-weight:800;color:var(--ink);min-width:19px;height:19px;display:grid;place-items:center}
+.calv-chips{display:flex;flex-direction:column;gap:2px;min-width:0}
+.calv-chip{font-size:10px;padding:1px 4px;border-inline-start:3px solid var(--verdigris);border-radius:4px;background:var(--soft);color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.calv-more,.calv-tcount{font-size:9.5px;color:var(--muted);font-weight:700}
+
+.calv-totals{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-top:12px;padding:9px 11px;border:1px solid var(--line);border-radius:11px;background:var(--soft)}
+.calv-tot-h{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.calv-tot{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--ink)}
+.calv-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+
+.calv-ev-t{font-size:15px;font-weight:800;color:var(--ink);margin:0 0 4px}
+.calv-picklist{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.calv-pick{display:flex;align-items:center;gap:8px;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;text-align:start}
+.calv-pick.on{border-color:var(--verdigris);background:var(--soft)}
+
+@media (max-width:640px){
+  .calv-scroll{max-height:56vh}
+  .calv-cell{min-height:64px}
+  .calv-chip{font-size:9px}
+  .calv-title{min-width:110px;font-size:13px}
+}
+
 .cal-list{display:flex;flex-direction:column;gap:6px;margin:9px 0}
 .cal-row{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
 .cal-row.off{opacity:.5}

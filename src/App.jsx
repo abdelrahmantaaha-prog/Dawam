@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3, Mic, Square, ListChecks } from 'lucide-react';
+import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3, Mic, Square, ListChecks, CalendarRange } from 'lucide-react';
 import {brokerFrom, hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
 import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken } from './sync.js';
@@ -14,6 +14,9 @@ import { FocusView, isDesktop, useRoundEnded } from './focus.jsx';
 import { loadFeeds, saveFeeds, refreshAll, loadInstances, busyOn, eventsOn } from './calsync.js';
 import { calKey, loadCalDone, toggleCalDone, pruneCalDone } from './caldone.js';
 import { DayEvents } from './calview.jsx';
+import { CalendarView } from './calendarview.jsx';
+import { rangeOf } from './calgrid.js';
+import { loadCalProjects, setCalProject, pruneCalProjects } from './calproj.js';
 import { TrelloCards } from './trelloview.jsx';
 import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
 
@@ -47,7 +50,7 @@ export default function Rhythm() {
   const [todayData, setTodayData] = useState(null);
   const [nowTick, setNowTick] = useState(0);
   const [storageOk, setStorageOk] = useState(true);
-  const [view, setView] = useState('now');         // 'overdue' | 'now' | 'plan' | 'focus'
+  const [view, setView] = useState('now');         // 'overdue' | 'now' | 'plan' | 'calendar' | 'projects' | 'habits' | 'focus'
   // The last focus round that ended and has not been answered yet. The shell
   // raises the window when a round linked to a task finishes, so the question
   // lands in front of the person while the answer still means something.
@@ -64,6 +67,14 @@ export default function Rhythm() {
      written to. Keyed by day ISO, loaded for the two days on screen (today and
      the selected one); `refresh` re-runs this after sync lands new pages. */
   const [calDone, setCalDone] = useState({});
+  /* The calendar view keeps its own date and mode. Deliberately not the Plan
+     page's selection: paging a month around is browsing, and it should not
+     drag the day you are actually working on with it. */
+  const [calMode, setCalMode] = useState('week');
+  const [calDate, setCalDate] = useState(() => new Date());
+  const [calProjects, setCalProjects] = useState({});
+  const [calPicked, setCalPicked] = useState(null);
+  const [calTasks, setCalTasks] = useState({});   // ISO -> tasks, for the range on screen
   // Trello, same shape of problem: a cached copy of someone else's system,
   // refreshed on a timer, never written to.
   const [trelloCards, setTrelloCards] = useState([]);
@@ -1457,6 +1468,51 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     return () => { alive = false; clearInterval(id); };
   }, [ready, refreshCalendars]);
 
+  /* Assignments load once and are pruned against the live project list: a
+     deleted project would otherwise leave meetings filed under nothing, which
+     reads as a bug rather than as an empty project. */
+  useEffect(() => {
+    if (!ready) return;
+    (async () => {
+      const m = await loadCalProjects();
+      const live = (settingsRef.current.projects || []).map((p) => p.id);
+      setCalProjects(Object.keys(m).length ? await pruneCalProjects(m, live) : m);
+    })();
+  }, [ready]);
+
+  const assignCalProject = useCallback(async (seriesKey, projectId) => {
+    setCalProjects(await setCalProject(calProjects, seriesKey, projectId));
+    flash(projectId ? tx('Filed.', 'تم الإسناد.') : tx('Cleared.', 'أُزيل الإسناد.'));
+  }, [calProjects]);
+
+  /* Tasks for whatever the calendar is showing. A month spans up to six week
+     documents, so this reads them rather than assuming the displayed week —
+     readWeek is session-cached, so paging back and forth costs nothing after
+     the first look. */
+  useEffect(() => {
+    if (!ready || view !== 'calendar') return;
+    let cancelled = false;
+    (async () => {
+      const [fromMs, toMs] = rangeOf(calMode, calDate, settings.weekStartDay);
+      const out = {};
+      const seen = new Set();
+      for (let t = fromMs; t < toMs; t += 86400000) {
+        const d = new Date(t);
+        const wsISO = fmtISO(startOfWeek(d, settings.weekStartDay));
+        if (seen.has(wsISO)) continue;
+        seen.add(wsISO);
+        const wk = await readWeek(wsISO);
+        const ws = parseISO(wsISO);
+        for (const task of wk.tasks || []) {
+          const iso = fmtISO(addDays(ws, Number(task.day) || 0));
+          (out[iso] = out[iso] || []).push(task);
+        }
+      }
+      if (!cancelled) setCalTasks(out);
+    })();
+    return () => { cancelled = true; };
+  }, [ready, view, calMode, calDate, settings.weekStartDay, refresh, localVersion]);
+
   const calSettings = settings.calendar || {};
   // What the scheduler must not schedule over, for the day being looked at.
   const calBusyFor = useCallback(
@@ -2656,6 +2712,23 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         </div>
       )}
 
+      {view === 'calendar' && (
+        <CalendarView
+          mode={calMode}
+          date={calDate}
+          onMode={setCalMode}
+          onDate={setCalDate}
+          events={calInstances}
+          tasksByISO={calTasks}
+          projects={settings.projects || []}
+          calProjects={calProjects}
+          weekStartDay={settings.weekStartDay}
+          onAssign={assignCalProject}
+          picked={calPicked}
+          onPick={setCalPicked}
+        />
+      )}
+
       {/* PROJECTS (long-term) */}
       {view === 'projects' && (
         <ProjectsView
@@ -2962,6 +3035,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         </button>
         <button className={`navbtn ${view === 'plan' ? 'on' : ''}`} onClick={() => setView('plan')} aria-label={tx('Plan', 'خطّط')}>
           <Calendar size={20} /><span className="navlabel">{tx('Plan', 'خطّط')}</span>
+        </button>
+        <button className={`navbtn ${view === 'calendar' ? 'on' : ''}`} onClick={() => setView('calendar')} aria-label={tx('Calendar', 'التقويم')}>
+          <CalendarRange size={20} /><span className="navlabel">{tx('Calendar', 'تقويم')}</span>
         </button>
         <button className={`navbtn ${view === 'projects' ? 'on' : ''}`} onClick={() => setView('projects')} aria-label={tx('Projects', 'المشاريع')}>
           <Target size={20} /><span className="navlabel">{tx('Projects', 'مشاريع')}</span>
