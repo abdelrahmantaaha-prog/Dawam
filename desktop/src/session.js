@@ -20,6 +20,22 @@ function windowKey(title, process, host) {
   return site ? `site:${site}` : null;
 }
 
+/* Pausing is for a phone call, not for the rest of the afternoon.
+ *
+ * Everything that makes a work round mean anything — drift detection, the
+ * nudge, the force-return — is gated on `!paused`, so an indefinite pause was
+ * simply an off switch with an innocent name. Two limits close it: any one
+ * pause resumes itself, and a round only has so much pause in it. Spend the
+ * budget and the pause item stops working until the next round.
+ *
+ * The away-pause is deliberately exempt. That one is the app's own doing — it
+ * fires when the chair empties and ends when the person sits back down — and
+ * counting it would punish someone for being pulled away from a desk they then
+ * came back to. It cannot be triggered by choice, which is what makes it safe
+ * to leave uncapped. */
+const MAX_PAUSE_SEC = 5 * 60;      // one pause, at most
+const PAUSE_BUDGET_SEC = 10 * 60;  // all manual pauses in one round, at most
+
 // Session state machine: idle -> work -> break -> idle.
 // Drift detection runs only during an unpaused work phase.
 class SessionManager extends EventEmitter {
@@ -38,6 +54,9 @@ class SessionManager extends EventEmitter {
     this.totalSec = 0;
     this.endsAt = 0;
     this.remainingOnPause = 0;
+    this.pausedAt = 0;         // when the current pause began
+    this.pauseAuto = false;    // the chair emptied, rather than a decision
+    this.pauseSpentSec = 0;    // manual pause seconds used this round
     this.startedAt = 0;
     this.distractedSec = 0;
     this.driftCount = 0;
@@ -81,6 +100,9 @@ class SessionManager extends EventEmitter {
       enforceInSec: drifting ? this.enforceInSec() : null,
       phase: this.phase,
       paused: this.paused,
+      pauseAuto: this.pauseAuto,
+      pauseLeftSec: this.pauseLeft(),
+      pauseBudgetLeftSec: this.pauseBudgetLeft(),
       task: this.task,
       taskId: this.taskId,
       rounds: this.rounds,
@@ -146,6 +168,9 @@ class SessionManager extends EventEmitter {
     this.sessionVerdicts = { ...((tpl && tpl.verdicts) || {}), ...carry };
     this.phase = 'work';
     this.paused = false;
+    this.pauseAuto = false;
+    this.pausedAt = 0;
+    this.pauseSpentSec = 0; // a fresh round gets a fresh budget
     this.task = newTask;
     this.taskId = taskId || null;
     this.allowed = (Array.isArray(allowed) ? allowed : [])
@@ -165,19 +190,57 @@ class SessionManager extends EventEmitter {
     this.emitState();
   }
 
-  pause() {
-    if (this.phase === 'idle' || this.paused) return;
+  /* `auto` is the away-pause and only the away-pause: uncapped, unbudgeted,
+     and resumed by whoever paused it. Returns false when the pause was
+     refused, so a caller can say why instead of silently doing nothing. */
+  pause({ auto = false } = {}) {
+    if (this.phase === 'idle' || this.paused) return false;
+    if (!auto && this.pauseBudgetLeft() <= 0) {
+      this.emit('pause-refused', { spentSec: this.pauseSpentSec });
+      this.emitState();
+      return false;
+    }
     this.remainingOnPause = this.remaining();
+    this.pausedAt = Date.now();
+    this.pauseAuto = auto;
     this.paused = true;
     this.drift = null;
     this.emitState();
+    return true;
   }
 
   resume() {
     if (this.phase === 'idle' || !this.paused) return;
     this.endsAt = Date.now() + this.remainingOnPause * 1000;
     this.paused = false;
+    this.pauseAuto = false;
+    this.pausedAt = 0;
     this.emitState();
+  }
+
+  /* A paused round still has a clock — just a different one. */
+  tickPaused() {
+    if (this.pauseAuto) return; // the chair is empty; main.js owns this one
+    this.pauseSpentSec += 1;
+    const overOnePause = Date.now() - this.pausedAt >= MAX_PAUSE_SEC * 1000;
+    const overBudget = this.pauseBudgetLeft() <= 0;
+    if (overOnePause || overBudget) {
+      this.resume();
+      this.emit('pause-expired', { reason: overBudget ? 'budget' : 'cap' });
+    } else {
+      this.emitState(); // the countdown is visible, so it has to be pushed
+    }
+  }
+
+  pauseBudgetLeft() {
+    return Math.max(0, PAUSE_BUDGET_SEC - this.pauseSpentSec);
+  }
+
+  // Seconds before this pause resumes itself, or null when nothing is counting.
+  pauseLeft() {
+    if (!this.paused || this.pauseAuto) return null;
+    const thisPause = Math.max(0, MAX_PAUSE_SEC - Math.round((Date.now() - this.pausedAt) / 1000));
+    return Math.min(thisPause, this.pauseBudgetLeft());
   }
 
   stop() {
@@ -195,6 +258,9 @@ class SessionManager extends EventEmitter {
   toIdle() {
     this.phase = 'idle';
     this.paused = false;
+    this.pauseAuto = false;
+    this.pausedAt = 0;
+    this.pauseSpentSec = 0;
     this.taskId = null;
     this.drift = null;
     this.allowed = [];
@@ -293,7 +359,7 @@ class SessionManager extends EventEmitter {
 
   tick() {
     if (this.phase === 'idle') return;
-    if (this.paused) return;
+    if (this.paused) { this.tickPaused(); return; }
 
     if (this.phase === 'work' && this.lastSample.distracted) {
       this.distractedSec += 1;

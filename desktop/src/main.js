@@ -208,7 +208,9 @@ if (!app.requestSingleInstanceLock()) {
     const s = sessions.getState();
     if (s.phase === 'work' && !s.paused) {
       awayPaused = true;
-      sessions.pause();
+      // Exempt from the pause budget: nobody chose this, and it ends when they
+      // sit back down.
+      sessions.pause({ auto: true });
     }
   }
 
@@ -386,8 +388,14 @@ if (!app.requestSingleInstanceLock()) {
         },
         { type: 'separator' },
         {
-          label: state.paused ? 'Resume Session' : 'Pause Session',
-          enabled: state.phase !== 'idle',
+          /* The budget is named in the label rather than hidden behind a bare
+             disabled item, so running out reads as a rule rather than a bug. */
+          label: state.paused
+            ? (state.pauseLeftSec != null ? `Resume Session (auto in ${Math.ceil(state.pauseLeftSec / 60)}m)` : 'Resume Session')
+            : (state.phase === 'idle'
+              ? 'Pause Session'
+              : `Pause Session (${Math.ceil((state.pauseBudgetLeftSec || 0) / 60)}m left)`),
+          enabled: state.phase !== 'idle' && (state.paused || (state.pauseBudgetLeftSec || 0) > 0),
           click: () => (state.paused ? sessions.resume() : sessions.pause())
         },
         {
