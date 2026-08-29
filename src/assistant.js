@@ -470,6 +470,12 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = 'openai/gpt-oss-120b';
 
 const rateError = () => { const e = new Error('rate'); e.code = 'rate'; return e; };
+/* The pool refusing a token is the one failure a person can actually fix, and
+   "HTTP 401" tells them nothing about which of the two credentials on the
+   Settings page is wrong. Worth knowing: the two providers disagree usefully
+   here — a bad Gemini key comes back 400 INVALID_ARGUMENT, while the broker
+   answers 401 broker_auth. So a 401 is always the pool, never the key. */
+const poolAuthError = () => { const e = new Error('pool auth'); e.code = 'pool_auth'; return e; };
 
 export async function callAssistant({ apiKey, groqKey, broker, system, messages, maxTokens = 1500 }) {
   const post = (url, key, model) => fetch(url, {
@@ -496,6 +502,10 @@ export async function callAssistant({ apiKey, groqKey, broker, system, messages,
     try {
       const res = await post(`${broker.url}/v1/chat/completions`, broker.token, 'gemini-flash-lite-latest');
       if (res.ok) return read(res);
+      // A rejected token is a settings mistake, not an outage. It still falls
+      // through to this device's own keys when there are any — but if there
+      // are not, it must say what is actually wrong.
+      if (res.status === 401 || res.status === 403) throw poolAuthError();
       if (res.status !== 404 && res.status < 500 && res.status !== 429) throw new Error(`HTTP ${res.status}`);
     } catch (e) {
       if (!apiKey && !groqKey) throw e;

@@ -1,7 +1,7 @@
 /* The assistant's parser is the safety boundary: nothing reaches the plan
    unless it validates AND the person approves. Test it like it matters. */
-import { describe, it, expect } from 'vitest';
-import { ACTIONS, MAX_PROPOSALS, parseAssistantReply, validateProposal, buildDaySnapshot, describeProposal, parseEstimates, ASSISTANT_SYSTEM } from '../src/assistant.js';
+import { describe, it, expect, afterEach } from 'vitest';
+import { ACTIONS, MAX_PROPOSALS, parseAssistantReply, validateProposal, buildDaySnapshot, describeProposal, parseEstimates, callAssistant, ASSISTANT_SYSTEM } from '../src/assistant.js';
 
 const IDS = {
   taskIds: ['t1', 't2'], poolIds: ['p1'], habitIds: ['h1'], projectIds: ['j1'], recurringIds: ['r1'],
@@ -258,5 +258,56 @@ describe('describeProposal', () => {
       const text = describeProposal({ kind: a.kind, date: '2026-08-15', block: 'asr', prayer: 'asr', view: 'plan', lang: 'ar', theme: 'dark', option: 'time24', on: true, at: '05:30', title: 'T', name: 'N', cost: 5, amount: 3, step: 1 }, names);
       expect(text, a.kind).not.toBe(a.kind); // the fallback means an unwritten case
     }
+  });
+});
+
+/* Which credential is wrong?
+
+   The two providers disagree in a way that turns out to be diagnostic: a bad
+   Gemini key comes back 400 INVALID_ARGUMENT, while the broker answers 401
+   broker_auth. So a 401 always means the pool token, never the key — and the
+   app has to say so, because "Assistant unavailable (HTTP 401)" sends people
+   to re-check the one credential that was fine. */
+describe('telling a rejected pool token from an outage', () => {
+  const BROKER = { url: 'https://pool.example', token: 'kb_wrong' };
+  const reply = (status, body = {}) => Promise.resolve({
+    ok: status >= 200 && status < 300,
+    status,
+    json: () => Promise.resolve(body),
+  });
+  let calls;
+  const stub = (fn) => { calls = []; globalThis.fetch = (url, init) => { calls.push(String(url)); return fn(String(url), init); }; };
+  afterEach(() => { delete globalThis.fetch; });
+
+  const ask = (opts) => callAssistant({ system: 's', messages: [{ role: 'user', content: 'hi' }], ...opts });
+
+  it('reports a rejected token as pool_auth, not a bare HTTP code', async () => {
+    stub(() => reply(401, { error: { type: 'broker_auth' } }));
+    await expect(ask({ broker: BROKER })).rejects.toMatchObject({ code: 'pool_auth' });
+  });
+
+  it('treats 403 the same way', async () => {
+    stub(() => reply(403));
+    await expect(ask({ broker: BROKER })).rejects.toMatchObject({ code: 'pool_auth' });
+  });
+
+  it('still falls through to this device\u2019s own key when there is one', async () => {
+    // A rejected pool token must not take the app down when it has a key of
+    // its own — that is the whole reason the local key paths stayed in place.
+    stub((url) => (url.includes('pool.example')
+      ? reply(401)
+      : reply(200, { choices: [{ message: { content: 'from the local key' } }] })));
+    await expect(ask({ broker: BROKER, apiKey: 'AIza-local' })).resolves.toBe('from the local key');
+    expect(calls.some((u) => u.includes('generativelanguage'))).toBe(true);
+  });
+
+  it('does not confuse an outage with a bad token', async () => {
+    stub(() => reply(503));
+    await expect(ask({ broker: BROKER })).rejects.toMatchObject({ message: 'pool unavailable' });
+  });
+
+  it('reports a rate limit as rate, from either lane', async () => {
+    stub(() => reply(429));
+    await expect(ask({ apiKey: 'AIza-local' })).rejects.toMatchObject({ code: 'rate' });
   });
 });

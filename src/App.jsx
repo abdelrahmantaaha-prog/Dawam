@@ -20,6 +20,14 @@ import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.
 import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
 
+/* The pool rejected this app's token. Said plainly, and pointing at the field
+   that is wrong — the failure is indistinguishable from "the AI is broken"
+   otherwise, and it is neither the Gemini key nor the network. */
+const POOL_AUTH_MSG = () => tx(
+  'The shared key pool rejected this app\u2019s token. Check Settings \u2192 key pool token, or clear both key pool fields to use your own Gemini key instead.',
+  '\u0631\u0641\u0636 \u0645\u062e\u0632\u0646 \u0627\u0644\u0645\u0641\u0627\u062a\u064a\u062d \u062a\u0648\u0643\u0646 \u0647\u0630\u0627 \u0627\u0644\u062a\u0637\u0628\u064a\u0642. \u0631\u0627\u062c\u0639 \u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a \u2190 \u062a\u0648\u0643\u0646 \u0627\u0644\u0645\u062e\u0632\u0646\u060c \u0623\u0648 \u0627\u0645\u0633\u062d \u062d\u0642\u0644\u064a \u0627\u0644\u0645\u062e\u0632\u0646 \u0644\u0627\u0633\u062a\u062e\u062f\u0627\u0645 \u0645\u0641\u062a\u0627\u062d Gemini \u0627\u0644\u062e\u0627\u0635 \u0628\u0643.',
+);
+
 export default function Rhythm() {
   const [ready, setReady] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -1300,7 +1308,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       } catch (e) {
         setParseError(e.code === 'rate'
           ? tx('Free-tier limit hit (per-minute or daily). Wait a minute and retry — daily quotas reset at midnight Pacific.', 'تم بلوغ الحد المجاني (بالدقيقة أو اليومي). انتظر دقيقة وأعد المحاولة — تتجدد الحصة اليومية منتصف الليل بتوقيت المحيط الهادئ.')
-          : `${tx('Sorter request failed', 'فشل طلب الفرز')} (${e.message || e}). ${tx('Add items by hand instead.', 'أضف العناصر يدويًا.')}`);
+          : e.code === 'pool_auth' ? POOL_AUTH_MSG()
+            : `${tx('Sorter request failed', 'فشل طلب الفرز')} (${e.message || e}). ${tx('Add items by hand instead.', 'أضف العناصر يدويًا.')}`);
         setParsing(false); return;
       }
       let clean = text.replace(/```json|```/g, '').trim();
@@ -1693,7 +1702,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     } catch (e) {
       setChatErr(e.code === 'rate'
         ? tx('Rate limit hit — wait a moment and try again.', 'تم بلوغ حد المعدل — انتظر قليلًا وأعد المحاولة.')
-        : tx(`Assistant unavailable (${e.message || e}).`, `المساعد غير متاح (${e.message || e}).`));
+        : e.code === 'pool_auth' ? POOL_AUTH_MSG()
+          : tx(`Assistant unavailable (${e.message || e}).`, `المساعد غير متاح (${e.message || e}).`));
     }
     setChatBusy(false);
   };
