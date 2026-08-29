@@ -426,7 +426,17 @@ function FocusSettings({ api, settings, templates, onSaved }) {
       {list('freeTimes', tx('Free times', 'أوقات حرة'), tx('20:00-23:00 — or fri,sat 14:00-02:00. The hard block is off inside these.', '20:00-23:00 — أو fri,sat 14:00-02:00. الحظر التام معطّل خلالها.'))}
 
       <h4 className="focus-h4">{tx('This app', 'هذا التطبيق')}</h4>
-      {toggle('launchAtLogin', tx('Start with Windows', 'البدء مع تشغيل ويندوز'), tx('Rhythm launches when you sign in, quietly in the tray. With commitment mode on, the locks are up from the first minute.', 'يبدأ ريذم عند تسجيل الدخول، بهدوء في شريط المهام. مع وضع الالتزام، تكون الأقفال قائمة من الدقيقة الأولى.'))}
+      {/* Not a toggle. Rhythm has no Quit on the desktop, so signing out would
+          be the loophole that closed it — it comes back at every sign-in. */}
+      <label className="check is-fixed">
+        <input type="checkbox" checked disabled readOnly />
+        <span>{tx('Start with Windows', 'البدء مع تشغيل ويندوز')}
+          <small className="hint-text">{tx(
+            'Always on. Rhythm has no Quit on the desktop — closing a window sends it to the tray, and it launches again at every sign-in. To actually end it, use Task Manager or uninstall it.',
+            'مفعّل دائمًا. لا يوجد زر إنهاء لريذم على سطح المكتب — إغلاق النافذة يرسله إلى شريط المهام، ويبدأ من جديد مع كل تسجيل دخول. لإنهائه فعلًا، استخدم مدير المهام أو أزل تثبيته.'
+          )}</small>
+        </span>
+      </label>
       {toggle('openPlannerAtStart', tx('Open the planner window at launch', 'افتح نافذة المخطط عند التشغيل'), tx('Off means Rhythm starts in the tray.', 'إيقافها يعني أن ريذم يبدأ في شريط المهام.'))}
 
       {templates.some((t) => t.verdicts && Object.keys(t.verdicts).length) && (

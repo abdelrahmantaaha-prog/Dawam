@@ -635,7 +635,11 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .rhythm.dark .side-tab.on{background:var(--panel)}
 .rhythm.dark .block{background:transparent}
 .rhythm.dark .task,.rhythm.dark .now-item{background:transparent}
-.rhythm.dark .chip{background:var(--panel);border-color:var(--line);color:var(--muted)}
+/* :not(.sel):not(.drop) matters. ".rhythm.dark .chip" is three classes and
+   ".chip.sel" is two, so dark mode was quietly repainting the selected day —
+   and a drag's drop target — back to plain panel. Picking a day left no mark. */
+.rhythm.dark .chip:not(.sel):not(.drop){background:var(--panel);border-color:var(--line);color:var(--muted)}
+.rhythm.dark .chip.sel{background:var(--verdigris);border-color:var(--verdigris)}
 .rhythm.dark .navbar,.rhythm.dark nav.nav{background:rgba(13,18,25,.92);border-color:var(--line)}
 /* The header and bottom bar hardcode a near-white background (they predate
    dark mode and it isn't a token, so nothing overrode it). In dark mode the
@@ -646,6 +650,17 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .rhythm.dark .navbtn{color:var(--muted)}
 .rhythm.dark .navbtn.on{color:#8FD3B8}
 .rhythm.dark .primary{background:#2F6F51;border-color:#2F6F51}
+/* The chosen segment — language, theme, clock format — was var(--ink) behind
+   #F6FBF8 text. That reads as near-black on near-white in light mode and as
+   near-white on near-white here: 1.03:1, an invisible button. The same deep
+   green .primary wears in the dark, which lands at 5.7:1. */
+.rhythm.dark .seg button.on{background:#2F6F51;color:#F6FBF8}
+/* .danger was drawn for a light card: #B23A3A text lands at 2.9:1 on the dark
+   panel, and its hover flashed a near-white block behind red. #E07A7A is the
+   red dark mode already wears on late Trello cards and drift verdicts — 5.9:1
+   here — with the hover tinted from the same colour instead of bleached. */
+.rhythm.dark .danger{color:#E07A7A;border-color:#6B3A3A}
+.rhythm.dark .danger:hover{background:rgba(224,122,122,.14)}
   .rhythm.dark .toast{background:#1E2632;color:var(--ink)}
 .rhythm.dark .proj-status.neutral{background:var(--soft);color:var(--muted)}
 .rhythm.dark .settings-tab.on{color:var(--ink)}
@@ -665,7 +680,8 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .rhythm.dark .habit-card.glow-3,.rhythm.dark .habit-card.glow-4,
 .rhythm.dark .habit-card.glow-5,.rhythm.dark .habit-card.glow-6,
 .rhythm.dark .habit-card.glow-7{background:linear-gradient(var(--tpl-dir,90deg),color-mix(in srgb,var(--hcolor) 14%,transparent),transparent 55%),var(--panel)}
-.rhythm.dark .chip .chip-d,.rhythm.dark .chip .chip-n{color:var(--ink)}
+.rhythm.dark .chip:not(.sel):not(.drop) .chip-d,.rhythm.dark .chip:not(.sel):not(.drop) .chip-n{color:var(--ink)}
+.rhythm.dark .chip.sel .chip-d,.rhythm.dark .chip.sel .chip-n,.rhythm.dark .chip.sel .chip-count{color:#F6FBF8}
 .rhythm.dark .chip.today{border-color:var(--verdigris)}
 .rhythm.dark .timeline{box-shadow:none}
 .rhythm.dark .block{border-top-color:var(--line)}
@@ -702,6 +718,25 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .chat-prop-actions{display:flex;gap:6px;flex-shrink:0}
 .chat-prop-state{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:800;color:var(--verdigris);flex-shrink:0}
 .chat-prop-state.muted{color:var(--faint)}
+.chat-apply-all{align-self:flex-start;display:inline-flex;align-items:center;gap:5px;font-weight:800}
+
+/* ---- Dictation ----
+   One button, three states. The ring is driven by --mic-level, written by the
+   recorder's meter, so on the recorded lane the button visibly hears you —
+   there is no live transcript there to prove the mic is open. */
+.mic-btn{flex-shrink:0;width:40px;height:40px;display:inline-flex;align-items:center;justify-content:center;
+  border:1px solid var(--line);border-radius:10px;background:var(--panel);color:var(--ink);cursor:pointer;
+  transition:background .15s,border-color .15s,color .15s}
+.mic-btn:hover:not(:disabled){border-color:var(--verdigris)}
+.mic-btn:disabled{opacity:.55;cursor:default}
+.mic-btn.listening{background:#9C4221;border-color:#9C4221;color:#fff;
+  box-shadow:0 0 0 calc(2px + 6px * var(--mic-level,0)) rgba(156,66,33,.22)}
+.mic-btn.transcribing{border-color:var(--verdigris);color:var(--verdigris)}
+@media (prefers-reduced-motion:no-preference){
+  .mic-btn.listening{animation:mic-pulse 1.6s ease-in-out infinite}
+}
+@keyframes mic-pulse{0%,100%{opacity:1}50%{opacity:.78}}
+.dump-actions .mic-btn{width:36px;height:36px}
 .chat-foot{display:flex;gap:8px;align-items:center}
 .chat-input{flex:1;height:40px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:0 12px;font-family:inherit;font-size:14px;outline:none}
 .chat-input:focus{border-color:var(--verdigris)}
@@ -866,6 +901,9 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .focus-view .check{display:flex;align-items:flex-start;gap:8px;margin-top:11px;font-size:13px;color:var(--ink);cursor:pointer}
 .focus-view .check input{margin-top:2px;accent-color:var(--verdigris)}
 .focus-view .check small{display:block}
+/* A setting that is stated, not offered — see the launch-at-login row. */
+.focus-view .check.is-fixed{cursor:default;opacity:.85}
+.focus-view .check.is-fixed input{cursor:default}
 .focus-row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap}
 .focus-presets{display:flex;gap:6px;padding-bottom:1px}
 .focus-presets .ghost.on{border-color:var(--verdigris);color:var(--verdigris)}

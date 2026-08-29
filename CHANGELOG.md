@@ -7,6 +7,94 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Dictation, on the laptop and on the phone.** The planning assistant and the
+  brain dump both have a microphone now. Where the browser has working Web
+  Speech the words appear live and cost nothing; where it does not, the clip is
+  recorded and transcribed by Gemini instead, through the shared key pool.
+
+  "Where it does not" could not be a feature check. The Android WebView has no
+  `SpeechRecognition` at all, which is easy. Electron defines it, opens the
+  microphone with it, and only then fails — the open-source Chromium carries no
+  credentials for Google's speech service, and `desktop/mic-probe.mjs` logs the
+  whole sequence against the real window: `start -> audiostart ->
+  error:network -> end`. So the live lane is believed until it breaks that
+  promise, then retired for the session, and the handover to the recorder
+  happens inside the same press rather than as an error the person can do
+  nothing about. The page re-encodes whatever MediaRecorder produced as 16 kHz mono WAV
+  first: Chrome records `audio/webm;codecs=opus`, which is not a container the
+  Gemini API lists as accepted, and a malformed clip fails *silently* — the
+  request succeeds and the transcript comes back empty, which reads exactly
+  like "you said nothing". English, Egyptian Arabic and a mix of both.
+  `RECORD_AUDIO` is declared on Android and asked for on first tap; the
+  desktop app grants `media` to its own origin and refuses everything else,
+  which is narrower than Electron's default of granting whatever is asked.
+- **The assistant can now do anything you can.** It was five actions — add,
+  move, complete, unschedule, schedule from the backlog — against a snapshot of
+  one day. It is thirty-five now, covering tasks and their subtasks, the
+  backlog, recurring tasks, habits, prayers, projects and their progress,
+  rewards, slotting a day, focus sessions, the wake alarm, pulling overdue
+  forward, moving around the app, and the language / theme / clock /
+  prayer-gate settings. Approval is still per proposal and still the only way
+  anything lands; an *Approve all* button walks the same list through the same
+  code path when one sentence meant several changes.
+- **One table instead of two lists.** The actions live in `ACTIONS` in
+  `src/assistant.js`: the prompt the model reads is generated from it and
+  `validateProposal` walks it, so the schema the model is told about and the
+  schema the app enforces can no longer disagree. Adding an action is a row
+  and a handler.
+
+### Changed
+- **The assistant sees the whole week, not just the day on screen.** The cost
+  of the old snapshot was invisible until you used the new actions: asked to
+  move tomorrow's dentist appointment, the model correctly answered that it
+  could not see any such task — an id it cannot see is an id it must not name,
+  and the day filter had been hiding six sevenths of the ids it was allowed to
+  use. Overdue tasks from earlier weeks still carry no ids; `overdue_to_today`
+  remains the only way to reach those.
+- **A task the assistant ticks off now pays its points.** Approving
+  `complete_task` goes through `toggleDone`, the same path the checkbox uses,
+  rather than writing `done: true` behind the ledger's back.
+- **Slotting takes a day rather than reading the selection.** `structureSelectedDay`
+  and `clearSlots` accept a day index, because the assistant can name a day
+  that isn't the one on screen. Asked to slot a day in another week, it opens
+  that day and leaves the proposal standing for a second press instead of
+  quietly slotting the wrong one.
+- **CI-built APKs can carry the key pool.** `.env.local` is gitignored, so
+  every APK GitHub Actions built shipped with no pool address at all. The
+  workflow now writes one from the `VITE_BROKER_URL` / `VITE_BROKER_TOKEN`
+  repository secrets, and skips the step cleanly when they are not set.
+- **Rhythm no longer closes on the desktop.** The tray has no Quit, every
+  window's close button already sent it to the tray, and `app.quit()` is now
+  refused outright. Two doors stay open on purpose: Windows signing out or
+  shutting down, and a `--dev` launch (a packaged build given that flag only
+  points itself at a dev server that isn't running, so it is no bypass).
+  Ending it for real means Task Manager or the uninstaller. "Start with
+  Windows" stops being a toggle to match — a reboot was otherwise the way to
+  close what cannot be closed — and the settings row states it instead of
+  offering a switch.
+
+### Fixed
+- **Picking a day left no mark in dark mode.** `.rhythm.dark .chip` is three
+  classes and `.chip.sel` is two, so dark mode was quietly repainting the
+  selected day — and a drag's drop target — back to plain panel. The
+  selection is verdigris again in both themes.
+- **The chosen segment was invisible in dark mode.** Language, theme and clock
+  format drew `var(--ink)` behind near-white text: near-black on near-white in
+  the light, near-white on near-white in the dark, at 1.03:1. It now wears the
+  same deep green `.primary` does after dark — 5.71:1.
+- **Destructive buttons after dark.** `.danger` was drawn for a light card:
+  #B23A3A at 2.9:1 on the dark panel, with a hover that flashed a near-white
+  block behind red. It now uses the red dark mode already wears on late Trello
+  cards, at 5.9:1, with a hover tinted from the same colour.
+- The desktop smoke test killed only the `cmd` wrapper on Windows, leaving the
+  app running after every run — which now matters, because what it leaves
+  behind has no Quit of its own. It kills the process tree.
+
+---
+
 ## [2.8] — 2026-08-25
 
 The calendar stays read-only toward Google — and stops being read-only toward

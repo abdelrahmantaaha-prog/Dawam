@@ -1,82 +1,36 @@
 /* ------------------------------------------------------------------ */
-/*  Planning assistant — chat about the day.                            */
+/*  Planning assistant — talk to the day, and change it.                */
 /*                                                                      */
-/*  It reads a compact snapshot of the day (blocks, tasks, habits,      */
-/*  prayers, overdue, projects) and answers. It never writes anything   */
-/*  itself: it may only PROPOSE changes, which the person approves one  */
-/*  by one in the UI. Every proposal is validated here before it can be */
-/*  shown — a malformed or unknown action is dropped, not guessed at.   */
+/*  It reads a compact snapshot of the day (blocks, tasks, backlog,     */
+/*  recurring tasks, habits, prayers, overdue, projects, rewards) and   */
+/*  answers. It never writes anything itself: it may only PROPOSE       */
+/*  changes, which the person approves in the UI. Every proposal is     */
+/*  validated here before it can be shown — a malformed or unknown      */
+/*  action is dropped, not guessed at.                                  */
+/*                                                                      */
+/*  The action list below is the whole contract, in one table. The      */
+/*  prompt the model reads is GENERATED from it, so a new action is a   */
+/*  row here plus a handler in App.jsx — the schema the model is told   */
+/*  about and the schema this file enforces cannot drift apart, which   */
+/*  is exactly what went wrong when they were two hand-written lists.   */
 /* ------------------------------------------------------------------ */
-import { BLOCKS, firstJsonObject } from './core.jsx';
+import { BLOCKS, PRAYER_BLOCKS, bName, blockById, firstJsonObject, fmtTime, mon, parseISO, tx, wdFull } from './core.jsx';
 
 const BLOCK_IDS = BLOCKS.map((b) => b.id);
+export const VIEWS = ['now', 'plan', 'overdue', 'focus'];
+const THEMES = ['auto', 'light', 'dark'];
+const LANGS_OK = ['en', 'ar'];
+const TOGGLES = ['time24', 'prayerGate'];
 
-export const ASSISTANT_SYSTEM = `You are the planning assistant inside "Rhythm", a daily planner whose day is divided into six periods anchored to Islamic prayer times: fajr, morning, dhuhr, asr, maghrib, isha.
+/* ------------------------------------------------------------------ */
+/*  Field types                                                         */
+/* ------------------------------------------------------------------ */
+/* Each returns the cleaned value, or null to reject the whole proposal.
+   `undefined` is only ever returned for an absent optional field, which is
+   how "leave this out" is told apart from "this was wrong". */
 
-You help the person think about their day: what to prioritise, what to drop, what is slipping. Be concise, concrete and honest — if they are overcommitted, say so plainly. Never moralise about prayer or habits; report what the data says and leave judgement to them.
-
-Reply with ONLY one valid JSON object. No prose outside it, no markdown fences.
-
-Schema:
-{
-  "reply": string,              // your answer, plain text, 1-6 short sentences
-  "proposals": [ proposal ]     // may be empty; ONLY when a concrete change helps
-}
-
-proposal types (all fields required unless marked optional):
-- {"kind":"add_task","title":string,"block":blockId,"date":"YYYY-MM-DD","start":"HH:MM"|null,"end":"HH:MM"|null,"why":string}
-- {"kind":"move_task","taskId":string,"block":blockId,"date":"YYYY-MM-DD","why":string}
-- {"kind":"complete_task","taskId":string,"why":string}
-- {"kind":"task_to_backlog","taskId":string,"why":string}
-- {"kind":"backlog_to_day","poolId":string,"block":blockId,"date":"YYYY-MM-DD","why":string}
-
-Rules:
-- blockId is one of: fajr, morning, dhuhr, asr, maghrib, isha.
-- date is an absolute calendar date. It does NOT have to fall inside the shown
-  week: to move something to the day after the last day listed, give the next
-  day's date. WEEK DAYS in the snapshot gives you each shown day's date.
-- Use ONLY ids that appear in the snapshot. Never invent an id.
-- "why" is a short phrase (<= 10 words) explaining the change.
-- Propose nothing unless it clearly helps. An empty "proposals" array is normal and good.
-- Never propose more than 5 changes at once.
-- The person approves each proposal manually, so propose, don't assume.`;
-
-/* A compact, token-cheap snapshot. Deliberately terse: the model needs facts,
-   not prose. */
-export function buildDaySnapshot({ dateLabel, dayIdx, dayNames, dayDates, todayISO, timings, activeBlock, tasks, pool, habits, prayersDone, overdue, projects, labels }) {
-  const L = [];
-  L.push(`TODAY: ${dateLabel}${todayISO ? ` (${todayISO})` : ''}`);
-  // Each shown day with its real date. Without the dates the model can only
-  // name days inside this week, so "move it to Saturday" on the last day of the
-  // week has no way to mean NEXT Saturday.
-  L.push(`WEEK DAYS: ${(dayNames || []).map((n, i) => `${n}${dayDates && dayDates[i] ? ` ${dayDates[i]}` : ''}`).join(', ')}`);
-  L.push(`NOW IN PERIOD: ${activeBlock}`);
-  if (timings) L.push(`PRAYER TIMES: ${Object.entries(timings).map(([k, v]) => `${k} ${v}`).join(', ')}`);
-  L.push(`PRAYERS DONE TODAY: ${(prayersDone || []).length ? prayersDone.join(', ') : 'none'}`);
-  L.push('');
-  L.push('TASKS ON THE SHOWN DAY:');
-  if (!tasks || !tasks.length) L.push('  (none)');
-  else for (const t of tasks) L.push(`  id=${t.id} block=${t.block} ${t.time ? `time=${t.time} ` : ''}done=${t.done ? 'yes' : 'no'} title="${t.title}"${t.project ? ` project="${t.project}"` : ''}${t.subtasks ? ` steps=${t.subtasks}` : ''}`);
-  L.push('');
-  L.push('BACKLOG (no fixed day):');
-  if (!pool || !pool.length) L.push('  (none)');
-  else for (const p of pool.slice(0, 25)) L.push(`  id=${p.id} done=${p.done ? 'yes' : 'no'} title="${p.title}"`);
-  L.push('');
-  L.push('HABITS:');
-  if (!habits || !habits.length) L.push('  (none)');
-  else for (const h of habits) L.push(`  "${h.name}" period=${h.block} streak=${h.streak} today=${h.doneToday ? 'kept' : 'not yet'}${h.builtin ? ' (built-in prayer)' : ''}`);
-  L.push('');
-  L.push(`OVERDUE TASKS: ${overdue && overdue.length ? overdue.map((o) => `"${o.title}" (${o.when})`).join(', ') : 'none'}`);
-  L.push('');
-  L.push('PROJECTS:');
-  if (!projects || !projects.length) L.push('  (none)');
-  else for (const p of projects) L.push(`  "${p.name}" ${p.target ? `${p.done}/${p.target} ${p.unit}` : '(no numeric target)'} ${p.status}${p.perDay ? ` need=${p.perDay}/day` : ''}${p.daysLeft != null ? ` daysLeft=${p.daysLeft}` : ''}`);
-  if (labels && labels.length) L.push(`\nLABELS: ${labels.join(', ')}`);
-  return L.join('\n');
-}
-
-const isHM = (s) => s == null || s === '' || /^\d{1,2}:\d{2}$/.test(String(s));
 const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+const isHM = (s) => /^\d{1,2}:\d{2}$/.test(String(s)) && Number(String(s).split(':')[0]) < 24 && Number(String(s).split(':')[1]) < 60;
 
 /* A real calendar date, and a real one — "2026-02-31" parses as March 3rd in
    JavaScript, so the round trip through Date is what actually rejects it.
@@ -99,35 +53,364 @@ function validDate(v, anchorISO) {
   return s;
 }
 
-/* Validate one proposal. Returns the cleaned object or null (dropped). */
-export function validateProposal(p, { taskIds = [], poolIds = [], todayISO = null } = {}) {
-  if (!p || typeof p !== 'object') return null;
-  const why = str(p.why) || '';
-  const block = BLOCK_IDS.includes(p.block) ? p.block : null;
-  const date = validDate(p.date, todayISO);
+const oneOf = (list) => (v) => (list.includes(v) ? v : null);
+const idIn = (key) => (v, ctx) => { const s = str(v); return s && (ctx[key] || []).includes(s) ? s : null; };
+
+const TYPES = {
+  text: (v) => str(v),
+  /* A list of short strings — subtasks. Anything non-string in the array is
+     dropped rather than stringified; "[object Object]" is not a step. */
+  texts: (v) => {
+    if (!Array.isArray(v)) return null;
+    const out = v.map((s) => str(typeof s === 'string' ? s : s?.title)).filter(Boolean).slice(0, 12);
+    return out.length ? out : null;
+  },
+  block: oneOf(BLOCK_IDS),
+  prayer: oneOf(PRAYER_BLOCKS),
+  view: oneOf(VIEWS),
+  theme: oneOf(THEMES),
+  lang: oneOf(LANGS_OK),
+  toggle: oneOf(TOGGLES),
+  bool: (v) => (typeof v === 'boolean' ? v : null),
+  date: (v, ctx) => validDate(v, ctx.todayISO),
+  hm: (v) => (isHM(v) ? String(v).trim() : null),
+  /* Optional time that is always emitted, as '' when absent. The task shape
+     stores start/end as strings, and a missing key there is a different thing
+     from an empty one. */
+  hm0: (v) => (v == null || v === '' ? '' : isHM(v) ? String(v).trim() : null),
+  minutes: (v) => { const n = Number(v); return Number.isFinite(n) && n >= 1 ? Math.min(600, Math.round(n)) : null; },
+  count: (v) => { const n = Number(v); return Number.isFinite(n) && n >= 1 ? Math.min(100000, Math.round(n)) : null; },
+  /* Progress can be negative — correcting an over-log is a real thing to say. */
+  amount: (v) => { const n = Number(v); return Number.isFinite(n) && n !== 0 ? Math.max(-100000, Math.min(100000, Math.round(n * 100) / 100)) : null; },
+  /* 1-based, as the snapshot prints them. */
+  stepNo: (v) => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= 50 ? n : null; },
+  taskId: idIn('taskIds'),
+  poolId: idIn('poolIds'),
+  habitId: idIn('habitIds'),
+  projectId: idIn('projectIds'),
+  recurringId: idIn('recurringIds'),
+};
+
+/* ------------------------------------------------------------------ */
+/*  The action table                                                    */
+/* ------------------------------------------------------------------ */
+/* `fields` maps a field name to a type name; a trailing "?" makes it
+   optional. `doc` is the one line the model is shown about when to use it. */
+
+export const ACTIONS = [
+  // --- tasks on a day ---
+  { kind: 'add_task', fields: { title: 'text', block: 'block', date: 'date', start: 'hm0?', end: 'hm0?', label: 'text?', steps: 'texts?' }, doc: 'put a new task on a day' },
+  { kind: 'move_task', fields: { taskId: 'taskId', block: 'block', date: 'date' }, doc: 'move an existing task to another day and/or period' },
+  { kind: 'edit_task', fields: { taskId: 'taskId', title: 'text?', start: 'hm0?', end: 'hm0?', label: 'text?' }, doc: 'rename or re-time a task; give only the fields that change', needsOne: ['title', 'start', 'end', 'label'] },
+  { kind: 'complete_task', fields: { taskId: 'taskId' }, doc: 'tick a task off' },
+  { kind: 'reopen_task', fields: { taskId: 'taskId' }, doc: 'un-tick a task that was marked done by mistake' },
+  { kind: 'delete_task', fields: { taskId: 'taskId' }, doc: 'remove a task entirely — prefer task_to_backlog unless they said delete' },
+  { kind: 'task_to_backlog', fields: { taskId: 'taskId' }, doc: 'unschedule a task, keeping it in the backlog' },
+  { kind: 'add_step', fields: { taskId: 'taskId', title: 'text' }, doc: 'add a subtask to an existing task' },
+  { kind: 'complete_step', fields: { taskId: 'taskId', step: 'stepNo' }, doc: 'tick off one subtask by its number in the snapshot' },
+
+  // --- backlog ---
+  { kind: 'add_backlog', fields: { title: 'text', steps: 'texts?' }, doc: 'capture something with no day yet' },
+  { kind: 'backlog_to_day', fields: { poolId: 'poolId', block: 'block', date: 'date' }, doc: 'schedule a backlog item onto a day' },
+  { kind: 'complete_backlog', fields: { poolId: 'poolId' }, doc: 'tick off a backlog item where it stands' },
+  { kind: 'delete_backlog', fields: { poolId: 'poolId' }, doc: 'drop a backlog item' },
+
+  // --- recurring task definitions ---
+  { kind: 'add_recurring', fields: { title: 'text', block: 'block', start: 'hm0?', end: 'hm0?' }, doc: 'define a recurring task they can drop onto any day' },
+  { kind: 'recurring_to_day', fields: { recurringId: 'recurringId', date: 'date', block: 'block?' }, doc: 'place a recurring task on a day' },
+  { kind: 'delete_recurring', fields: { recurringId: 'recurringId' }, doc: 'remove a recurring task definition' },
+
+  // --- habits ---
+  { kind: 'add_habit', fields: { name: 'text', block: 'block' }, doc: 'start tracking a daily habit in one period' },
+  { kind: 'mark_habit', fields: { habitId: 'habitId', date: 'date' }, doc: 'mark a habit kept (or un-mark it) on a date' },
+  { kind: 'delete_habit', fields: { habitId: 'habitId' }, doc: 'stop tracking a habit' },
+  { kind: 'mark_prayer', fields: { prayer: 'prayer', date: 'date' }, doc: 'mark a prayer prayed (or un-mark it). Only ever when they say they prayed' },
+
+  // --- long-term projects ---
+  { kind: 'add_project', fields: { name: 'text', target: 'count?', unit: 'text?', deadline: 'date?', goal: 'text?' }, doc: 'start a long-term project with a numeric target' },
+  { kind: 'log_project', fields: { projectId: 'projectId', amount: 'amount', note: 'text?' }, doc: 'log progress against a project' },
+  { kind: 'complete_project', fields: { projectId: 'projectId' }, doc: 'mark a project finished' },
+
+  // --- points ---
+  { kind: 'add_reward', fields: { name: 'text', cost: 'count' }, doc: 'add something points can buy' },
+
+  // --- the day as a whole ---
+  { kind: 'slot_day', fields: { date: 'date' }, doc: 'auto-slot a day: give every untimed task a start and end around what is fixed' },
+  { kind: 'clear_slots', fields: { date: 'date' }, doc: 'strip the auto-assigned times off a day' },
+  { kind: 'start_focus', fields: { taskId: 'taskId', minutes: 'minutes?' }, doc: 'start a focus session on a task now' },
+  { kind: 'set_alarm', fields: { at: 'hm', label: 'text?' }, doc: 'set the wake alarm for a time of day' },
+  { kind: 'cancel_alarm', fields: {}, doc: 'cancel the wake alarm' },
+  { kind: 'overdue_to_today', fields: {}, doc: 'pull everything overdue onto today' },
+
+  // --- moving around, and settings ---
+  { kind: 'go_to_date', fields: { date: 'date' }, doc: 'show a particular day' },
+  { kind: 'open_view', fields: { view: 'view' }, doc: 'switch to Now, Plan, Overdue or Focus' },
+  { kind: 'set_language', fields: { lang: 'lang' }, doc: 'switch the interface language' },
+  { kind: 'set_theme', fields: { theme: 'theme' }, doc: 'light, dark, or automatic by sunset' },
+  { kind: 'set_option', fields: { option: 'toggle', on: 'bool' }, doc: 'time24 = 24-hour clock; prayerGate = the prayer gate that blocks the app until the prayer is marked' },
+];
+
+const BY_KIND = new Map(ACTIONS.map((a) => [a.kind, a]));
+
+/* The literal JSON line for one action, as the model is shown it. */
+const schemaLine = (a) => {
+  const parts = Object.entries(a.fields).map(([name, spec]) => {
+    const optional = spec.endsWith('?');
+    const type = optional ? spec.slice(0, -1) : spec;
+    return `"${name}":${type}${optional ? '|null' : ''}`;
+  });
+  return `- {"kind":"${a.kind}"${parts.length ? `,${parts.join(',')}` : ''},"why":str}  — ${a.doc}`;
+};
+
+export const ACTION_SCHEMA = ACTIONS.map(schemaLine).join('\n');
+
+export const MAX_PROPOSALS = 8;
+
+/* ------------------------------------------------------------------ */
+/*  The prompt                                                          */
+/* ------------------------------------------------------------------ */
+
+export const ASSISTANT_SYSTEM = `You are the planning assistant inside "Rhythm", a daily planner whose day is divided into six periods anchored to Islamic prayer times: fajr, morning, dhuhr, asr, maghrib, isha.
+
+You help the person run their day, and you can change anything in the app on their behalf — every proposal you make is shown to them and applied only if they approve it.
+
+Be concise, concrete and honest — if they are overcommitted, say so plainly. Never moralise about prayer or habits; report what the data says and leave judgement to them.
+
+The person may be speaking rather than typing, so their message can arrive as loose dictated speech with no punctuation, in English, Egyptian Arabic, or a mix. Read the intent, not the grammar. Answer in the language they used.
+
+Reply with ONLY one valid JSON object. No prose outside it, no markdown fences.
+
+{
+  "reply": string,              // your answer, plain text, 1-6 short sentences
+  "proposals": [ proposal ]     // may be empty; ONLY when a concrete change helps
+}
+
+TYPES
+  str      a plain string
+  int      a whole number
+  block    one of: ${BLOCK_IDS.join(', ')}
+  prayer   one of: ${PRAYER_BLOCKS.join(', ')}
+  date     an absolute calendar date, "YYYY-MM-DD"
+  hm       a time of day, "HH:MM", 24-hour
+  view     one of: ${VIEWS.join(', ')}
+  [str]    an array of plain strings
+
+ACTIONS
+${ACTION_SCHEMA}
+
+Rules:
+- Use ONLY ids that appear in the snapshot. Never invent an id. If what they
+  asked about is not in the snapshot, say so instead of guessing an id.
+- TASKS THIS WEEK covers the whole week, not only the day on screen, so a task
+  on another day is still yours to act on. Overdue tasks from earlier weeks
+  have no ids here: overdue_to_today is the only way to reach them.
+- date is absolute and does NOT have to fall inside the week shown: to move
+  something to the day after the last day listed, give the next day's date.
+  WEEK DAYS in the snapshot gives you each shown day's date.
+- "step" in complete_step is the number printed beside that subtask.
+- "why" is a short phrase (<= 10 words) explaining the change.
+- When one request means several changes, propose them all — but never more
+  than ${MAX_PROPOSALS} at once, and propose nothing unless it clearly helps. An empty
+  "proposals" array is normal and good.
+- Destructive actions (delete_task, delete_backlog, delete_habit,
+  delete_recurring) are only for when they plainly asked to delete something.
+- The person approves each proposal manually, so propose, don't assume.`;
+
+/* ------------------------------------------------------------------ */
+/*  The snapshot                                                        */
+/* ------------------------------------------------------------------ */
+/* Deliberately terse: the model needs facts, not prose. Ids are printed for
+   everything an action can name, because an action can only name what it can
+   see — anything left out of here is, in practice, out of reach. */
+
+export function buildDaySnapshot({
+  dateLabel, dayIdx, dayNames, dayDates, todayISO, shownDate, timings, activeBlock,
+  tasks, pool, recurring, habits, prayersDone, overdue, projects, labels,
+  rewards, balance, view, alarm, options,
+}) {
+  const L = [];
+  L.push(`TODAY: ${dateLabel}${todayISO ? ` (${todayISO})` : ''}`);
+  // Each shown day with its real date. Without the dates the model can only
+  // name days inside this week, so "move it to Saturday" on the last day of the
+  // week has no way to mean NEXT Saturday.
+  L.push(`WEEK DAYS: ${(dayNames || []).map((n, i) => `${n}${dayDates && dayDates[i] ? ` ${dayDates[i]}` : ''}`).join(', ')}`);
+  L.push(`NOW IN PERIOD: ${activeBlock}`);
+  if (view) L.push(`SCREEN: ${view}`);
+  if (timings) L.push(`PRAYER TIMES: ${Object.entries(timings).map(([k, v]) => `${k} ${v}`).join(', ')}`);
+  L.push(`PRAYERS DONE TODAY: ${(prayersDone || []).length ? prayersDone.join(', ') : 'none'}`);
+  L.push('');
+  /* The whole week, not just the day on screen.
+
+     This used to list only the selected day, and the cost was invisible until
+     you tried to use it: ask to move tomorrow's dentist appointment and the
+     model correctly answered that it could not see any such task — an id it
+     cannot see is an id it must not name. Every task in the loaded week is an
+     id a proposal may legitimately carry, so every one of them is printed. */
+  L.push('TASKS THIS WEEK:');
+  if (!tasks || !tasks.length) L.push('  (none)');
+  else {
+    let lastDate = null;
+    for (const t of tasks) {
+      if (t.date && t.date !== lastDate) { lastDate = t.date; L.push(`  --- ${t.date}${t.date === shownDate ? ' (the day on screen)' : ''} ---`); }
+      L.push(`  id=${t.id} block=${t.block} ${t.time ? `time=${t.time} ` : ''}done=${t.done ? 'yes' : 'no'} title="${t.title}"${t.project ? ` project="${t.project}"` : ''}`);
+      // Numbered so complete_step can name one without every subtask id
+      // having to be spelled out in the snapshot.
+      const steps = Array.isArray(t.steps) ? t.steps : [];
+      if (steps.length) L.push(`    steps: ${steps.map((s, i) => `${i + 1}.${s.done ? '[x]' : '[ ]'}"${s.title}"`).join(' ')}`);
+      else if (t.subtasks) L.push(`    steps: ${t.subtasks}`);
+    }
+  }
+  L.push('');
+  L.push('BACKLOG (no fixed day):');
+  if (!pool || !pool.length) L.push('  (none)');
+  else for (const p of pool.slice(0, 25)) L.push(`  id=${p.id} done=${p.done ? 'yes' : 'no'} title="${p.title}"`);
+  L.push('');
+  L.push('RECURRING TASKS (definitions, not yet on any day):');
+  if (!recurring || !recurring.length) L.push('  (none)');
+  else for (const r of recurring.slice(0, 25)) L.push(`  id=${r.id} block=${r.block}${r.time ? ` time=${r.time}` : ''} title="${r.title}"`);
+  L.push('');
+  L.push('HABITS:');
+  if (!habits || !habits.length) L.push('  (none)');
+  else for (const h of habits) L.push(`  id=${h.id} "${h.name}" period=${h.block} streak=${h.streak} today=${h.doneToday ? 'kept' : 'not yet'}${h.builtin ? ' (built-in prayer — use mark_prayer, not mark_habit)' : ''}`);
+  L.push('');
+  L.push(`OVERDUE TASKS: ${overdue && overdue.length ? overdue.map((o) => `"${o.title}" (${o.when})`).join(', ') : 'none'}`);
+  L.push('');
+  L.push('PROJECTS:');
+  if (!projects || !projects.length) L.push('  (none)');
+  else for (const p of projects) L.push(`  id=${p.id} "${p.name}" ${p.target ? `${p.done}/${p.target} ${p.unit}` : '(no numeric target)'} ${p.status}${p.perDay ? ` need=${p.perDay}/day` : ''}${p.daysLeft != null ? ` daysLeft=${p.daysLeft}` : ''}`);
+  if (rewards && rewards.length) {
+    L.push('');
+    L.push(`POINTS: balance=${balance == null ? '?' : balance}`);
+    for (const r of rewards.slice(0, 15)) L.push(`  id=${r.id} "${r.name}" costs ${r.cost}`);
+  } else if (balance != null) {
+    L.push('');
+    L.push(`POINTS: balance=${balance}, no rewards defined`);
+  }
+  if (labels && labels.length) L.push(`\nLABELS: ${labels.join(', ')}`);
+  if (alarm) L.push(`\nWAKE ALARM: ${alarm}`);
+  if (options) L.push(`SETTINGS: language=${options.lang} theme=${options.theme} time24=${options.time24 ? 'on' : 'off'} prayerGate=${options.prayerGate ? 'on' : 'off'}`);
+  return L.join('\n');
+}
+
+/* ------------------------------------------------------------------ */
+/*  Validation — the safety boundary                                    */
+/* ------------------------------------------------------------------ */
+
+/* Validate one proposal against the table. Returns the cleaned object or null
+   (dropped). An unknown kind, a bad field, a missing required field, or an id
+   the snapshot never mentioned all mean the same thing: drop it. */
+export function validateProposal(p, ctx = {}) {
+  if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
+  const action = BY_KIND.get(p.kind);
+  if (!action) return null;
+
+  const out = { kind: action.kind };
+  for (const [name, spec] of Object.entries(action.fields)) {
+    const optional = spec.endsWith('?');
+    const fn = TYPES[optional ? spec.slice(0, -1) : spec];
+    if (!fn) return null; // a typo in the table is a bug, not a silent pass
+    const raw = p[name];
+    if (raw == null || raw === '') {
+      if (!optional) return null;
+      // hm0 is optional but always present in the output: '' is its absence.
+      if (spec === 'hm0?') out[name] = '';
+      continue;
+    }
+    const v = fn(raw, ctx);
+    if (v == null) return null;
+    out[name] = v;
+  }
+  // "Change nothing" is not a change worth showing anyone.
+  if (action.needsOne && !action.needsOne.some((f) => out[f])) return null;
+
+  out.why = str(p.why) || '';
+  return out;
+}
+
+/* Model text → { reply, proposals }. Tolerates fences/preamble; drops anything
+   that doesn't validate rather than acting on a guess. */
+export function parseAssistantReply(text, ids = {}) {
+  const raw = firstJsonObject(String(text || ''));
+  if (!raw) return { reply: String(text || '').trim() || '(no reply)', proposals: [] };
+  let obj; try { obj = JSON.parse(raw); } catch { return { reply: String(text || '').trim(), proposals: [] }; }
+  const reply = typeof obj.reply === 'string' ? obj.reply.trim() : '';
+  const list = Array.isArray(obj.proposals) ? obj.proposals : [];
+  const proposals = list.map((p) => validateProposal(p, ids)).filter(Boolean).slice(0, MAX_PROPOSALS);
+  return { reply: reply || '(no reply)', proposals };
+}
+
+/* ------------------------------------------------------------------ */
+/*  How a proposal reads to a person                                    */
+/* ------------------------------------------------------------------ */
+/* Lives here rather than in the view so that adding an action means touching
+   one file for the contract and one for the effect. `names` resolves ids to
+   the titles only the app knows. */
+
+export function describeProposal(p, names = {}) {
+  const bn = (id) => bName(blockById(id));
+  // Name the date, not just the weekday: the target may be in another week,
+  // and "Saturday" alone would read as the Saturday already on screen.
+  const dn = (iso) => { const d = parseISO(iso); return d && !Number.isNaN(d.getTime()) ? `${wdFull(d.getDay())} ${d.getDate()} ${mon(d.getMonth())}` : '?'; };
+  const q = (s) => `“${s}”`;
+  const T = (id) => q(names.task?.(id) || '?');
+  const P = (id) => q(names.pool?.(id) || '?');
+  const H = (id) => q(names.habit?.(id) || '?');
+  const J = (id) => q(names.project?.(id) || '?');
+  const R = (id) => q(names.recurring?.(id) || '?');
+  const when = (x) => `${dn(x.date)} · ${bn(x.block)}`;
+  const at = (x) => (x.start ? ` · ${fmtTime(x.start)}${x.end ? `–${fmtTime(x.end)}` : ''}` : '');
+
   switch (p.kind) {
-    case 'add_task': {
-      const title = str(p.title); if (!title || !block || !date) return null;
-      if (!isHM(p.start) || !isHM(p.end)) return null;
-      return { kind: 'add_task', title, block, date, start: str(p.start) || '', end: str(p.end) || '', why };
+    case 'add_task': return `${tx('Add', 'أضف')} ${q(p.title)} → ${when(p)}${at(p)}`;
+    case 'move_task': return `${tx('Move', 'انقل')} ${T(p.taskId)} → ${when(p)}`;
+    case 'edit_task': {
+      const bits = [];
+      if (p.title) bits.push(`${tx('rename to', 'غيّر الاسم إلى')} ${q(p.title)}`);
+      if (p.start || p.end) bits.push(`${tx('set to', 'اضبط على')} ${fmtTime(p.start || '')}${p.end ? `–${fmtTime(p.end)}` : ''}`);
+      if (p.label) bits.push(`${tx('label', 'وسم')} ${q(p.label)}`);
+      return `${tx('Edit', 'عدّل')} ${T(p.taskId)}: ${bits.join(tx(', ', '، '))}`;
     }
-    case 'move_task': {
-      const taskId = str(p.taskId); if (!taskId || !taskIds.includes(taskId) || !block || !date) return null;
-      return { kind: 'move_task', taskId, block, date, why };
-    }
-    case 'complete_task': {
-      const taskId = str(p.taskId); if (!taskId || !taskIds.includes(taskId)) return null;
-      return { kind: 'complete_task', taskId, why };
-    }
-    case 'task_to_backlog': {
-      const taskId = str(p.taskId); if (!taskId || !taskIds.includes(taskId)) return null;
-      return { kind: 'task_to_backlog', taskId, why };
-    }
-    case 'backlog_to_day': {
-      const poolId = str(p.poolId); if (!poolId || !poolIds.includes(poolId) || !block || !date) return null;
-      return { kind: 'backlog_to_day', poolId, block, date, why };
-    }
-    default: return null;
+    case 'complete_task': return `${tx('Mark done', 'علّم كمنجز')}: ${T(p.taskId)}`;
+    case 'reopen_task': return `${tx('Reopen', 'أعد فتح')}: ${T(p.taskId)}`;
+    case 'delete_task': return `${tx('Delete', 'احذف')}: ${T(p.taskId)}`;
+    case 'task_to_backlog': return `${tx('To backlog', 'إلى قائمة الانتظار')}: ${T(p.taskId)}`;
+    case 'add_step': return `${tx('Add step', 'أضف خطوة')} ${q(p.title)} → ${T(p.taskId)}`;
+    case 'complete_step': return `${tx('Tick step', 'علّم الخطوة')} #${p.step} ${tx('of', 'في')} ${T(p.taskId)}`;
+
+    case 'add_backlog': return `${tx('To backlog', 'إلى قائمة الانتظار')}: ${q(p.title)}`;
+    case 'backlog_to_day': return `${tx('Schedule', 'جدولة')} ${P(p.poolId)} → ${when(p)}`;
+    case 'complete_backlog': return `${tx('Mark done', 'علّم كمنجز')}: ${P(p.poolId)}`;
+    case 'delete_backlog': return `${tx('Delete from backlog', 'احذف من قائمة الانتظار')}: ${P(p.poolId)}`;
+
+    case 'add_recurring': return `${tx('New recurring task', 'مهمة متكررة جديدة')} ${q(p.title)} · ${bn(p.block)}${at(p)}`;
+    case 'recurring_to_day': return `${tx('Place', 'ضع')} ${R(p.recurringId)} → ${dn(p.date)}${p.block ? ` · ${bn(p.block)}` : ''}`;
+    case 'delete_recurring': return `${tx('Delete recurring task', 'احذف المهمة المتكررة')}: ${R(p.recurringId)}`;
+
+    case 'add_habit': return `${tx('Track habit', 'تتبّع عادة')} ${q(p.name)} · ${bn(p.block)}`;
+    case 'mark_habit': return `${tx('Mark habit', 'علّم العادة')} ${H(p.habitId)} → ${dn(p.date)}`;
+    case 'delete_habit': return `${tx('Stop tracking', 'أوقف تتبّع')}: ${H(p.habitId)}`;
+    case 'mark_prayer': return `${tx('Mark prayed', 'علّم الصلاة')}: ${bn(p.prayer)} · ${dn(p.date)}`;
+
+    case 'add_project': return `${tx('New project', 'مشروع جديد')} ${q(p.name)}${p.target ? ` · ${p.target} ${p.unit || ''}`.trimEnd() : ''}`;
+    case 'log_project': return `${tx('Log', 'سجّل')} ${p.amount > 0 ? '+' : ''}${p.amount} → ${J(p.projectId)}`;
+    case 'complete_project': return `${tx('Complete project', 'أنهِ المشروع')}: ${J(p.projectId)}`;
+
+    case 'add_reward': return `${tx('New reward', 'مكافأة جديدة')} ${q(p.name)} · ${p.cost}`;
+
+    case 'slot_day': return `${tx('Slot the day', 'وزّع اليوم')}: ${dn(p.date)}`;
+    case 'clear_slots': return `${tx('Clear slotted times', 'امسح التوزيع')}: ${dn(p.date)}`;
+    case 'start_focus': return `${tx('Focus on', 'ركّز على')} ${T(p.taskId)}${p.minutes ? ` · ${p.minutes}${tx('m', 'د')}` : ''}`;
+    case 'set_alarm': return `${tx('Wake alarm at', 'منبه الساعة')} ${fmtTime(p.at)}${p.label ? ` — ${p.label}` : ''}`;
+    case 'cancel_alarm': return tx('Cancel the wake alarm', 'ألغِ المنبه');
+    case 'overdue_to_today': return tx('Move everything overdue to today', 'انقل كل المتأخرات إلى اليوم');
+
+    case 'go_to_date': return `${tx('Go to', 'اذهب إلى')} ${dn(p.date)}`;
+    case 'open_view': return `${tx('Open', 'افتح')} ${p.view}`;
+    case 'set_language': return `${tx('Switch language to', 'غيّر اللغة إلى')} ${p.lang === 'ar' ? 'العربية' : 'English'}`;
+    case 'set_theme': return `${tx('Theme', 'المظهر')}: ${p.theme}`;
+    case 'set_option': return `${p.option === 'time24' ? tx('24-hour clock', 'نظام ٢٤ ساعة') : tx('Prayer gate', 'بوابة الصلاة')} → ${p.on ? tx('on', 'مفعّل') : tx('off', 'معطّل')}`;
+
+    default: return p.kind;
   }
 }
 
@@ -169,18 +452,6 @@ export function parseEstimates(text, ids) {
   return out.size ? out : null;
 }
 
-/* Model text → { reply, proposals }. Tolerates fences/preamble; drops anything
-   that doesn't validate rather than acting on a guess. */
-export function parseAssistantReply(text, ids = {}) {
-  const raw = firstJsonObject(String(text || ''));
-  if (!raw) return { reply: String(text || '').trim() || '(no reply)', proposals: [] };
-  let obj; try { obj = JSON.parse(raw); } catch { return { reply: String(text || '').trim(), proposals: [] }; }
-  const reply = typeof obj.reply === 'string' ? obj.reply.trim() : '';
-  const list = Array.isArray(obj.proposals) ? obj.proposals : [];
-  const proposals = list.map((p) => validateProposal(p, ids)).filter(Boolean).slice(0, 5);
-  return { reply: reply || '(no reply)', proposals };
-}
-
 /* Provider call — mirrors the brain-dump sorter's shapes. */
 /* Transport: Gemini primary, Groq fallback — the Loqma playbook.
 
@@ -199,6 +470,12 @@ const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = 'openai/gpt-oss-120b';
 
 const rateError = () => { const e = new Error('rate'); e.code = 'rate'; return e; };
+/* The pool refusing a token is the one failure a person can actually fix, and
+   "HTTP 401" tells them nothing about which of the two credentials on the
+   Settings page is wrong. Worth knowing: the two providers disagree usefully
+   here — a bad Gemini key comes back 400 INVALID_ARGUMENT, while the broker
+   answers 401 broker_auth. So a 401 is always the pool, never the key. */
+const poolAuthError = () => { const e = new Error('pool auth'); e.code = 'pool_auth'; return e; };
 
 export async function callAssistant({ apiKey, groqKey, broker, system, messages, maxTokens = 1500 }) {
   const post = (url, key, model) => fetch(url, {
@@ -225,6 +502,10 @@ export async function callAssistant({ apiKey, groqKey, broker, system, messages,
     try {
       const res = await post(`${broker.url}/v1/chat/completions`, broker.token, 'gemini-flash-lite-latest');
       if (res.ok) return read(res);
+      // A rejected token is a settings mistake, not an outage. It still falls
+      // through to this device's own keys when there are any — but if there
+      // are not, it must say what is actually wrong.
+      if (res.status === 401 || res.status === 403) throw poolAuthError();
       if (res.status !== 404 && res.status < 500 && res.status !== 429) throw new Error(`HTTP ${res.status}`);
     } catch (e) {
       if (!apiKey && !groqKey) throw e;
