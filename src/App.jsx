@@ -531,10 +531,27 @@ export default function Rhythm() {
     if (ref.wsISO === fmtISO(weekStart)) { weekRef.current = next; setWeek(next); }
     bumpRefresh();
   };
+  /* Opening a task from a project — the card or its board — used to throw you
+     onto the Plan page, which meant leaving the thing you were working through
+     and, on a board, losing the board itself (leaving Projects clears it).
+     Both editors are top-level modals and render whatever view is showing, so
+     the jump was never needed.
+
+     The week still has to be loaded: editingTask is looked up in the displayed
+     week, and mutateTask writes back to that same document — so pointing at
+     the wrong one would either find nothing or save into the wrong week. That
+     is invisible from here, since the Plan page is not what you are looking
+     at. */
   const openProjectTask = (ref) => {
-    if (ref.kind === 'pool') { setView('plan'); setEditingPool(ref.id); return; }
+    if (ref.kind === 'pool') { setEditingPool(ref.id); return; }
+    /* Already showing that week? Open it now. The deferred path waits on the
+       week CHANGING, and setting weekStart to the value it already holds
+       changes nothing — so a task on the current week would have sat behind a
+       pending flag that nothing ever cleared. Most tasks reached from a
+       project board are on the current week. */
+    if (ref.wsISO === fmtISO(weekStart)) { setSelectedDay(ref.day); setEditing(ref.id); return; }
     const ws = parseISO(ref.wsISO);
-    setWeekStart(ws); setSelectedDay(ref.day); setView('plan'); pendingEditRef.current = ref.id;
+    setWeekStart(ws); setSelectedDay(ref.day); pendingEditRef.current = ref.id;
   };
 
   /* ---- habits (stored in settings) ---- */
