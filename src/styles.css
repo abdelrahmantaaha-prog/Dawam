@@ -361,7 +361,11 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .proj-empty svg{color:var(--verdigris)}
 .proj-empty p{margin:0;font-size:13.5px;line-height:1.55;max-width:440px}
 .proj-add{margin-top:6px}
-.proj-card{border:1px solid var(--line);border-left:4px solid var(--pcolor,var(--verdigris));border-radius:13px;padding:13px 14px;margin-bottom:12px;background:var(--panel)}
+.proj-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;align-items:start}
+.proj-card{border:1px solid var(--line);border-left:4px solid var(--pcolor,var(--verdigris));border-radius:13px;padding:13px 14px;background:var(--panel);min-width:0}
+/* One per row on a phone: two 340px columns cannot both fit, and a card
+   squeezed narrower than its own numbers is worse than a longer page. */
+@media (max-width:719px){ .proj-grid{grid-template-columns:1fr} }
 .hero-card.wide .proj-card{background:#fff}
 .proj-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .proj-open{display:flex;align-items:center;gap:8px;flex:1;min-width:0;background:none;border:none;padding:0;cursor:pointer;text-align:start}
@@ -1060,7 +1064,10 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .kb-hint{max-width:520px;margin:14px auto 0;text-align:center}
 
 /* A project card shows the shape of the work, not a second task list. */
-.proj-lanebar{display:flex;gap:2px;height:7px;margin:8px 0 6px;border-radius:99px;overflow:hidden;background:var(--soft)}
+/* Capped. A single-segment bar stretched across a full-width card reads as a
+   progress meter sitting at 100%, which is the opposite of what one lane with
+   two things in it means. */
+.proj-lanebar{display:flex;gap:2px;height:7px;width:100%;max-width:280px;margin:8px 0 6px;border-radius:99px;overflow:hidden;background:var(--soft)}
 .proj-laneseg{background:var(--pcolor,var(--verdigris));opacity:.55;border-radius:99px;min-width:5px}
 .proj-laneseg.done{opacity:1}
 .proj-lanekeys{display:flex;flex-wrap:wrap;gap:10px}

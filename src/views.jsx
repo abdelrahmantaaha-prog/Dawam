@@ -226,13 +226,20 @@ function ProjectsView({ projects, sky, stars, heroLight, onAdd, onUpd, onDel, on
             <p>{tx('Track anything with a finish line — translating a book, a course, a series of investigations. Set a target and a deadline, log progress as you go, link tasks to it, and Rhythm tells you whether you are on pace.', 'تابِع أي شيء له خط نهاية — ترجمة كتاب، أو دورة، أو سلسلة تحقيقات. حدّد هدفًا وموعدًا نهائيًا، وسجّل تقدّمك، واربط المهام به، وسيخبرك التطبيق إن كنت على المسار الصحيح.')}</p>
           </div>
         )}
-        {ordered.map((p) => (
-          <ProjectCard key={p.id} p={p} open={openId === p.id}
-            onOpen={() => setOpenId(openId === p.id ? null : p.id)}
-            onUpd={(patch) => onUpd(p.id, patch)} onDel={() => { onDel(p.id); setOpenId(null); }}
-            onLog={(amt, note) => onLog(p.id, amt, note)} taskInfo={taskList(p.id)}
-            onToggleTask={onToggleTask} onOpenTask={onOpenTask} onBoard={() => onBoard && onBoard(p.id)} />
-        ))}
+        {/* A card is a summary now, so it does not need a full row to itself —
+            auto-fill rather than a fixed count, so the number per row follows
+            the window instead of a breakpoint someone has to maintain. An
+            expanded card is much taller than its neighbours, which is why the
+            row aligns to the top rather than stretching them all to match. */}
+        <div className="proj-grid">
+          {ordered.map((p) => (
+            <ProjectCard key={p.id} p={p} open={openId === p.id}
+              onOpen={() => setOpenId(openId === p.id ? null : p.id)}
+              onUpd={(patch) => onUpd(p.id, patch)} onDel={() => { onDel(p.id); setOpenId(null); }}
+              onLog={(amt, note) => onLog(p.id, amt, note)} taskInfo={taskList(p.id)}
+              onToggleTask={onToggleTask} onOpenTask={onOpenTask} onBoard={() => onBoard && onBoard(p.id)} />
+          ))}
+        </div>
         <button className="plan-day-btn proj-add" onClick={() => { const np = onAdd(); setOpenId(np.id); }}><Plus size={15} /> {tx('New project', 'مشروع جديد')}</button>
       </div>
     </div>
