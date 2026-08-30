@@ -640,30 +640,28 @@ if (!app.requestSingleInstanceLock()) {
       return sessions.getState();
     });
     ipcMain.handle('save-template', (_e, tpl) => {
-      const task = String(tpl.task || '').trim();
-      if (!task) return store.data.templates;
-      const existing = store.data.templates.find(
-        (t) => t.task.toLowerCase() === task.toLowerCase()
-      );
-      // Learned filters travel with the template: keep what the old template
-      // knew, plus anything taught during a live session of this same task.
-      const liveVerdicts =
-        sessions.task && sessions.task.toLowerCase() === task.toLowerCase()
-          ? sessions.sessionVerdicts
-          : {};
+      const name = String((tpl && (tpl.name || tpl.task)) || '').trim();
+      if (!name) return store.data.templates;
+      // Editing the one in hand updates it; otherwise a repeated name replaces
+      // rather than duplicates.
+      const existing = tpl.id
+        ? store.data.templates.find((t) => t.id === tpl.id)
+        : store.data.templates.find((t) => String(t.name).toLowerCase() === name.toLowerCase());
+      /* Learned filters travel with the policy. A live round contributes what
+         it has taught only when it is running under THIS policy — matching on
+         the task name would hand one policy's lessons to another the moment
+         two rounds happened to be called the same thing. */
+      const liveVerdicts = existing && sessions.templateId === existing.id ? sessions.sessionVerdicts : {};
       const entry = {
-        id: Date.now(),
-        task,
+        id: (existing && existing.id) || Date.now(),
+        name,
         workMin: Math.max(1, Math.min(240, Number(tpl.workMin) || 50)),
         allowed: (Array.isArray(tpl.allowed) ? tpl.allowed : [])
           .map((k) => String(k).trim())
           .filter(Boolean),
         verdicts: { ...((existing && existing.verdicts) || {}), ...liveVerdicts }
       };
-      // Same task name updates the existing template instead of duplicating.
-      store.data.templates = store.data.templates.filter(
-        (t) => t.task.toLowerCase() !== task.toLowerCase()
-      );
+      store.data.templates = store.data.templates.filter((t) => t.id !== entry.id);
       store.data.templates.unshift(entry);
       store.save();
       broadcast('data-changed');

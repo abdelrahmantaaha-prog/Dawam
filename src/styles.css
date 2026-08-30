@@ -965,6 +965,16 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 /* ---- Calendars (read-only) -------------------------------------------
    Deliberately quiet: these are not tasks, nothing can be done to them
    from here, and they must not compete with the day's own work. */
+.focus-tplrow.on{border-color:var(--verdigris);background:var(--soft)}
+.focus-applied{font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--verdigris)}
+
+/* ---- What the add box understood ----
+   Silent for plain prose on purpose: a preview that is always on screen stops
+   being read, and most tasks are just words. */
+.parse-chip{margin-top:5px;padding:3px 8px;border-radius:8px;background:var(--soft);border:1px solid var(--line);
+  font-size:10.5px;font-weight:700;color:var(--verdigris);font-variant-numeric:tabular-nums;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* ---- Kanban board ----
    Three columns that scroll horizontally on a phone rather than squeezing to
    nothing: a card you cannot read is not a board. */

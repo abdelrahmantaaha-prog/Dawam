@@ -19,6 +19,7 @@ import { KanbanBoard } from './kanban.jsx';
 import { columnsOf, isMove, patchFor } from './board.js';
 import { rangeOf } from './calgrid.js';
 import { loadCalProjects, setCalProject, pruneCalProjects } from './calproj.js';
+import { parseTaskText, describeParse } from './parse.js';
 import { TrelloCards } from './trelloview.jsx';
 import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
 
@@ -638,7 +639,8 @@ export default function Rhythm() {
     const w = weekRef.current;
     const t = {
       id: uid(), title: title.trim(), day: dayIdx, block: blockId,
-      projectId: extra.projectId || null, time: extra.time || '', start: extra.start || '', end: extra.end || '', templateId: extra.templateId || null, done: false,
+      projectId: extra.projectId || null, projectRef: extra.projectRef || null,
+      time: extra.time || '', start: extra.start || '', end: extra.end || '', templateId: extra.templateId || null, done: false,
       subtasks: extra.subtasks ? mkSubs(extra.subtasks.map((s) => (typeof s === 'string' ? s : s.title))) : [],
       notes: extra.notes || [], order: extra.order != null ? extra.order : (timeOrder(extra.time) + Date.now() % 1000),
     };
@@ -767,12 +769,23 @@ export default function Rhythm() {
   /* ---- pool (backlog) ops ---- */
   const addPoolItem = (title, extra = {}) => {
     if (!title.trim()) return;
-    const it = { id: uid(), title: title.trim(), projectId: extra.projectId || null, subtasks: extra.subtasks ? mkSubs(extra.subtasks.map((s) => (typeof s === 'string' ? s : s.title))) : [], notes: extra.notes || [], order: Date.now() };
+    const it = { id: uid(), title: title.trim(), projectId: extra.projectId || null, projectRef: extra.projectRef || null, subtasks: extra.subtasks ? mkSubs(extra.subtasks.map((s) => (typeof s === 'string' ? s : s.title))) : [], notes: extra.notes || [], order: Date.now() };
     persistPool([...poolRef.current, it]);
     return it;
   };
   const mutatePoolItem = (id, fn) => persistPool(poolRef.current.map((p) => (p.id === id ? fn(p) : p)));
   const togglePoolDone = (id) => mutatePoolItem(id, (p) => ({ ...p, done: !p.done }));
+  /* Emptying the drawer. Confirmed in the UI first — this is the one button
+     here that destroys several things at once, and an undo would mean keeping
+     a copy of what was just deleted, which is exactly what a backlog is
+     supposed to stop being. */
+  const clearDonePool = () => {
+    const gone = poolRef.current.filter((p) => p.done).length;
+    if (!gone) return;
+    persistPool(poolRef.current.filter((p) => !p.done));
+    setEditingPool(null);
+    flash(gone === 1 ? tx('Deleted.', 'حُذفت.') : `${gone} ${tx('deleted.', 'حُذفت.')}`);
+  };
   const removePoolItem = (id) => { persistPool(poolRef.current.filter((p) => p.id !== id)); setEditingPool(null); };
   const togglePoolSub = (id, subId) => mutatePoolItem(id, (p) => ({ ...p, subtasks: p.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) }));
 
@@ -898,6 +911,37 @@ export default function Rhythm() {
   };
 
   /* ---- structuring the day into strict slots ---- */
+  /* Everything a person can type into an "add a task" box goes through here.
+     The same text means the same thing whichever box it was typed into, which
+     is the only reason a syntax like this is worth learning at all. */
+  const parseCtx = () => ({ today: logicalDayMid(), labels: settings.labels || [], projects: settings.projects || [] });
+  const parseHint = useCallback(
+    (text) => describeParse(parseTaskText(text, parseCtx()), { blockName: (id) => bName(blockById(id)) }),
+    [settings.labels, settings.projects],
+  );
+
+  const addParsedTask = async (rawText, { dayIdx = selectedDay, blockId = null, toPool = false } = {}) => {
+    const text = String(rawText || '').trim();
+    if (!text) return;
+    const p = parseTaskText(text, parseCtx());
+    const extra = {
+      start: p.start || '', end: p.end || '',
+      // Only the first tag is claimed — the task model carries one label.
+      projectId: p.labelNames.length ? labelIdFor(p.labelNames[0]) : null,
+      projectRef: p.projectId || null,
+    };
+    if (toPool) { addPoolItem(p.title, extra); return; }
+    const block = p.block || blockId || 'morning';
+    // A date in the text outranks the row it was typed into: someone who
+    // writes "tomorrow" in today's Morning box means tomorrow.
+    if (p.dateISO && p.dateISO !== fmtISO(addDays(weekStart, dayIdx))) {
+      await addTaskOnDate(p.dateISO, block, p.title, extra);
+      flash(`${p.title} → ${p.dateISO}`);
+      return;
+    }
+    addTask(dayIdx, block, p.title, extra);
+  };
+
   const [slotBusy, setSlotBusy] = useState(false);
   // dayIdx is 0-6 within the week on screen; omitted means the selected day.
   // The assistant can name any day, so this can no longer read the selection
@@ -2688,7 +2732,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 prayer={isSelectedToday && PRAYER_BLOCKS.includes(b.id) ? { done: !!(week.prayers?.[selectedDay]?.[b.id]) } : null}
                 onPrayer={() => togglePrayer(b.id, selectedDate)}
                 onToggle={toggleDone} onToggleSub={toggleSub} onOpen={setEditing}
-                onAdd={(title) => addTask(selectedDay, b.id, title)}
+                onAdd={(title) => addParsedTask(title, { blockId: b.id })}
+                parseHint={parseHint}
                 onDragStart={startDrag}
                 dragActive={dragActive} dragOver={drag && drag.over && drag.over.type === 'block' && drag.over.id === b.id}
                 draggingId={drag && drag.kind === 'task' ? drag.id : null}
@@ -2705,7 +2750,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               onTplToDay={(id) => setPlacer({ kind: 'template', id })}
               onAddTpl={() => addTemplate({ title: tx('New recurring task', 'مهمة متكررة جديدة'), block: 'morning', subtasks: [] })}
               onManage={() => setShowSettings(true)}
-              onAddPool={(title) => addPoolItem(title)}
+              onAddPool={(title) => addParsedTask(title, { toPool: true })}
+              onClearDonePool={clearDonePool}
+              parseHint={parseHint}
               onOpenPool={setEditingPool}
               onEditTpl={setEditingTpl}
               onTogglePoolDone={togglePoolDone}

@@ -54,6 +54,7 @@ class SessionManager extends EventEmitter {
     this.totalSec = 0;
     this.endsAt = 0;
     this.remainingOnPause = 0;
+    this.templateId = null;    // the policy this round is running under
     this.pausedAt = 0;         // when the current pause began
     this.pauseAuto = false;    // the chair emptied, rather than a decision
     this.pauseSpentSec = 0;    // manual pause seconds used this round
@@ -105,6 +106,7 @@ class SessionManager extends EventEmitter {
       pauseBudgetLeftSec: this.pauseBudgetLeft(),
       task: this.task,
       taskId: this.taskId,
+      templateId: this.templateId,
       rounds: this.rounds,
       plannedMin: this.plannedMin,
       totalSec: this.totalSec,
@@ -125,11 +127,11 @@ class SessionManager extends EventEmitter {
   setVerdict(key, verdict) {
     if (!key || !['work', 'distraction'].includes(verdict)) return;
     this.sessionVerdicts[key] = verdict;
-    // Persist only into this task's template, if one exists — ad-hoc sessions
-    // forget their verdicts when they end.
-    const tpl = this.store.data.templates.find(
-      (t) => t.task.toLowerCase() === this.task.toLowerCase()
-    );
+    // Persist into the policy this round is running under, if any — a round
+    // started without one forgets its verdicts when it ends.
+    const tpl = this.templateId
+      ? this.store.data.templates.find((t) => t.id === this.templateId)
+      : null;
     if (tpl) {
       tpl.verdicts = tpl.verdicts || {};
       tpl.verdicts[key] = verdict;
@@ -156,15 +158,17 @@ class SessionManager extends EventEmitter {
   }
 
   startWork(req) {
-    const { task, workMin, allowed, taskId } = req || {};
+    const { task, workMin, allowed, taskId, templateId } = req || {};
     const min = Math.max(1, Math.min(240, Number(workMin) || this.settings().workMin));
     const newTask = String(task || 'Deep work').trim() || 'Deep work';
-    // Verdicts seed from the task's template; a follow-up round of the same
-    // task also keeps what was learned earlier this sitting.
-    const tpl = this.store.data.templates.find(
-      (t) => t.task.toLowerCase() === newTask.toLowerCase()
-    );
+    /* Verdicts seed from the policy this round was started under — by id, not
+       by matching the task's name. Templates are no longer tasks, so "what is
+       allowed" and "what am I doing" are two separate questions and a policy
+       can be reused across every task it suits. A follow-up round of the same
+       task still keeps what was learned earlier this sitting. */
+    const tpl = templateId ? this.store.data.templates.find((t) => t.id === templateId) : null;
     const carry = this.task === newTask ? this.sessionVerdicts : {};
+    this.templateId = tpl ? tpl.id : null;
     this.sessionVerdicts = { ...((tpl && tpl.verdicts) || {}), ...carry };
     this.phase = 'work';
     this.paused = false;
@@ -258,6 +262,7 @@ class SessionManager extends EventEmitter {
   toIdle() {
     this.phase = 'idle';
     this.paused = false;
+    this.templateId = null;
     this.pauseAuto = false;
     this.pausedAt = 0;
     this.pauseSpentSec = 0;

@@ -67,7 +67,13 @@ class Store {
     const raw = JSON.parse(text);
     return {
       settings: { ...DEFAULTS.settings, ...(raw.settings || {}) },
-      templates: Array.isArray(raw.templates) ? raw.templates : [],
+      /* A template used to BE a task: it was keyed by task name, and applying
+         one renamed whatever you were doing. It is a named set of restrictions
+         now, usable with any task, so the old `task` field becomes its name. */
+      templates: (Array.isArray(raw.templates) ? raw.templates : []).map((t) => ({
+        ...t,
+        name: String((t && (t.name || t.task)) || '').trim() || 'Focus',
+      })),
       history: Array.isArray(raw.history) ? raw.history : []
     };
   }

@@ -86,6 +86,11 @@ export function FocusView({ tasks = [], durationFor, pendingRound, onDismissRoun
   const [minutes, setMinutes] = useState(50);
   const [cleared, setCleared] = useState('');
   const [saveTpl, setSaveTpl] = useState(false);
+  /* The applied policy, separate from the task. A template used to BE a task —
+     picking one renamed whatever you were doing — which meant a set of
+     restrictions could only ever belong to one piece of work. */
+  const [tplId, setTplId] = useState('');
+  const [tplName, setTplName] = useState('');
 
   const settings = data?.settings || null;
   const templates = data?.templates || [];
@@ -100,13 +105,14 @@ export function FocusView({ tasks = [], durationFor, pendingRound, onDismissRoun
     setTitle(t.title);
     const known = (t.minutes || null) || (durationFor ? durationFor(t.title) : null);
     setMinutes(clamp(Number(known) || settings?.workMin || 50, 1, 240));
-    const tpl = templates.find((x) => x.task.toLowerCase() === t.title.trim().toLowerCase());
-    setCleared(tpl ? listToText(tpl.allowed) : '');
+    // The allow list is the policy's, not the task's, so picking a task leaves
+    // whatever policy is applied exactly where it is.
   };
 
   const useTemplate = (tpl) => {
-    setTaskId('');
-    setTitle(tpl.task);
+    if (tplId === tpl.id) { setTplId(''); setCleared(''); return; }  // tap again to lift it
+    setTplId(tpl.id);
+    setTplName(tpl.name);
     setMinutes(clamp(Number(tpl.workMin) || 50, 1, 240));
     setCleared(listToText(tpl.allowed));
   };
@@ -119,8 +125,14 @@ export function FocusView({ tasks = [], durationFor, pendingRound, onDismissRoun
     const task = title.trim();
     if (!task) return;
     const allowed = textToList(cleared);
-    if (saveTpl) await api.saveTemplate({ task, workMin: minutes, allowed });
-    await api.startWork({ task, workMin: minutes, allowed, taskId: taskId || null });
+    let useId = tplId || null;
+    if (saveTpl) {
+      const name = (tplName.trim() || task).trim();
+      const list = await api.saveTemplate({ id: tplId || null, name, workMin: minutes, allowed });
+      const saved = (list || []).find((t) => String(t.name).toLowerCase() === name.toLowerCase());
+      if (saved) useId = saved.id;
+    }
+    await api.startWork({ task, workMin: minutes, allowed, taskId: taskId || null, templateId: useId });
     reload();
   };
 
@@ -184,7 +196,7 @@ export function FocusView({ tasks = [], durationFor, pendingRound, onDismissRoun
             </div>
 
             <label className="field">
-              <span>{tx('Cleared for this task', 'مسموح لهذه المهمة')}</span>
+              <span>{tplId ? `${tx('Cleared by', 'مسموح حسب')} “${tplName}”` : tx('Cleared for this round', 'مسموح لهذه الجولة')}</span>
               <textarea rows={2} value={cleared} onChange={(e) => setCleared(e.target.value)}
                 placeholder={tx('one site or app per line — leave empty for relaxed mode', 'موقع أو تطبيق في كل سطر — اتركه فارغًا للوضع المتساهل')} />
             </label>
@@ -195,9 +207,17 @@ export function FocusView({ tasks = [], durationFor, pendingRound, onDismissRoun
             </p>
 
             <label className="check">
-              <input type="checkbox" checked={saveTpl} onChange={(e) => setSaveTpl(e.target.checked)} />
-              <span>{tx('Save as a template', 'احفظها كقالب')}</span>
+              <input type="checkbox" checked={saveTpl} onChange={(e) => { setSaveTpl(e.target.checked); if (e.target.checked && !tplName) setTplName(title.trim()); }} />
+              <span>{tplId ? tx('Update this focus mode', 'حدّث نمط التركيز هذا') : tx('Save these restrictions as a focus mode', 'احفظ هذه القيود كنمط تركيز')}</span>
             </label>
+            {saveTpl && (
+              <label className="field">
+                <span>{tx('Name it', 'سمِّه')}</span>
+                <input value={tplName} onChange={(e) => setTplName(e.target.value)}
+                  placeholder={tx('Deep work, Admin, Reading…', 'عمل عميق، إداري، قراءة…')} />
+                <span className="hint-text">{tx('A focus mode is a set of restrictions, not a task — you can use it with any task.', 'نمط التركيز مجموعة قيود لا مهمة — يمكنك استخدامه مع أي مهمة.')}</span>
+              </label>
+            )}
 
             <button className="primary focus-block" onClick={start} disabled={!title.trim()}>
               <Play size={16} /> {tx('Start focusing', 'ابدأ التركيز')}
@@ -205,16 +225,18 @@ export function FocusView({ tasks = [], durationFor, pendingRound, onDismissRoun
 
             {templates.length > 0 && (
               <div className="focus-templates">
-                <h4 className="focus-h4">{tx('Templates', 'القوالب')}</h4>
+                <h4 className="focus-h4">{tx('Focus modes', 'أنماط التركيز')}</h4>
+                <p className="hint-text">{tx('Restrictions and allow lists you can apply to any task.', 'قيود وقوائم سماح يمكن تطبيقها على أي مهمة.')}</p>
                 {templates.map((tpl) => (
-                  <div key={tpl.id} className="focus-tplrow">
+                  <div key={tpl.id} className={`focus-tplrow${tplId === tpl.id ? ' on' : ''}`}>
                     <button className="focus-tplname" onClick={() => useTemplate(tpl)}>
-                      <span>{tpl.task}</span>
+                      <span>{tpl.name}</span>
                       <span className="ttime">{tpl.workMin}m</span>
                       {tpl.allowed?.length ? <span className="focus-strict"><ShieldCheck size={12} /> {tx('strict', 'صارم')}</span> : null}
+                      {tplId === tpl.id ? <span className="focus-applied">{tx('applied', 'مطبّق')}</span> : null}
                     </button>
-                    <button className="ghost sm" onClick={async () => { await api.deleteTemplate(tpl.id); reload(); }}
-                      aria-label={tx('Delete template', 'حذف القالب')}><Trash2 size={14} /></button>
+                    <button className="ghost sm" onClick={async () => { if (tplId === tpl.id) { setTplId(''); } await api.deleteTemplate(tpl.id); reload(); }}
+                      aria-label={tx('Delete focus mode', 'حذف نمط التركيز')}><Trash2 size={14} /></button>
                   </div>
                 ))}
               </div>
@@ -444,7 +466,7 @@ function FocusSettings({ api, settings, templates, onSaved }) {
           <h4 className="focus-h4">{tx('Learned filters', 'المرشّحات المكتسبة')}</h4>
           {templates.filter((t) => t.verdicts && Object.keys(t.verdicts).length).map((t) => (
             <div key={t.id} className="focus-verdicts">
-              <strong>{t.task}</strong>
+              <strong>{t.name}</strong>
               {Object.entries(t.verdicts).map(([k, v]) => (
                 <span key={k} className={`focus-verdict ${v}`}>
                   {k.replace(/^(site|app):/, '')}

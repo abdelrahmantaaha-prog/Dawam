@@ -38,7 +38,13 @@ function HabitLine({ h, iso, onToggle }) {
 /* ------------------------------------------------------------------ */
 /*  Block row (drop target for tasks, pool items, templates)           */
 /* ------------------------------------------------------------------ */
-function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over, events = [], cards = [], onAddCard, addedCards, onToggleCalEvent }) {
+function ParseChip({ text, hint }) {
+  const s = hint ? hint(text || '') : '';
+  if (!s) return null;
+  return <div className="parse-chip">{s}</div>;
+}
+
+function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over, events = [], cards = [], onAddCard, addedCards, onToggleCalEvent, parseHint }) {
   const [folded, setFolded] = useState(() => new Set()); // collapsed subtask lists, per task id (session-local)
   const toggleFold = (id) => setFolded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [quick, setQuick] = useState('');
@@ -137,7 +143,8 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
         {adding ? (
           <div className="quick"><input autoFocus value={quick} onChange={(e) => setQuick(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') { setAdding(false); setQuick(''); } }}
-            onBlur={() => { submit(); setAdding(false); }} placeholder={tx('Add a task…', 'أضف مهمة…')} /></div>
+            onBlur={() => { submit(); setAdding(false); }} placeholder={tx('Add a task… (tomorrow 3pm #tag %project)', 'أضف مهمة… (بكرة ٣ عصر #وسم %مشروع)')} />
+            <ParseChip text={quick} hint={parseHint} /></div>
         ) : (tasks.length > 0 || habits.length > 0) ? (<button className="add-row" onClick={() => setAdding(true)}><Plus size={14} /> {tx('Add', 'إضافة')}</button>) : null}
     </div>
   );
@@ -207,8 +214,10 @@ function SkyScene({ sky, stars, light, label, time, blockName, blockAr, range })
 /* ------------------------------------------------------------------ */
 /*  Plan sidebar — Recurring + Backlog in one box, switchable          */
 /* ------------------------------------------------------------------ */
-function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labelById, usedTpl = {}, onDragStart, onTplToPool, onTplToDay, onAddTpl, onManage, onEditTpl, onAddPool, onOpenPool, onTogglePoolDone, onPoolToDay, poolDropActive, poolDropOver }) {
+function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labelById, usedTpl = {}, onDragStart, onTplToPool, onTplToDay, onAddTpl, onManage, onEditTpl, onAddPool, onOpenPool, onTogglePoolDone, onPoolToDay, poolDropActive, poolDropOver, parseHint, onClearDonePool }) {
   const [val, setVal] = useState('');
+  const [doneOpen, setDoneOpen] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const submitPool = () => { if (val.trim()) { onAddPool(val); setVal(''); } };
   const isBacklog = tab === 'backlog';
   return (
@@ -240,9 +249,16 @@ function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labe
       ) : (
         <div className="pool-body">
           {poolDropActive && <div className="pool-hint drop">{tx('drop a task here to unschedule', 'أفلت مهمة هنا لإلغاء جدولتها')}</div>}
-          <div className="quick pool-add"><input value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submitPool(); }} placeholder={tx('Add to backlog…', 'أضف إلى قائمة الانتظار…')} /><button className="ghost sm" onClick={submitPool}><Plus size={14} /></button></div>
-          {pool.length === 0 ? <div className="pool-empty">{tx('Empty. Anything without a home goes here.', 'فارغة. أي شيء بلا موعد يذهب هنا.')}</div> : (
-            <ul className="pool-list">{pool.map((it) => { const p = labelById(it.projectId); const doneN = (it.subtasks || []).filter((s) => s.done).length; return (
+          <div className="quick pool-add"><input value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submitPool(); }} placeholder={tx('Add to backlog… (#tag %project)', 'أضف إلى قائمة الانتظار… (#وسم %مشروع)')} /><button className="ghost sm" onClick={submitPool}><Plus size={14} /></button>
+            <ParseChip text={val} hint={parseHint} /></div>
+          {(() => {
+            /* A backlog is a list of what is left, so what is finished does not
+               belong in it — it pushes the live items down and makes the list
+               read longer than the work actually is. The finished ones are not
+               thrown away either: they go in a drawer that is shut by default. */
+            const live = pool.filter((it) => !it.done);
+            const done = pool.filter((it) => it.done);
+            const row = (it) => { const p = labelById(it.projectId); const doneN = (it.subtasks || []).filter((s) => s.done).length; return (
               <li key={it.id} className={`pool-item ${it.done ? 'done' : ''}`}>
                 <span className="grip" onPointerDown={(e) => onDragStart(e, 'pool', it)} title={tx('Drag into a slot', 'اسحب إلى موعد')}><GripVertical size={15} /></span>
                 <button className="tcheck" onClick={() => onTogglePoolDone(it.id)} aria-label={tx('Mark done', 'وضع كمنجز')}>{it.done ? <CheckCircle2 size={17} /> : <Circle size={17} />}</button>
@@ -251,8 +267,32 @@ function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labe
                   <span className="tmeta">{p && <span className="pdot" style={{ background: p.color }} />}{p && <span className="pname">{p.name}</span>}{it.subtasks && it.subtasks.length > 0 && <span className="badge"><CheckCircle2 size={11} /> {doneN}/{it.subtasks.length}</span>}</span>
                 </button>
                 <button className="tpl-act" title={tx('Schedule on the selected day', 'جدولة في اليوم المحدد')} onClick={() => onPoolToDay(it.id)}><CornerUpRight size={15} /></button>
-              </li>); })}</ul>
-          )}
+              </li>); };
+            return (<>
+              {live.length === 0
+                ? <div className="pool-empty">{done.length ? tx('Nothing left. Everything here is done.', 'لم يتبقَّ شيء. كل ما هنا منجز.') : tx('Empty. Anything without a home goes here.', 'فارغة. أي شيء بلا موعد يذهب هنا.')}</div>
+                : <ul className="pool-list">{live.map(row)}</ul>}
+              {done.length > 0 && (
+                <div className={`pool-done ${doneOpen ? 'open' : ''}`}>
+                  <div className="pool-done-h">
+                    <button className="pool-done-t" onClick={() => setDoneOpen((v) => !v)}>
+                      <ChevronRight size={14} className="pool-caret" style={{ transform: doneOpen ? 'rotate(90deg)' : 'none' }} />
+                      {tx('Done', 'المنجز')} <span className="pool-done-n">{done.length}</span>
+                    </button>
+                    {doneOpen && onClearDonePool && (
+                      confirmClear
+                        ? <span className="pool-done-confirm">
+                            <button className="danger sm" onClick={() => { onClearDonePool(); setConfirmClear(false); }}>{tx('Delete all', 'احذف الكل')}</button>
+                            <button className="ghost sm" onClick={() => setConfirmClear(false)}>{tx('Cancel', 'إلغاء')}</button>
+                          </span>
+                        : <button className="ghost sm" onClick={() => setConfirmClear(true)}><Trash2 size={13} /> {tx('Clear', 'مسح')}</button>
+                    )}
+                  </div>
+                  {doneOpen && <ul className="pool-list">{done.map(row)}</ul>}
+                </div>
+              )}
+            </>);
+          })()}
         </div>
       )}
     </section>
