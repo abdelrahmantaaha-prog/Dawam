@@ -20,6 +20,8 @@ import { DONE_COL, columnsOf, isMove, newColumn, patchFor, toStored } from './bo
 import { rangeOf } from './calgrid.js';
 import { loadCalProjects, setCalProject, pruneCalProjects } from './calproj.js';
 import { parseTaskText, describeParse } from './parse.js';
+import { NotesView, NoteEditor } from './notesview.jsx';
+import { loadNotes, saveNote, deleteNote, newNote, notesForTask, isEmptyNote, excerpt as noteExcerpt } from './notes.js';
 import { nextMark, TINY } from './habits.js';
 import { TrelloCards } from './trelloview.jsx';
 import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
@@ -79,6 +81,8 @@ export default function Rhythm() {
   const [calProjects, setCalProjects] = useState({});
   const [calPicked, setCalPicked] = useState(null);
   const [calTasks, setCalTasks] = useState({});   // ISO -> tasks, for the range on screen
+  const [notes, setNotes] = useState([]);
+  const [openNote, setOpenNote] = useState(null);          // notebook id being written in
   const [boardProject, setBoardProject] = useState(null);  // project id, when its board is open
   const [boardReady, setBoardReady] = useState(false);
   // Trello, same shape of problem: a cached copy of someone else's system,
@@ -1659,6 +1663,51 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     patchProjectTask(card, patchFor(col));
   }, [weekStart, boardProject]);
 
+  useEffect(() => { if (ready) loadNotes().then(setNotes); }, [ready, localVersion]);
+
+  const noteById = (id) => notes.find((n) => n.id === id) || null;
+  const notebooksFor = (taskId) => notesForTask(notes, taskId).map((n) => ({ ...n, excerpt: noteExcerpt(n.body, 60) }));
+
+  /* Written straight through rather than debounced. A notebook is its own
+     document, so a save touches one small key and nothing else — and losing a
+     paragraph because a timer had not fired yet is the one failure a writing
+     surface must not have. */
+  const patchNote = useCallback(async (id, patch) => {
+    const cur = notes.find((n) => n.id === id);
+    if (!cur) return;
+    const next = await saveNote({ ...cur, ...patch });
+    setNotes((prev) => prev.map((n) => (n.id === id ? next : n)));
+  }, [notes]);
+
+  const createNote = useCallback(async (over = {}) => {
+    const n = await saveNote(newNote(over));
+    setNotes((prev) => [n, ...prev]);
+    setOpenNote(n.id);
+    return n;
+  }, []);
+
+  /* An empty notebook closed without a word in it is a misclick, not a
+     document. Keeping it would fill the wall with blanks nobody made on
+     purpose. */
+  const closeNote = useCallback(async () => {
+    const n = openNote ? notes.find((x) => x.id === openNote) : null;
+    setOpenNote(null);
+    if (n && isEmptyNote(n)) { await deleteNote(n.id); setNotes((prev) => prev.filter((x) => x.id !== n.id)); }
+  }, [openNote, notes]);
+
+  const removeNote = useCallback(async (id) => {
+    await deleteNote(id);
+    setNotes((prev) => prev.filter((n) => n.id !== id));
+    flash(tx('Note deleted.', 'حُذفت الملاحظة.'));
+  }, []);
+
+  const titleOfTask = (id) => {
+    const t = (weekRef.current.tasks || []).find((x) => x.id === id);
+    if (t) return t.title;
+    const p = (poolRef.current || []).find((x) => x.id === id);
+    return p ? p.title : null;
+  };
+
   const calSettings = settings.calendar || {};
   // What the scheduler must not schedule over, for the day being looked at.
   const calBusyFor = useCallback(
@@ -2971,6 +3020,17 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         );
       })()}
 
+      {view === 'notes' && (
+        <NotesView
+          notes={notes}
+          sky={sky} stars={stars} heroLight={heroLight} SkyScene={SkyScene}
+          onOpen={setOpenNote}
+          onNew={() => createNote()}
+          onChange={patchNote}
+          taskTitleFor={titleOfTask}
+        />
+      )}
+
       {/* PROJECTS (long-term) */}
       {view === 'projects' && !boardProject && (
         <ProjectsView
@@ -3016,14 +3076,30 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           onClose={() => setEditing(null)} onChange={(fn) => mutateTask(editingTask.id, fn)}
           onDelete={() => removeTask(editingTask.id)} onToPool={() => { taskToPool(editingTask.id); setEditing(null); }}
           onSaveTemplate={() => { addTemplate({ title: editingTask.title, block: editingTask.block, time: editingTask.time, projectId: editingTask.projectId, subtasks: editingTask.subtasks.map((s) => s.title) }); flash(tx('Saved as a recurring task.', 'حُفظت كمهمة متكررة.')); }}
-          onFocus={(mins, untilEnd) => { startFocus(editingTask, mins, untilEnd); setEditing(null); }} />
+          onFocus={(mins, untilEnd) => { startFocus(editingTask, mins, untilEnd); setEditing(null); }}
+          notebooks={notebooksFor(editingTask.id)}
+          onOpenNotebook={setOpenNote}
+          onNewNotebook={() => createNote({ taskId: editingTask.id })} />
       )}
       {editingPoolItem && (
         <PoolEditor item={editingPoolItem} projects={settings.labels} allProjects={settings.projects}
           onClose={() => setEditingPool(null)} onChange={(fn) => mutatePoolItem(editingPoolItem.id, fn)}
           onDelete={() => removePoolItem(editingPoolItem.id)}
           onToDay={() => { setEditingPool(null); setPlacer({ kind: 'pool', id: editingPoolItem.id }); }}
-          onSaveTemplate={() => { addTemplate({ title: editingPoolItem.title, block: 'morning', projectId: editingPoolItem.projectId, subtasks: editingPoolItem.subtasks.map((s) => s.title) }); flash(tx('Saved as a recurring task.', 'حُفظت كمهمة متكررة.')); }} />
+          onSaveTemplate={() => { addTemplate({ title: editingPoolItem.title, block: 'morning', projectId: editingPoolItem.projectId, subtasks: editingPoolItem.subtasks.map((s) => s.title) }); flash(tx('Saved as a recurring task.', 'حُفظت كمهمة متكررة.')); }}
+          notebooks={notebooksFor(editingPoolItem.id)}
+          onOpenNotebook={setOpenNote}
+          onNewNotebook={() => createNote({ taskId: editingPoolItem.id })} />
+      )}
+
+      {openNote && noteById(openNote) && (
+        <NoteEditor
+          note={noteById(openNote)}
+          taskTitle={noteById(openNote).taskId ? titleOfTask(noteById(openNote).taskId) : null}
+          onChange={(patch) => patchNote(openNote, patch)}
+          onClose={closeNote}
+          onDelete={removeNote}
+        />
       )}
 
       {showPoints && (
@@ -3280,6 +3356,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         </button>
         <button className={`navbtn ${view === 'calendar' ? 'on' : ''}`} onClick={() => setView('calendar')} aria-label={tx('Calendar', 'التقويم')}>
           <CalendarRange size={20} /><span className="navlabel">{tx('Calendar', 'تقويم')}</span>
+        </button>
+        <button className={`navbtn ${view === 'notes' ? 'on' : ''}`} onClick={() => setView('notes')} aria-label={tx('Notes', 'الملاحظات')}>
+          <StickyNote size={20} /><span className="navlabel">{tx('Notes', 'ملاحظات')}</span>
         </button>
         <button className={`navbtn ${view === 'projects' ? 'on' : ''}`} onClick={() => setView('projects')} aria-label={tx('Projects', 'المشاريع')}>
           <Target size={20} /><span className="navlabel">{tx('Projects', 'مشاريع')}</span>

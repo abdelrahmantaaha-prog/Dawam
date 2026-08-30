@@ -383,6 +383,23 @@ function NoteBlock({ note, onChange, onDel }) {
     </div>
   );
 }
+function NotebookList({ notebooks = [], onOpen, onNew }) {
+  if (!onNew) return null;
+  return (
+    <div className="nb-list">
+      <div className="nb-head">{tx('Notebooks', 'الدفاتر')}</div>
+      {notebooks.map((n) => (
+        <button key={n.id} className="nb-row" style={{ '--ncolour': n.colour }} onClick={() => onOpen(n.id)}>
+          <StickyNote size={13} />
+          <span className="nb-row-t">{n.title || tx('Untitled', 'بلا عنوان')}</span>
+          <span className="nb-row-x">{n.excerpt}</span>
+        </button>
+      ))}
+      <button className="nb-add" onClick={onNew}><Plus size={13} /> {tx('New notebook', 'دفتر جديد')}</button>
+    </div>
+  );
+}
+
 function NotesEditor({ notes, onAdd, onUpdate, onDel }) {
   const [type, setType] = useState('link'); const [val, setVal] = useState('');
   const addUrl = () => { if (val.trim()) { onAdd({ id: uid(), type, content: val.trim() }); setVal(''); } };
@@ -401,7 +418,7 @@ function NotesEditor({ notes, onAdd, onUpdate, onDel }) {
 /* ------------------------------------------------------------------ */
 /*  Task editor                                                        */
 /* ------------------------------------------------------------------ */
-function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaultOpen = false, onMoveDate, onClose, onChange, onDelete, onToPool, onSaveTemplate, onFocus }) {
+function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaultOpen = false, onMoveDate, onClose, onChange, onDelete, onToPool, onSaveTemplate, onFocus, notebooks = [], onOpenNotebook, onNewNotebook }) {
   const setField = (k, v) => onChange((t) => ({ ...t, [k]: v }));
   // Vault editing is write-anytime / read-only-in-window: the stored value is
   // never rendered while the window is shut, only replaced wholesale.
@@ -518,6 +535,7 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaul
           </details>
           <SubtaskEditor subtasks={task.subtasks} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...t.subtasks, { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: t.subtasks.filter((s) => s.id !== id) }))} onMove={(id, targetId, after) => onChange((t) => ({ ...t, subtasks: moveById(t.subtasks || [], id, targetId, after) }))} />
           <NotesEditor notes={task.notes || []} onAdd={(n) => onChange((t) => ({ ...t, notes: [...(t.notes || []), n] }))} onUpdate={(id, c) => onChange((t) => ({ ...t, notes: (t.notes || []).map((x) => x.id === id ? { ...x, content: c } : x) }))} onDel={(id) => onChange((t) => ({ ...t, notes: (t.notes || []).filter((x) => x.id !== id) }))} />
+          <NotebookList notebooks={notebooks} onOpen={onOpenNotebook} onNew={onNewNotebook} />
         </div>
         <div className="modal-foot"><button className="danger" onClick={onDelete}><Trash2 size={14} /> {tx('Delete', 'حذف')}</button><button className="primary" onClick={onClose}>{tx('Done', 'تم')}</button></div>
       </div>
@@ -528,7 +546,7 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaul
 /* ------------------------------------------------------------------ */
 /*  Pool item editor                                                   */
 /* ------------------------------------------------------------------ */
-function PoolEditor({ item, projects, allProjects = [], onClose, onChange, onDelete, onToDay, onSaveTemplate }) {
+function PoolEditor({ item, projects, allProjects = [], onClose, onChange, onDelete, onToDay, onSaveTemplate, notebooks = [], onOpenNotebook, onNewNotebook }) {
   const setField = (k, v) => onChange((t) => ({ ...t, [k]: v }));
   return (
     <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -549,6 +567,7 @@ function PoolEditor({ item, projects, allProjects = [], onClose, onChange, onDel
           </div>
           <SubtaskEditor subtasks={item.subtasks || []} onAdd={(title) => onChange((t) => ({ ...t, subtasks: [...(t.subtasks || []), { id: uid(), title, done: false }] }))} onToggle={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).map((s) => s.id === id ? { ...s, done: !s.done } : s) }))} onDel={(id) => onChange((t) => ({ ...t, subtasks: (t.subtasks || []).filter((s) => s.id !== id) }))} onMove={(id, targetId, after) => onChange((t) => ({ ...t, subtasks: moveById(t.subtasks || [], id, targetId, after) }))} />
           <NotesEditor notes={item.notes || []} onAdd={(n) => onChange((t) => ({ ...t, notes: [...(t.notes || []), n] }))} onUpdate={(id, c) => onChange((t) => ({ ...t, notes: (t.notes || []).map((x) => x.id === id ? { ...x, content: c } : x) }))} onDel={(id) => onChange((t) => ({ ...t, notes: (t.notes || []).filter((x) => x.id !== id) }))} />
+          <NotebookList notebooks={notebooks} onOpen={onOpenNotebook} onNew={onNewNotebook} />
         </div>
         <div className="modal-foot"><button className="danger" onClick={onDelete}><Trash2 size={14} /> {tx('Delete', 'حذف')}</button><button className="primary" onClick={onClose}>{tx('Done', 'تم')}</button></div>
       </div>

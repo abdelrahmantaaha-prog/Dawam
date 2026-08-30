@@ -17,7 +17,7 @@
 import { BLOCKS, PRAYER_BLOCKS, addDays, bName, blockById, firstJsonObject, fmtISO, fmtTime, mon, parseISO, tx, wdFull } from './core.jsx';
 
 const BLOCK_IDS = BLOCKS.map((b) => b.id);
-export const VIEWS = ['now', 'plan', 'calendar', 'projects', 'habits', 'overdue', 'focus'];
+export const VIEWS = ['now', 'plan', 'calendar', 'projects', 'habits', 'notes', 'overdue', 'focus'];
 const THEMES = ['auto', 'light', 'dark'];
 const LANGS_OK = ['en', 'ar'];
 const TOGGLES = ['time24', 'prayerGate'];
