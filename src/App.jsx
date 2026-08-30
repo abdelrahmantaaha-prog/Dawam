@@ -20,6 +20,7 @@ import { columnsOf, isMove, patchFor } from './board.js';
 import { rangeOf } from './calgrid.js';
 import { loadCalProjects, setCalProject, pruneCalProjects } from './calproj.js';
 import { parseTaskText, describeParse } from './parse.js';
+import { nextMark, TINY } from './habits.js';
 import { TrelloCards } from './trelloview.jsx';
 import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
 
@@ -544,10 +545,27 @@ export default function Rhythm() {
   const addHabit = () => { const h = newHabit(); persistHabits((prev) => [...prev, h]); return h; };
   const updHabit = (id, patch) => persistHabits((prev) => prev.map((h) => h.id === id ? { ...h, ...patch } : h));
   const delHabit = (id) => persistHabits((prev) => prev.filter((h) => h.id !== id));
+  /* The two-minute version, marked straight rather than by cycling: this is
+     offered at the moment someone is deciding whether to bother at all, and
+     making them press twice to reach it is exactly the friction it exists to
+     remove. */
+  const markHabitTiny = (id, iso) => {
+    const before = (settingsRef.current.habits || []).find((h) => h.id === id);
+    persistHabits((prev) => prev.map((h) => (h.id === id ? { ...h, log: { ...(h.log || {}), [iso]: TINY } } : h)));
+    if (before && !habitDoneOn(before, iso)) awardHabitDay(before, iso);
+  };
   const toggleHabitDay = (id, iso) => {
     const before = (settingsRef.current.habits || []).find((h) => h.id === id);
+    /* Three states, not two, when the habit has a two-minute version: kept,
+       kept-tiny, not kept. A tiny day still keeps the chain — showing up is
+       the habit — but it is recorded as tiny rather than rounded up, because
+       the log should not lie about which kind of day it was. */
     persistHabits((prev) => prev.map((h) => {
-      if (h.id !== id) return h; const log = { ...(h.log || {}) }; if (log[iso]) delete log[iso]; else log[iso] = 1; return { ...h, log };
+      if (h.id !== id) return h;
+      const log = { ...(h.log || {}) };
+      const next = nextMark(log[iso], { hasTiny: !!(h.tiny || '').trim() });
+      if (next) log[iso] = next; else delete log[iso];
+      return { ...h, log };
     }));
     // Points ride on the log as it stood BEFORE the toggle: the multiplier is
     // earned by the days leading up to this one, not by this one.
@@ -2866,7 +2884,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {view === 'habits' && (
         <HabitsView
           habits={[...prayerHabits, ...settings.habits]} sky={sky} stars={stars} heroLight={heroLight} todayISO={nowHabitISO}
-          onAdd={addHabit} onUpd={updHabit} onDel={delHabit} onToggleDay={toggleAnyHabitDay}
+          onAdd={addHabit} onUpd={updHabit} onDel={delHabit} onToggleDay={toggleAnyHabitDay} onMarkTiny={markHabitTiny}
           onFocus={(h, mins) => startFocus({ id: h.id, title: h.name }, mins)}
         />
       )}

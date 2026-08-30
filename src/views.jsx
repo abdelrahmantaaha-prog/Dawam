@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Rows3 } from 'lucide-react';
 import { boardSummary, columnsOf } from './board.js';
+import { TINY, habitStats, wasTiny } from './habits.js';
 import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 
@@ -8,7 +9,7 @@ import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,P
 import { saveJson } from './files.js';
 import { CalendarSettings } from './calview.jsx';
 import { TrelloSettings } from './trelloview.jsx';
-function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, onAdd, onUpd, onDel, onToggleDay, onFocus }) {
+function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, onAdd, onUpd, onDel, onToggleDay, onFocus, onMarkTiny }) {
   const [openId, setOpenId] = useState(null);
   // The day runs Fajr → next Fajr, so "today" comes from the caller, which
   // knows the boundary. Falling back to the calendar date would mean that
@@ -38,7 +39,8 @@ function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, onA
                 <HabitCard key={h.id} h={h} todayISO={todayISO} open={openId === h.id}
                   onOpen={() => setOpenId(openId === h.id ? null : h.id)}
                   onUpd={(patch) => onUpd(h.id, patch)} onDel={() => { onDel(h.id); setOpenId(null); }}
-                  onToggle={(iso) => onToggleDay(h.id, iso)} onFocus={(mins) => onFocus(h, mins)} />
+                  onToggle={(iso) => onToggleDay(h.id, iso)} onFocus={(mins) => onFocus(h, mins)}
+                  onMarkTiny={(iso) => onMarkTiny && onMarkTiny(h.id, iso)} />
               ))}
             </div>
           );
@@ -49,12 +51,14 @@ function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, onA
   );
 }
 
-function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus }) {
+function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus, onMarkTiny = () => {} }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const isPrayer = !!h.prayer; // built-in, derived from the prayer log
   const streak = habitStreak(h, todayISO);
   const glow = glowLevel(streak);
   const doneToday = habitDoneOn(h, todayISO);
+  const stats = habitStats(h, todayISO, 30);
+  const tiny = String(h.tiny || '').trim();
   // last 7 days, oldest → newest
   const today = parseISO(todayISO);
   const week = Array.from({ length: 7 }, (_, i) => { const d = addDays(today, i - 6); return { iso: fmtISO(d), d, done: habitDoneOn(h, fmtISO(d)) }; });
@@ -65,8 +69,17 @@ function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus 
           {doneToday ? <CheckCircle2 size={22} /> : <Circle size={22} />}
         </button>
         <button className="habit-main" onClick={onOpen}>
+          {h.identity ? <span className="habit-identity">{h.identity}</span> : null}
           <span className="habit-name">{h.name}</span>
-          <span className="habit-streak"><FlameGlyph level={glow} size={13} /> {streak > 0 ? `${streak} ${tx('day', 'يوم')}${streak !== 1 && LANG !== 'ar' ? 's' : ''}` : tx('no streak', 'لا سلسلة')}{glow >= 7 ? ` · ${tx('max glow', 'أقصى توهّج')}` : ''}</span>
+          <span className="habit-streak">
+            <FlameGlyph level={glow} size={13} /> {streak > 0 ? `${streak} ${tx('day', 'يوم')}${streak !== 1 && LANG !== 'ar' ? 's' : ''}` : tx('no streak', 'لا سلسلة')}
+            {/* The number that survives a slip. A streak of 0 after 29 kept
+                days is true and useless; this is what stops the card reading
+                as failure on the one day it matters most. */}
+            {stats.consistency.of >= 7 ? <span className="habit-cons">{stats.consistency.pct}% · {stats.consistency.kept}/{stats.consistency.of}</span> : null}
+            {stats.best > streak ? <span className="habit-best">{tx('best', 'الأفضل')} {stats.best}</span> : null}
+          </span>
+          {h.cue ? <span className="habit-cue">{h.cue}</span> : null}
         </button>
         <ChevronDown size={16} className="proj-caret" style={{ transform: open ? 'rotate(180deg)' : 'none' }} onClick={onOpen} />
       </div>
@@ -79,6 +92,27 @@ function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus 
         ))}
       </div>
       <div className="habit-ember-track"><span className="habit-ember" style={{ width: `${(glow / 7) * 100}%` }} /></div>
+      {/* The one rule worth interrupting for. Said only when it is actually
+          true: once two days are gone the chain is already lost, and telling
+          someone not to miss twice then would be a lie. */}
+      {stats.risk === 'atRisk' && (
+        <div className="habit-risk">
+          <AlertCircle size={13} />
+          <span>{tx('Missed yesterday. Never miss twice.', 'فاتتك أمس. لا تفوّتها مرتين.')}</span>
+          {tiny ? <button className="ghost sm" onClick={() => onMarkTiny(todayISO)}>{tx('Do the 2-minute version', 'افعل نسخة الدقيقتين')}</button> : null}
+        </div>
+      )}
+      {stats.risk === 'broken' && stats.best > 0 && (
+        <div className="habit-risk soft">
+          <span>{tx('The chain is broken — start a new one today.', 'انقطعت السلسلة — ابدأ واحدة جديدة اليوم.')}</span>
+        </div>
+      )}
+      {tiny && !doneToday && stats.risk !== 'atRisk' && (
+        <button className="habit-tiny-btn" onClick={() => onMarkTiny(todayISO)}>
+          {tx('Too little time?', 'وقتك ضيّق؟')} <strong>{tiny}</strong>
+        </button>
+      )}
+      {stats.tinyToday && <div className="habit-tinytag">{tx('kept small today — still counts', 'أُنجزت مصغّرة اليوم — وتُحتسب')}</div>}
       {open && (
         <div className="proj-edit">
           {isPrayer ? (
@@ -88,6 +122,24 @@ function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus 
           <div className="proj-grid2">
             <label><span>{tx('Colour', 'اللون')}</span><input className="swatch proj-swatch" type="color" value={h.color} onChange={(e) => onUpd({ color: e.target.value })} /></label>
             <label><span>{tx('Day period', 'فترة اليوم')}</span><select className="time-input" value={h.block || 'morning'} onChange={(e) => onUpd({ block: e.target.value })}>{BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}</select></label>
+          </div>
+          <div className="proj-field">
+            <span>{tx('Who this makes you', 'من تصير به')}</span>
+            <input className="projname" value={h.identity || ''} onChange={(e) => onUpd({ identity: e.target.value })}
+              placeholder={tx('I am someone who reads', 'أنا شخص يقرأ')} />
+            <p className="hint-text" style={{ margin: '4px 0 0' }}>{tx('Every time you keep it, it is a vote for this. The goal is not to read a book — it is to become a reader.', 'كل مرة تلتزم بها هي صوت لصالح هذا. الهدف ليس قراءة كتاب — بل أن تصير قارئًا.')}</p>
+          </div>
+          <div className="proj-field">
+            <span>{tx('What triggers it', 'ما الذي يبدؤها')}</span>
+            <input className="projname" value={h.cue || ''} onChange={(e) => onUpd({ cue: e.target.value })}
+              placeholder={tx('After Fajr, at the desk', 'بعد الفجر، على المكتب')} />
+            <p className="hint-text" style={{ margin: '4px 0 0' }}>{tx('A habit needs a moment to hang on. Name the one that already happens every day — the period above is half of it; this is the rest.', 'العادة تحتاج لحظة تتعلق بها. سمِّ ما يحدث يوميًا بالفعل — الفترة أعلاه نصف الأمر، وهذا باقيه.')}</p>
+          </div>
+          <div className="proj-field">
+            <span>{tx('The two-minute version', 'نسخة الدقيقتين')}</span>
+            <input className="projname" value={h.tiny || ''} onChange={(e) => onUpd({ tiny: e.target.value })}
+              placeholder={tx('Read one page', 'اقرأ صفحة واحدة')} />
+            <p className="hint-text" style={{ margin: '4px 0 0' }}>{tx('What you do on the worst day. Keeping this still keeps the chain — a habit has to be established before it can be improved.', 'ما تفعله في أسوأ يوم. إنجازها يبقي السلسلة — العادة تُرسَّخ أولًا ثم تُحسَّن.')}</p>
           </div>
           </>)}
           <div className="proj-field">

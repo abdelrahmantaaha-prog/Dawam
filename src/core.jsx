@@ -347,7 +347,11 @@ function projectPace(p) {
 // A habit is a daily commitment. Completion is stored per ISO date in habit.log.
 // Streak = consecutive completed days ending at (and including) the given date.
 const LABEL_ICON = null;
-const newHabit = () => ({ id: uid(), name: tx('New habit', 'عادة جديدة'), color: LABEL_SWATCHES[Math.floor(Math.random() * LABEL_SWATCHES.length)], block: 'morning', createdAt: fmtISO(new Date()), log: {} });
+/* identity, cue and tiny are the three Atomic Habits levers that survive
+   contact with a planner: who this makes you, what triggers it, and the
+   two-minute version you can still do on the worst day. All optional — a
+   habit with only a name works exactly as it always did. */
+const newHabit = () => ({ id: uid(), name: tx('New habit', 'عادة جديدة'), color: LABEL_SWATCHES[Math.floor(Math.random() * LABEL_SWATCHES.length)], block: 'morning', createdAt: fmtISO(new Date()), log: {}, identity: '', cue: '', tiny: '' });
 const habitDoneOn = (h, iso) => !!(h.log && h.log[iso]);
 function habitStreak(h, uptoISO) {
   const upto = uptoISO ? parseISO(uptoISO) : (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();

@@ -975,6 +975,20 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
   font-size:10.5px;font-weight:700;color:var(--verdigris);font-variant-numeric:tabular-nums;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
+/* ---- Habits, Atomic-Habits shaped ---- */
+.habit-identity{display:block;font-size:10.5px;font-weight:700;letter-spacing:.02em;color:var(--verdigris);margin-bottom:1px}
+.habit-cue{display:block;font-size:10.5px;color:var(--faint);margin-top:2px}
+.habit-cons{margin-inline-start:8px;font-size:10.5px;font-weight:800;color:var(--muted);font-variant-numeric:tabular-nums}
+.habit-best{margin-inline-start:6px;font-size:10px;font-weight:700;color:var(--faint)}
+.habit-risk{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-top:8px;padding:7px 10px;
+  border:1px solid #9C4221;border-radius:10px;background:rgba(156,66,33,.08);color:#9C4221;font-size:12px;font-weight:700}
+.habit-risk.soft{border-color:var(--line);background:var(--soft);color:var(--muted);font-weight:600}
+.habit-tiny-btn{display:block;width:100%;margin-top:8px;padding:7px 10px;border:1px dashed var(--line);border-radius:10px;
+  background:none;color:var(--muted);font-family:inherit;font-size:11.5px;cursor:pointer;text-align:start}
+.habit-tiny-btn:hover{border-color:var(--verdigris);color:var(--ink)}
+.habit-tiny-btn strong{color:var(--verdigris)}
+.habit-tinytag{margin-top:7px;font-size:10.5px;font-weight:700;color:var(--verdigris)}
+
 /* ---- Kanban board ----
    Three columns that scroll horizontally on a phone rather than squeezing to
    nothing: a card you cannot read is not a board. */
