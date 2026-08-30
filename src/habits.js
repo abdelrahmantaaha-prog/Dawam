@@ -163,6 +163,36 @@ export function wouldCycle(habits, id, anchorId) {
   return false;
 }
 
+/* How a stack should be DRAWN, not just ordered.
+ *
+ * Each habit gets its depth in the chain and whether anything hangs off it, so
+ * a card can show a connector into the one above rather than only saying
+ * "After X" in words. A stack you can see is the point of stacking — the
+ * sentence alone is just a label. Depth is capped so a pathological chain
+ * cannot indent a card off the screen. */
+export const MAX_STACK_DEPTH = 3;
+
+export function stackShape(habits) {
+  const list = stackOrder(habits);
+  const byId = new Map(list.map((h) => [h.id, h]));
+  const anchored = new Set();
+  for (const h of list) if (h.after && !isPrayerAnchor(h.after) && byId.has(h.after)) anchored.add(h.after);
+
+  const depthOf = (h, seen = new Set()) => {
+    if (!h.after || isPrayerAnchor(h.after) || !byId.has(h.after)) return h.after ? 1 : 0;
+    if (seen.has(h.id)) return 0;              // a cycle: stop rather than recurse
+    seen.add(h.id);
+    return Math.min(MAX_STACK_DEPTH, 1 + depthOf(byId.get(h.after), seen));
+  };
+
+  return list.map((h) => ({
+    habit: h,
+    depth: depthOf(h),
+    hasAnchor: !!h.after,
+    anchorsOthers: anchored.has(h.id),
+  }));
+}
+
 /* The next mark for a day, cycling through the three states a day can be in.
    Returns undefined for "clear it", which is what the caller deletes on. */
 export function nextMark(current, { hasTiny }) {

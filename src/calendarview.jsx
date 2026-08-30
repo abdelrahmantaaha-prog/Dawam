@@ -127,11 +127,15 @@ function useScrollToMorning(ref, mode) {
 
 export function CalendarView({
   mode, date, onMode, onDate,
-  events, tasksByISO, projects, calProjects, weekStartDay = 6,
-  onAssign, picked, onPick,
+  events: allEvents, tasksByISO, projects, calProjects, weekStartDay = 6,
+  filterBar, eventFilter, onAssign, picked, onPick,
 }) {
   const scroller = useRef(null);
   useScrollToMorning(scroller, mode);
+  /* Filtered once, at the top: the grid, the all-day row, the month cells and
+     the totals underneath all read from this, so they cannot disagree about
+     what is being shown. */
+  const events = eventFilter ? (allEvents || []).filter(eventFilter) : (allEvents || []);
 
   const days = mode === 'day' ? [date] : mode === 'week' ? weekDates(date, weekStartDay) : [];
   const cells = mode === 'month' ? monthGrid(date, weekStartDay) : [];
@@ -168,6 +172,7 @@ export function CalendarView({
           <button className="icon" onClick={() => onDate(step(mode, date, 1))} aria-label={tx('Next', 'التالي')}><ChevronRight size={18} /></button>
           <button className="ghost sm" onClick={() => onDate(new Date())}>{tx('Today', 'اليوم')}</button>
         </div>
+        {filterBar}
         <div className="seg calv-modes">
           {MODES.map((m) => (
             <button key={m} className={mode === m ? 'on' : ''} onClick={() => onMode(m)}>

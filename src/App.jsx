@@ -18,10 +18,14 @@ import { CalendarView } from './calendarview.jsx';
 import { KanbanBoard } from './kanban.jsx';
 import { DONE_COL, columnsOf, isMove, newColumn, patchFor, toStored } from './board.js';
 import { rangeOf } from './calgrid.js';
-import { loadCalProjects, setCalProject, pruneCalProjects } from './calproj.js';
+import { loadCalProjects, setCalProject, pruneCalProjects, calSeriesKey } from './calproj.js';
+import { loadCalPrep, setCalPrep, prepFor as prepForEvent, meetingsForProject, isPast as meetingPast } from './calprep.js';
 import { parseTaskText, describeParse } from './parse.js';
 import { NotesView, NoteEditor } from './notesview.jsx';
-import { loadNotes, saveNote, deleteNote, newNote, notesForTask, isEmptyNote, excerpt as noteExcerpt } from './notes.js';
+import { FilterBar } from './filterbar.jsx';
+import { EMPTY as EMPTY_FILTER, arrange, isFiltering, matches as filterMatches } from './filters.js';
+import { loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, isEmptyNote, excerpt as noteExcerpt } from './notes.js';
+import { MeetingSheet } from './meetingsheet.jsx';
 import { nextMark, TINY } from './habits.js';
 import { TrelloCards } from './trelloview.jsx';
 import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
@@ -79,8 +83,14 @@ export default function Rhythm() {
   const [calMode, setCalMode] = useState('week');
   const [calDate, setCalDate] = useState(() => new Date());
   const [calProjects, setCalProjects] = useState({});
+  const [calPrep, setCalPrepMap] = useState({});
+  const [openMeeting, setOpenMeeting] = useState(null);   // the occurrence whose prep sheet is open
   const [calPicked, setCalPicked] = useState(null);
   const [calTasks, setCalTasks] = useState({});   // ISO -> tasks, for the range on screen
+  /* Held in the app rather than per view: Plan, the board, the calendar and
+     the notes wall are four angles on the same work, so "only the Bugs
+     project" should not have to be set four times. */
+  const [filter, setFilter] = useState(EMPTY_FILTER);
   const [notes, setNotes] = useState([]);
   const [openNote, setOpenNote] = useState(null);          // notebook id being written in
   const [boardProject, setBoardProject] = useState(null);  // project id, when its board is open
@@ -670,8 +680,14 @@ export default function Rhythm() {
   // order seeded from their start time, so timed tasks still land in a sane
   // spot — but the arrows on the Plan page are the source of truth, because
   // this exact order drives the one-at-a-time Now queue.
-  const tasksFor = (dayIdx, blockId) =>
-    week.tasks.filter((t) => t.day === dayIdx && t.block === blockId).sort((a, b) => (a.done - b.done) || (a.order - b.order));
+  const tasksFor = (dayIdx, blockId) => arrange(
+    week.tasks.filter((t) => t.day === dayIdx && t.block === blockId).sort((a, b) => (a.done - b.done) || (a.order - b.order)),
+    filter,
+    // No 'date' here: everything in one block is already the same day, and the
+    // manual order within it is what the drag handles are for.
+    ['manual', 'title'],
+    { date: (t) => (t.start ? t.start : null) },
+  );
 
   const addTask = (dayIdx, blockId, title, extra = {}) => {
     if (!title.trim()) return;
@@ -980,6 +996,11 @@ export default function Rhythm() {
     }
     addTask(dayIdx, block, p.title, extra);
   };
+
+  const filterBar = (sorts, compact = false) => (
+    <FilterBar filter={filter} onChange={setFilter} labels={settings.labels || []}
+      projects={settings.projects || []} sorts={sorts} compact={compact} />
+  );
 
   const [slotBusy, setSlotBusy] = useState(false);
   // dayIdx is 0-6 within the week on screen; omitted means the selected day.
@@ -1583,6 +1604,16 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     })();
   }, [ready]);
 
+  useEffect(() => { if (ready) loadCalPrep().then(setCalPrepMap); }, [ready]);
+
+  /* Everything a board needs to say about one meeting. The feed itself is
+     never touched — this is all Rhythm's own record around it. */
+  const meetingDone = (ev) => !!(calDone[fmtISO(new Date(ev.startMs))] || {})[calKey(ev)];
+  // Straight through toggleMeeting: the Plan page's inline meetings already
+  // use it, and two paths writing the same done-marks would drift.
+  const toggleMeetingDone = (ev) => toggleMeeting(fmtISO(new Date(ev.startMs)), calKey(ev));
+  const setMeetingDesc = async (ev, desc) => setCalPrepMap(await setCalPrep(calPrep, calSeriesKey(ev), desc));
+
   const assignCalProject = useCallback(async (seriesKey, projectId) => {
     setCalProjects(await setCalProject(calProjects, seriesKey, projectId));
     flash(projectId ? tx('Filed.', 'تم الإسناد.') : tx('Cleared.', 'أُزيل الإسناد.'));
@@ -1667,6 +1698,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
 
   const noteById = (id) => notes.find((n) => n.id === id) || null;
   const notebooksFor = (taskId) => notesForTask(notes, taskId).map((n) => ({ ...n, excerpt: noteExcerpt(n.body, 60) }));
+  const notebooksForEvent = (key) => notesForEvent(notes, key).map((n) => ({ ...n, excerpt: noteExcerpt(n.body, 60) }));
 
   /* Written straight through rather than debounced. A notebook is its own
      document, so a save touches one small key and nothing else — and losing a
@@ -2840,6 +2872,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             blockName={wdFull(selectedDate.getDay())} blockAr=""
             range={`${mon(selectedDate.getMonth())} · ${week.tasks.filter((t) => t.day === selectedDay).length} ${week.tasks.filter((t) => t.day === selectedDay).length !== 1 ? tr.tasks : tr.task}${usingFallback ? ` · ${tx('prayer times estimated', 'مواقيت تقديرية')}` : ''}`} />
           <div className="hero-sheet">
+        {filterBar(['manual', 'title'])}
         <div className="wknav plan-nav">
           <button className="icon" onClick={() => shiftStrip(-7)} disabled={!canPrev} aria-label={tx('Earlier days', 'أيام أسبق')}>{isRTL() ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}</button>
           <button className="today-btn" onClick={goToday}>{rangeLabel()}</button>
@@ -2989,6 +3022,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           projects={settings.projects || []}
           calProjects={calProjects}
           weekStartDay={settings.weekStartDay}
+          filterBar={filterBar(['manual'], true)}
+          eventFilter={(e) => filterMatches(e, { ...filter, labels: [] }, { project: (x) => calProjects[calSeriesKey(x)] || null })}
           onAssign={assignCalProject}
           picked={calPicked}
           onPick={setCalPicked}
@@ -3006,6 +3041,13 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             project={proj}
             cards={projectTaskList(proj.id).tasks}
             labels={settings.labels || []}
+            filterBar={filterBar(['manual', 'date', 'title'], true)}
+            meetings={meetingsForProject(calInstances, calProjects, proj.id)}
+            calDone={meetingDone}
+            prepFor={(ev) => prepForEvent(calPrep, ev)}
+            onOpenMeeting={setOpenMeeting}
+            onToggleMeetingDone={toggleMeetingDone}
+            cardFilter={(c) => filterMatches(c, { ...filter, projects: [] }, { label: (x) => x.projectId })}
             onMove={moveBoardCard}
             onOpenTask={openProjectTask}
             onBack={() => setBoardProject(null)}
@@ -3024,6 +3066,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         <NotesView
           notes={notes}
           sky={sky} stars={stars} heroLight={heroLight} SkyScene={SkyScene}
+          filterBar={filterBar(['recent', 'title'], true)}
+          sort={filter.sort}
           onOpen={setOpenNote}
           onNew={() => createNote()}
           onChange={patchNote}
@@ -3046,6 +3090,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {view === 'habits' && (
         <HabitsView
           habits={[...prayerHabits, ...settings.habits]} sky={sky} stars={stars} heroLight={heroLight} todayISO={nowHabitISO}
+          rewards={settings.rewards || []} balance={balance} onClaim={cashIn}
           onAdd={addHabit} onUpd={updHabit} onDel={delHabit} onToggleDay={toggleAnyHabitDay} onMarkTiny={markHabitTiny}
           onFocus={(h, mins) => startFocus({ id: h.id, title: h.name }, mins)}
         />
@@ -3090,6 +3135,22 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           notebooks={notebooksFor(editingPoolItem.id)}
           onOpenNotebook={setOpenNote}
           onNewNotebook={() => createNote({ taskId: editingPoolItem.id })} />
+      )}
+
+      {openMeeting && (
+        <MeetingSheet
+          ev={openMeeting}
+          done={meetingDone(openMeeting)}
+          desc={prepForEvent(calPrep, openMeeting)}
+          notebooks={notebooksForEvent(calKey(openMeeting))}
+          past={meetingPast(openMeeting)}
+          project={(settings.projects || []).find((p) => p.id === calProjects[calSeriesKey(openMeeting)]) || null}
+          onToggleDone={() => toggleMeetingDone(openMeeting)}
+          onDesc={(d) => setMeetingDesc(openMeeting, d)}
+          onOpenNotebook={setOpenNote}
+          onNewNotebook={() => createNote({ eventKey: calKey(openMeeting), title: openMeeting.summary || '' })}
+          onClose={() => setOpenMeeting(null)}
+        />
       )}
 
       {openNote && noteById(openNote) && (

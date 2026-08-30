@@ -91,6 +91,7 @@ export const newNote = (over = {}) => ({
   colour: NOTE_COLOURS[0],
   pinned: false,
   taskId: null,          // the task it was written from, if any
+  eventKey: null,        // or the calendar occurrence — "uid|startMs"
   createdAt: fmtISO(new Date()),
   updatedAt: Date.now(),
   ...over,
@@ -122,3 +123,7 @@ export async function deleteNote(id) {
 /* Notebooks written from a task. A task can carry several — a plan and a
    transcript are not the same page. */
 export const notesForTask = (notes, taskId) => (notes || []).filter((n) => n.taskId && n.taskId === taskId);
+
+/* Per OCCURRENCE, not per series: the agenda for this Monday is not the agenda
+   for next Monday, which is exactly the opposite of the description. */
+export const notesForEvent = (notes, eventKey) => (notes || []).filter((n) => n.eventKey && n.eventKey === eventKey);

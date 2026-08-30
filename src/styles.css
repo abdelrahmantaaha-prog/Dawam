@@ -1091,6 +1091,78 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
   background:none;color:var(--muted);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer}
 .nb-add:hover{border-color:var(--verdigris);color:var(--verdigris)}
 
+/* ---- filter bar ---- */
+.fbar{position:relative;display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:10px}
+.fbar.compact{margin:0}
+.fbar-btn{display:inline-flex;align-items:center;gap:6px;max-width:260px;padding:5px 11px;border:1px solid var(--line);
+  border-radius:99px;background:var(--panel);color:var(--muted);font-family:inherit;font-size:11.5px;font-weight:700;
+  cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fbar-btn.on{border-color:var(--verdigris);color:var(--verdigris);background:var(--soft)}
+.fbar-clear{display:grid;place-items:center;width:24px;height:24px;border:0;border-radius:50%;background:var(--soft);
+  color:var(--muted);cursor:pointer}
+.fbar-sort{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:11.5px}
+.fbar-sort select{border:1px solid var(--line);border-radius:8px;padding:4px 7px;background:var(--panel);color:var(--ink);
+  font-family:inherit;font-size:11.5px;font-weight:600}
+.fbar-panel{position:absolute;top:calc(100% + 6px);inset-inline-start:0;z-index:25;min-width:250px;max-width:min(92vw,360px);
+  padding:11px 13px;border:1px solid var(--line);border-radius:12px;background:var(--panel);box-shadow:0 12px 28px rgba(23,48,39,.18)}
+.fbar-h{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:2px 0 6px}
+.fbar-chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.fchip{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border:1px solid var(--line);border-radius:99px;
+  background:var(--panel);color:var(--ink);font-family:inherit;font-size:11.5px;font-weight:600;cursor:pointer}
+.fchip.on{border-color:var(--fcolour,var(--verdigris));background:var(--soft)}
+.fchip-dot{width:8px;height:8px;border-radius:50%;background:var(--fcolour,var(--verdigris))}
+
+/* ---- meetings on a board ---- */
+.kb-meetings{margin-bottom:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--soft)}
+.kb-meetings-h{display:flex;align-items:center;gap:7px;font-size:10.5px;font-weight:700;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.kb-meetings-rail{display:flex;gap:9px;overflow-x:auto;padding-bottom:4px}
+.kb-meeting{flex:0 0 258px;display:flex;align-items:flex-start;gap:6px;padding:9px 10px;border:1px solid var(--line);
+  border-inline-start:3px solid var(--verdigris);border-radius:11px;background:var(--panel);position:relative}
+.kb-meeting.past{opacity:.85;border-inline-start-style:dashed}
+.kb-meeting.done{opacity:.55}
+.kb-meeting.done .kb-meeting-t{text-decoration:line-through}
+.kb-meeting-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;background:none;border:0;padding:0;
+  text-align:start;font-family:inherit;color:inherit;cursor:pointer}
+.kb-meeting-t{font-size:12.5px;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kb-meeting-w{font-size:10.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+.kb-meeting-d{font-size:10.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.kb-meeting-tag{position:absolute;top:7px;inset-inline-end:8px;font-size:8.5px;font-weight:800;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--faint)}
+
+/* ---- the meeting sheet ---- */
+.ms-fixed{padding:10px 12px;border:1px solid var(--line);border-radius:11px;background:var(--soft);margin-bottom:11px}
+.ms-title{margin:0 0 3px;font-family:'Cormorant',serif;font-size:19px;font-weight:600;color:var(--ink)}
+.ms-when{margin:0 0 5px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.ms-ro{display:flex;align-items:center;gap:5px;margin:0;font-size:10.5px;color:var(--faint)}
+.ms-proj{display:inline-block;margin-top:7px;padding:2px 9px;border-radius:99px;font-size:10.5px;font-weight:800;
+  color:#fff;background:var(--pcolour,var(--verdigris))}
+.ms-done{display:flex;align-items:center;justify-content:center;gap:7px;width:100%;padding:9px;margin-bottom:11px;
+  border:1px solid var(--line);border-radius:11px;background:var(--panel);color:var(--muted);font-family:inherit;
+  font-size:13px;font-weight:700;cursor:pointer}
+.ms-done.on{border-color:var(--verdigris);color:var(--verdigris);background:var(--soft)}
+.ms-desc{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-family:inherit;font-size:13px;
+  background:var(--panel);color:var(--ink);resize:vertical}
+
+/* ---- a stack you can see ---- */
+.habit-stack{position:relative}
+.habit-stack.d1{padding-inline-start:14px}
+.habit-stack.d2{padding-inline-start:26px}
+.habit-stack.d3{padding-inline-start:38px}
+.habit-link{position:absolute;inset-inline-start:5px;top:-8px;bottom:50%;width:9px;
+  border-inline-start:2px solid var(--line);border-end-start-radius:8px;border-bottom:2px solid var(--line)}
+.habit-stack.d2 .habit-link{inset-inline-start:17px}
+.habit-stack.d3 .habit-link{inset-inline-start:29px}
+
+/* ---- a habit paying for something ---- */
+.habit-prize{display:flex;align-items:center;gap:7px;margin-top:8px;padding:6px 10px;border-radius:10px;
+  background:var(--soft);font-size:11px;font-weight:700;color:var(--muted)}
+.habit-prize.ready{color:var(--verdigris);background:color-mix(in srgb,var(--verdigris) 12%,transparent)}
+.habit-prize-n{flex-shrink:0;max-width:34%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.habit-prize-bar{flex:1;min-width:30px;height:5px;border-radius:99px;background:var(--line);overflow:hidden}
+.habit-prize-bar>span{display:block;height:100%;background:var(--verdigris);border-radius:99px}
+.habit-prize-c{font-variant-numeric:tabular-nums;flex-shrink:0}
+
 /* ---- Kanban board ----
    Three columns that scroll horizontally on a phone rather than squeezing to
    nothing: a card you cannot read is not a board. */

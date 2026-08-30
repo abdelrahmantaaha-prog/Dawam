@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { NOTE_COLOURS, excerpt, isEmptyNote, sanitise } from './notes.js';
 import { tx } from './core.jsx';
+import { applySort } from './filters.js';
 
 const stamp = (ms) => {
   if (!ms) return '';
@@ -125,12 +126,17 @@ export function NoteEditor({ note, onChange, onClose, onDelete, taskTitle }) {
 
 /* ---- the wall ---- */
 
-export function NotesView({ notes, sky, stars, heroLight, SkyScene, onOpen, onNew, onChange, taskTitleFor }) {
+export function NotesView({ notes, sky, stars, heroLight, SkyScene, filterBar, sort, onOpen, onNew, onChange, taskTitleFor }) {
   const [q, setQ] = useState('');
   const term = q.trim().toLowerCase();
-  const shown = term
+  const found = term
     ? notes.filter((n) => `${n.title} ${excerpt(n.body, 4000)}`.toLowerCase().includes(term))
     : notes;
+  /* Pinned stays above the sort whatever it is: pinning is a statement about
+     where something belongs on the wall, and an ordering that ignores it makes
+     the pin do nothing. */
+  const shown = applySort(found, sort === 'title' ? 'title' : 'recent', { title: (n) => n.title || excerpt(n.body, 40) })
+    .slice().sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
 
   return (
     <div className="hero-card wide">
@@ -144,6 +150,7 @@ export function NotesView({ notes, sky, stars, heroLight, SkyScene, onOpen, onNe
             <Search size={14} />
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tx('Search notes…', 'ابحث في الملاحظات…')} />
           </span>
+          {filterBar}
           <button className="primary sm" onClick={onNew}><Plus size={15} /> {tx('New note', 'ملاحظة جديدة')}</button>
         </div>
 

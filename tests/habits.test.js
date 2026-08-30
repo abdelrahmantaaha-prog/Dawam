@@ -3,7 +3,7 @@
    tell someone deciding whether to bother today. These pin the numbers that
    survive a slip, and the one state worth shouting about. */
 import { describe, it, expect } from 'vitest';
-import { FULL, TINY, consistency, bestStreak, riskState, habitStats, nextMark, doneOn, wasTiny, stackOrder, wouldCycle } from '../src/habits.js';
+import { FULL, TINY, consistency, bestStreak, riskState, habitStats, nextMark, doneOn, wasTiny, stackOrder, wouldCycle, stackShape, MAX_STACK_DEPTH } from '../src/habits.js';
 import { fmtISO } from '../src/core.jsx';
 
 const TODAY = '2026-08-29';
@@ -184,5 +184,38 @@ describe('wouldCycle', () => {
     expect(wouldCycle([h('a'), h('b')], 'b', 'a')).toBe(false);
     expect(wouldCycle([h('a')], 'a', 'prayer:fajr')).toBe(false);
     expect(wouldCycle([h('a')], 'a', null)).toBe(false);
+  });
+});
+
+/* Stacking has to be visible, not only ordered — "After X" in words is a
+   label; a connector you can see is the feature. */
+describe('stackShape', () => {
+  const h = (id, after) => ({ id, name: id, after: after || null, log: {} });
+
+  it('gives each habit its depth in the chain', () => {
+    const out = stackShape([h('c', 'b'), h('a'), h('b', 'a')]);
+    expect(out.map((x) => [x.habit.id, x.depth])).toEqual([['a', 0], ['b', 1], ['c', 2]]);
+  });
+
+  it('marks which habits are anchors, so a connector knows where to stop', () => {
+    const out = stackShape([h('a'), h('b', 'a')]);
+    expect(out.find((x) => x.habit.id === 'a').anchorsOthers).toBe(true);
+    expect(out.find((x) => x.habit.id === 'b').anchorsOthers).toBe(false);
+  });
+
+  it('treats a prayer anchor as depth 1 — anchored, but to nothing on screen', () => {
+    const out = stackShape([h('a', 'prayer:fajr')]);
+    expect(out[0]).toMatchObject({ depth: 1, hasAnchor: true });
+  });
+
+  it('caps depth so a long chain cannot indent a card off the screen', () => {
+    const chain = ['a', 'b', 'c', 'd', 'e', 'f'].map((id, i, arr) => h(id, i ? arr[i - 1] : null));
+    expect(Math.max(...stackShape(chain).map((x) => x.depth))).toBeLessThanOrEqual(MAX_STACK_DEPTH);
+  });
+
+  it('survives a cycle rather than recursing forever', () => {
+    const out = stackShape([h('a', 'b'), h('b', 'a')]);
+    expect(out).toHaveLength(2);
+    expect(out.every((x) => Number.isFinite(x.depth))).toBe(true);
   });
 });

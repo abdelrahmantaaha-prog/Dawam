@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Rows3 } from 'lucide-react';
+import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Rows3, Coins } from 'lucide-react';
 import { boardSummary, columnsOf } from './board.js';
-import { TINY, habitStats, isPrayerAnchor, stackOrder, wouldCycle } from './habits.js';
+import { TINY, habitStats, isPrayerAnchor, stackShape, wouldCycle } from './habits.js';
 import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 
@@ -9,7 +9,7 @@ import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,P
 import { saveJson } from './files.js';
 import { CalendarSettings } from './calview.jsx';
 import { TrelloSettings } from './trelloview.jsx';
-function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, onAdd, onUpd, onDel, onToggleDay, onFocus, onMarkTiny }) {
+function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, rewards = [], balance = 0, onClaim, onAdd, onUpd, onDel, onToggleDay, onFocus, onMarkTiny }) {
   const [openId, setOpenId] = useState(null);
   // The day runs Fajr → next Fajr, so "today" comes from the caller, which
   // knows the boundary. Falling back to the calendar date would mean that
@@ -30,19 +30,23 @@ function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, onA
           </div>
         )}
         {BLOCKS.map((b) => {
-          // Stacked habits follow their anchor: a stack listed out of order is
-          // a stack nobody can follow.
-          const group = stackOrder(habits.filter((h) => (h.block || 'morning') === b.id));
+          // Stacked habits follow their anchor, and carry how deep in the
+          // chain they sit so the card can be drawn hanging off the one above.
+          const group = stackShape(habits.filter((h) => (h.block || 'morning') === b.id));
           if (!group.length) return null;
           return (
             <div key={b.id} className="habit-group">
               <div className="habit-group-h blk-ink" style={{ '--bi-light': b.accentDeep, '--bi-dark': b.accent }}>{bName(b)}{bSub(b) ? ` · ${bSub(b)}` : ''}</div>
-              {group.map((h) => (
-                <HabitCard key={h.id} id={`habit-${h.id}`} h={h} habits={habits} todayISO={todayISO} open={openId === h.id}
-                  onOpen={() => setOpenId(openId === h.id ? null : h.id)}
-                  onUpd={(patch) => onUpd(h.id, patch)} onDel={() => { onDel(h.id); setOpenId(null); }}
-                  onToggle={(iso) => onToggleDay(h.id, iso)} onFocus={(mins) => onFocus(h, mins)}
-                  onMarkTiny={(iso) => onMarkTiny && onMarkTiny(h.id, iso)} />
+              {group.map(({ habit: h, depth, hasAnchor, anchorsOthers }) => (
+                <div key={h.id} className={`habit-stack d${depth}${hasAnchor ? ' hung' : ''}${anchorsOthers ? ' anchors' : ''}`}>
+                  {hasAnchor && <span className="habit-link" aria-hidden="true" />}
+                  <HabitCard id={`habit-${h.id}`} h={h} habits={habits} todayISO={todayISO} open={openId === h.id}
+                    rewards={rewards} balance={balance} onClaim={onClaim}
+                    onOpen={() => setOpenId(openId === h.id ? null : h.id)}
+                    onUpd={(patch) => onUpd(h.id, patch)} onDel={() => { onDel(h.id); setOpenId(null); }}
+                    onToggle={(iso) => onToggleDay(h.id, iso)} onFocus={(mins) => onFocus(h, mins)}
+                    onMarkTiny={(iso) => onMarkTiny && onMarkTiny(h.id, iso)} />
+                </div>
               ))}
             </div>
           );
@@ -63,7 +67,7 @@ function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, onA
   );
 }
 
-function HabitCard({ id, h, habits = [], todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus, onMarkTiny = () => {} }) {
+function HabitCard({ id, h, habits = [], todayISO, open, rewards = [], balance = 0, onClaim, onOpen, onUpd, onDel, onToggle, onFocus, onMarkTiny = () => {} }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const isPrayer = !!h.prayer; // built-in, derived from the prayer log
   const streak = habitStreak(h, todayISO);
@@ -71,6 +75,8 @@ function HabitCard({ id, h, habits = [], todayISO, open, onOpen, onUpd, onDel, o
   const doneToday = habitDoneOn(h, todayISO);
   const stats = habitStats(h, todayISO, 30);
   const tiny = String(h.tiny || '').trim();
+  const linked = h.rewardId ? rewards.find((r) => r.id === h.rewardId) : null;
+  const canClaim = linked && balance >= (Number(linked.cost) || 0);
   const anchor = h.after
     ? (isPrayerAnchor(h.after)
       ? `${bName(blockById(h.after.slice(7)))} ${tx('prayer', 'صلاة')}`
@@ -131,6 +137,18 @@ function HabitCard({ id, h, habits = [], todayISO, open, onOpen, onUpd, onDel, o
         </button>
       )}
       {h.reward && stats.doneToday ? <div className="habit-reward">{tx('Now:', 'الآن:')} {h.reward}</div> : null}
+      {/* A reward you can actually take, priced in the points this habit has
+          been paying all along — the note-to-self version above never cost
+          anything and so never really was a reward. */}
+      {linked && (
+        <div className={`habit-prize ${canClaim ? 'ready' : ''}`}>
+          <Coins size={13} />
+          <span className="habit-prize-n">{linked.name}</span>
+          <span className="habit-prize-bar"><span style={{ width: `${Math.min(100, Math.round((balance / Math.max(1, Number(linked.cost) || 1)) * 100))}%` }} /></span>
+          <span className="habit-prize-c">{balance}/{linked.cost}</span>
+          {canClaim && onClaim ? <button className="primary sm" onClick={() => onClaim(linked)}>{tx('Claim', 'استلم')}</button> : null}
+        </div>
+      )}
       {stats.tinyToday && <div className="habit-tinytag">{tx('kept small today — still counts', 'أُنجزت مصغّرة اليوم — وتُحتسب')}</div>}
       {open && (
         <div className="proj-edit">
@@ -177,6 +195,16 @@ function HabitCard({ id, h, habits = [], todayISO, open, onOpen, onUpd, onDel, o
               placeholder={tx('Coffee on the balcony', 'قهوة في الشرفة')} />
             <p className="hint-text" style={{ margin: '4px 0 0' }}>{tx('What is rewarded immediately gets repeated. The reward has to arrive now, not at the end of the month.', 'ما يُكافأ فورًا يتكرر. لا بد أن تصل المكافأة الآن، لا في آخر الشهر.')}</p>
           </div>
+          {rewards.length > 0 && (
+            <div className="proj-field">
+              <span>{tx('Pay it off against a reward', 'اجعلها تُموّل مكافأة')}</span>
+              <select className="time-input" value={h.rewardId || ''} onChange={(e) => onUpd({ rewardId: e.target.value || null })}>
+                <option value="">{tx('— none —', '— بدون —')}</option>
+                {rewards.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.cost}</option>)}
+              </select>
+              <p className="hint-text" style={{ margin: '4px 0 0' }}>{tx('Keeping the habit already earns points. Naming what they are for turns a number into something you actually wanted.', 'الالتزام بالعادة يكسب نقاطًا أصلًا. تسمية ما تُنفق عليه يحوّل الرقم إلى شيء أردته فعلًا.')}</p>
+            </div>
+          )}
           <div className="proj-field">
             <span>{tx('The two-minute version', 'نسخة الدقيقتين')}</span>
             <input className="projname" value={h.tiny || ''} onChange={(e) => onUpd({ tiny: e.target.value })}

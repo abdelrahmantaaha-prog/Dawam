@@ -16,9 +16,49 @@
 /*  fit on screen together is worse than a button.                     */
 /* ------------------------------------------------------------------ */
 import React, { useState } from 'react';
-import { ArrowLeft, Calendar, Check, ChevronLeft, ChevronRight, Columns3, Inbox, Lock, Plus, Trash2 } from 'lucide-react';
+import { ArrowLeft, Calendar, Check, CheckCircle2, ChevronLeft, ChevronRight, Circle, Columns3, Inbox, Lock, Plus, Trash2 } from 'lucide-react';
 import { DONE_COL, columnOf, columnsOf, groupByColumn, isMove, newColumn, toStored } from './board.js';
-import { bName, blockById, mon, tx, wd } from './core.jsx';
+import { isPast } from './calprep.js';
+import { bName, blockById, fmtTime, mon, pad, tx, wd } from './core.jsx';
+
+const clockOf = (ms) => { const d = new Date(ms); return fmtTime(`${pad(d.getHours())}:${pad(d.getMinutes())}`); };
+
+/* Meetings filed under this project.
+ *
+ * A rail rather than a column, because they cannot be moved: the feed is
+ * read-only and a card that refuses to be dragged sitting among cards that
+ * can be is a worse lie than not putting it there. What Rhythm CAN keep about
+ * one still lives here — whether you turned up, what it is for, and the page
+ * you wrote before walking in. */
+function Meetings({ meetings, calDone, prepFor, onOpen, onToggleDone }) {
+  if (!meetings.length) return null;
+  return (
+    <div className="kb-meetings">
+      <div className="kb-meetings-h">{tx('Meetings', 'الاجتماعات')} <span className="kb-col-n">{meetings.length}</span></div>
+      <div className="kb-meetings-rail">
+        {meetings.map((m) => {
+          const done = calDone(m);
+          const past = isPast(m);
+          const desc = prepFor(m);
+          return (
+            <div key={`${m.uid}-${m.startMs}`} className={`kb-meeting${done ? ' done' : ''}${past ? ' past' : ''}`}>
+              <button className="tcheck sm" onClick={() => onToggleDone(m)}
+                aria-label={tx('Mark attended', 'تم الحضور')}>{done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</button>
+              <button className="kb-meeting-main" onClick={() => onOpen(m)}>
+                <span className="kb-meeting-t">{m.summary || tx('(busy)', '(مشغول)')}</span>
+                <span className="kb-meeting-w">
+                  {wd(new Date(m.startMs).getDay())} {new Date(m.startMs).getDate()} {mon(new Date(m.startMs).getMonth())} · {clockOf(m.startMs)}
+                </span>
+                {desc ? <span className="kb-meeting-d">{desc}</span> : null}
+              </button>
+              <span className="kb-meeting-tag">{past ? tx('write up', 'التدوين') : tx('prepare', 'التحضير')}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 const neighbour = (cols, col, dir) => {
   const i = cols.findIndex((c) => c.id === col) + dir;
@@ -104,12 +144,21 @@ function ColumnEditor({ columns, onColumns, onClose }) {
   );
 }
 
-export function KanbanBoard({ project, cards, labels = [], onMove, onOpenTask, onBack, onAddTask, onColumns }) {
+export function KanbanBoard({
+  project, cards, labels = [], filterBar, cardFilter,
+  meetings = [], calDone, prepFor, onOpenMeeting, onToggleMeetingDone,
+  onMove, onOpenTask, onBack, onAddTask, onColumns,
+}) {
   const [dragging, setDragging] = useState(null);
   const [over, setOver] = useState(null);
   const [editing, setEditing] = useState(false);
   const columns = columnsOf(project);
-  const groups = groupByColumn(cards, columns);
+  /* Filtered before grouping, so a column's count matches what is under it.
+     Only the TAG dimension applies here — every card on this board is already
+     the one project, so filtering by project would either change nothing or
+     empty the board you deliberately opened. */
+  const shown = cardFilter ? (cards || []).filter(cardFilter) : (cards || []);
+  const groups = groupByColumn(shown, columns);
 
   const drop = (col) => {
     setOver(null);
@@ -124,7 +173,8 @@ export function KanbanBoard({ project, cards, labels = [], onMove, onOpenTask, o
         <button className="icon" onClick={onBack} aria-label={tx('Back to projects', 'العودة للمشاريع')}><ArrowLeft size={18} /></button>
         <span className="kb-dot" style={{ background: project.color }} />
         <strong className="kb-title">{project.name}</strong>
-        <span className="kb-count">{(cards || []).length} {tx('tasks', 'مهام')}</span>
+        <span className="kb-count">{shown.length}{shown.length !== (cards || []).length ? `/${(cards || []).length}` : ''} {tx('tasks', 'مهام')}</span>
+        {filterBar}
         {onColumns && (
           <button className="ghost sm" onClick={() => setEditing((v) => !v)}>
             <Columns3 size={14} /> {tx('Columns', 'الأعمدة')}
@@ -134,6 +184,11 @@ export function KanbanBoard({ project, cards, labels = [], onMove, onOpenTask, o
 
       {editing && onColumns && (
         <ColumnEditor columns={columns} onColumns={onColumns} onClose={() => setEditing(false)} />
+      )}
+
+      {onOpenMeeting && (
+        <Meetings meetings={meetings} calDone={calDone} prepFor={prepFor}
+          onOpen={onOpenMeeting} onToggleDone={onToggleMeetingDone} />
       )}
 
       <div className="kb-cols" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}>
