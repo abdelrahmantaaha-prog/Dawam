@@ -6,6 +6,7 @@ import { ACTIONS, MAX_PROPOSALS, MAX_SERIES, SERIES_DEFAULT_DAYS, seriesDates, p
 const IDS = {
   taskIds: ['t1', 't2'], poolIds: ['p1'], habitIds: ['h1'], projectIds: ['j1'], recurringIds: ['r1'],
   projects: [{ id: 'j1', name: 'The Book' }],
+  columns: [{ id: 'todo', name: 'To do', projectId: 'j1' }, { id: 'doing', name: 'Doing', projectId: 'j1' }, { id: 'done', name: 'Done', projectId: 'j1' }],
   todayISO: '2026-08-14',
 };
 
@@ -168,6 +169,11 @@ describe('the action table', () => {
     const sample = {
       add_task: { title: 'x', block: 'asr', date: '2026-08-15' },
       add_task_series: { title: 'x', block: 'asr', from: '2026-08-15' },
+      move_card: { taskId: 't1', column: 'Doing' },
+      open_board: { project: 'j1' },
+      add_column: { project: 'j1', name: 'Review' },
+      rename_column: { project: 'j1', column: 'todo', name: 'Inbox' },
+      delete_column: { project: 'j1', column: 'doing' },
       move_task: { taskId: 't1', block: 'asr', date: '2026-08-15' },
       edit_task: { taskId: 't1', title: 'renamed' },
       complete_task: { taskId: 't1' },
@@ -436,5 +442,45 @@ describe('naming a project the way a person does', () => {
     // Projects are few and deliberately named. Task titles are neither, so
     // matching those by text would be a coin toss between duplicates.
     expect(validateProposal({ kind: 'complete_task', taskId: 'Write the column' }, IDS)).toBe(null);
+  });
+});
+
+/* Board actions.
+
+   Columns are per project, so the validator can only prove a name exists on
+   SOME board — which project owns it is settled when the action is applied,
+   from the task or project the action already names. That is still a real
+   rail: a column nobody has never reaches the board. */
+describe('board actions', () => {
+  it('accepts a column by name or by id', () => {
+    expect(validateProposal({ kind: 'move_card', taskId: 't1', column: 'Doing' }, IDS).column).toBe('Doing');
+    expect(validateProposal({ kind: 'move_card', taskId: 't1', column: 'doing' }, IDS).column).toBe('doing');
+  });
+
+  it('refuses a column that exists on no board at all', () => {
+    expect(validateProposal({ kind: 'move_card', taskId: 't1', column: 'Blocked' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'delete_column', project: 'j1', column: 'Nope' }, IDS)).toBe(null);
+  });
+
+  it('still refuses a hallucinated task or project', () => {
+    expect(validateProposal({ kind: 'move_card', taskId: 'ghost', column: 'Doing' }, IDS)).toBe(null);
+    expect(validateProposal({ kind: 'open_board', project: 'ghost' }, IDS)).toBe(null);
+  });
+
+  it('names a project by its printed name here too', () => {
+    expect(validateProposal({ kind: 'open_board', project: 'The Book' }, IDS).project).toBe('j1');
+  });
+
+  it('describes each one without falling back to the raw kind', () => {
+    const names = { task: () => 'Chapter 4', project: () => 'The Book' };
+    for (const p of [
+      { kind: 'move_card', taskId: 't1', column: 'Doing' },
+      { kind: 'open_board', project: 'j1' },
+      { kind: 'add_column', project: 'j1', name: 'Review' },
+      { kind: 'rename_column', project: 'j1', column: 'todo', name: 'Inbox' },
+      { kind: 'delete_column', project: 'j1', column: 'doing' },
+    ]) {
+      expect(describeProposal(p, names), p.kind).not.toBe(p.kind);
+    }
   });
 });

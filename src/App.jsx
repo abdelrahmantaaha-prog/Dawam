@@ -16,7 +16,7 @@ import { calKey, loadCalDone, toggleCalDone, pruneCalDone } from './caldone.js';
 import { DayEvents } from './calview.jsx';
 import { CalendarView } from './calendarview.jsx';
 import { KanbanBoard } from './kanban.jsx';
-import { columnsOf, isMove, patchFor } from './board.js';
+import { DONE_COL, columnsOf, isMove, newColumn, patchFor, toStored } from './board.js';
 import { rangeOf } from './calgrid.js';
 import { loadCalProjects, setCalProject, pruneCalProjects } from './calproj.js';
 import { parseTaskText, describeParse } from './parse.js';
@@ -493,13 +493,13 @@ export default function Rhythm() {
     const scan = (wk, wsISO) => (wk?.tasks || []).forEach((tk) => {
       if (tk.projectRef === projId && !seen.has(tk.id)) {
         seen.add(tk.id);
-        out.push({ id: tk.id, title: tk.title, done: !!tk.done, board: tk.board || null, wsISO, day: tk.day, date: addDays(parseISO(wsISO), tk.day), block: tk.block, kind: 'task' });
+        out.push({ id: tk.id, title: tk.title, done: !!tk.done, board: tk.board || null, projectId: tk.projectId || null, wsISO, day: tk.day, date: addDays(parseISO(wsISO), tk.day), block: tk.block, kind: 'task' });
       }
     });
     const curISO = fmtISO(weekStart);
     scan(weekRef.current, curISO);
     Object.entries(weeksRef.current).forEach(([iso, wk]) => { if (iso !== curISO) scan(wk, iso); });
-    poolRef.current.forEach((it) => { if (it.projectRef === projId && !seen.has(it.id)) { seen.add(it.id); out.push({ id: it.id, title: it.title, done: !!it.done, board: it.board || null, wsISO: null, day: null, date: null, block: null, kind: 'pool' }); } });
+    poolRef.current.forEach((it) => { if (it.projectRef === projId && !seen.has(it.id)) { seen.add(it.id); out.push({ id: it.id, title: it.title, done: !!it.done, board: it.board || null, projectId: it.projectId || null, wsISO: null, day: null, date: null, block: null, kind: 'pool' }); } });
     out.sort((a, b) => (a.date && b.date ? a.date - b.date : a.date ? -1 : b.date ? 1 : 0));
     return { tasks: out, total: out.length, done: out.filter((x) => x.done).length };
   };
@@ -1850,6 +1850,10 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     projectIds: (settings.projects || []).map((p) => p.id),
     // Names too: the model routinely answers with the one the person said.
     projects: (settings.projects || []).map((p) => ({ id: p.id, name: p.name })),
+    // Every board column, so a proposal naming one that exists nowhere is
+    // dropped before it can be shown. Which project it belongs to is settled
+    // when the action is applied.
+    columns: (settings.projects || []).flatMap((p) => columnsOf(p).map((c) => ({ id: c.id, name: c.name, projectId: p.id }))),
     recurringIds: (templates || []).map((t) => t.id),
     todayISO: fmtISO(todayMid),
   });
@@ -1868,7 +1872,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       // exactly the set of ids chatIds() will accept, so the two agree.
       tasks: (week.tasks || []).slice().sort((a, b) => (a.day - b.day) || (a.order - b.order)).map((t) => ({
         id: t.id, date: fmtISO(addDays(weekStart, Number(t.day) || 0)),
-        block: t.block, time: timeLabel(t), done: t.done, title: t.title, project: projName(t),
+        block: t.block, time: timeLabel(t), done: t.done, title: t.title, project: projName(t), column: t.board || null,
         // Numbered rather than id'd: complete_step names a position, which
         // costs one integer instead of a uid per subtask in every snapshot.
         steps: (t.subtasks || []).map((sub) => ({ title: sub.title, done: !!sub.done })),
@@ -1881,7 +1885,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       projects: (settings.projects || []).map((p) => {
         const pc = projectPace(p);
         const status = p.completedAt ? 'completed' : pc.notStarted ? 'not started' : pc.onPace === true ? 'on pace' : pc.onPace === false ? 'behind' : 'in progress';
-        return { id: p.id, name: p.name, target: p.target, done: pc.done, unit: p.unit || 'units', status, perDay: pc.perDay ? Math.ceil(pc.perDay) : null, daysLeft: pc.daysLeft };
+        return { id: p.id, name: p.name, target: p.target, done: pc.done, unit: p.unit || 'units', status, perDay: pc.perDay ? Math.ceil(pc.perDay) : null, daysLeft: pc.daysLeft, columns: columnsOf(p) };
       }),
       labels: (settings.labels || []).map((l) => l.name),
       rewards: (settings.rewards || []).map((r) => ({ id: r.id, name: r.name, cost: r.cost })),
@@ -1950,6 +1954,24 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     return i >= 0 && i <= 6 ? i : -1;
   };
   const liveTask = (id) => (weekRef.current.tasks || []).find((t) => t.id === id) || null;
+
+  /* Which project a task belongs to — the board actions all need it, and a
+     task with no project has no board to be moved around. */
+  const projectRefOf = (taskId) => {
+    const t = liveTask(taskId);
+    if (t) return t.projectRef ? { projectRef: t.projectRef } : null;
+    const it = (poolRef.current || []).find((x) => x.id === taskId);
+    return it && it.projectRef ? { projectRef: it.projectRef } : null;
+  };
+
+  // A column named by id or by the name shown on the board.
+  const resolveColumn = (proj, name) => {
+    if (!proj || !name) return null;
+    const cols = columnsOf(proj);
+    const lower = String(name).toLowerCase();
+    const hit = cols.find((c) => c.id === name) || cols.find((c) => String(c.name).toLowerCase() === lower);
+    return hit ? hit.id : null;
+  };
 
   const applyAction = async (p) => {
     switch (p.kind) {
@@ -2091,6 +2113,52 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         if (!(settingsRef.current.projects || []).some((x) => x.id === p.projectId)) return false;
         updProjectItem(p.projectId, { completedAt: fmtISO(new Date()) });
         return true;
+
+      /* ---- project boards ---- */
+      case 'move_card': {
+        // The card's project decides which set of columns "column" is naming;
+        // validation only proved the name exists on SOME board.
+        const ref = projectRefOf(p.taskId);
+        if (!ref) return false;
+        const proj = (settingsRef.current.projects || []).find((x) => x.id === ref.projectRef);
+        const col = resolveColumn(proj, p.column);
+        if (!col) return false;
+        const card = projectTaskList(ref.projectRef).tasks.find((c) => c.id === p.taskId);
+        if (!card || !isMove(card, col, columnsOf(proj))) return false;
+        patchProjectTask(card, patchFor(col));
+        return true;
+      }
+      case 'open_board':
+        if (!(settingsRef.current.projects || []).some((x) => x.id === p.project)) return false;
+        setView('projects');
+        setBoardProject(p.project);
+        return true;
+      case 'add_column': {
+        const proj = (settingsRef.current.projects || []).find((x) => x.id === p.project);
+        if (!proj) return false;
+        const cols = columnsOf(proj).filter((c) => c.id !== DONE_COL);
+        updProjectItem(proj.id, { columns: toStored([...cols, { ...newColumn(p.name) }]) });
+        return true;
+      }
+      case 'rename_column': {
+        const proj = (settingsRef.current.projects || []).find((x) => x.id === p.project);
+        const col = resolveColumn(proj, p.column);
+        // Done is not a column anyone owns: it is appended, and its membership
+        // comes from each task's done flag rather than from the column field.
+        if (!proj || !col || col === DONE_COL) return false;
+        updProjectItem(proj.id, { columns: toStored(columnsOf(proj).map((c) => (c.id === col ? { ...c, name: p.name } : c))) });
+        return true;
+      }
+      case 'delete_column': {
+        const proj = (settingsRef.current.projects || []).find((x) => x.id === p.project);
+        const col = resolveColumn(proj, p.column);
+        if (!proj || !col || col === DONE_COL) return false;
+        const left = columnsOf(proj).filter((c) => c.id !== DONE_COL && c.id !== col);
+        // Cards need somewhere that is not Done.
+        if (!left.length) { flash(tx('A board needs one column besides Done.', 'تحتاج اللوحة عمودًا واحدًا غير «منجز».')); return false; }
+        updProjectItem(proj.id, { columns: toStored(left) });
+        return true;
+      }
 
       /* ---- points ---- */
       case 'add_reward': persistRewards((prev) => [...prev, { id: uid(), name: p.name, cost: p.cost }]); return true;
@@ -2888,6 +2956,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           <KanbanBoard
             project={proj}
             cards={projectTaskList(proj.id).tasks}
+            labels={settings.labels || []}
             onMove={moveBoardCard}
             onOpenTask={openProjectTask}
             onBack={() => setBoardProject(null)}

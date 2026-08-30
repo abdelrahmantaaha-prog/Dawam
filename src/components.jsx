@@ -116,13 +116,13 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
         const dBefore = taskDrop && taskDrop.taskId === t.id && !taskDrop.after;
         const dAfter = taskDrop && taskDrop.taskId === t.id && taskDrop.after;
         return (
-        <div key={t.id} data-taskid={t.id} className={`task ${t.done ? 'done' : ''} ${draggingId === t.id ? 'dragging' : ''} ${dBefore ? 'drop-before' : ''} ${dAfter ? 'drop-after' : ''}`}>
+        <div key={t.id} data-taskid={t.id} className={`task ${p ? 'has-label' : ''} ${t.done ? 'done' : ''} ${draggingId === t.id ? 'dragging' : ''} ${dBefore ? 'drop-before' : ''} ${dAfter ? 'drop-after' : ''}`} style={p ? { '--lcolor': p.color } : undefined}>
           <span className="grip" onPointerDown={(e) => onDragStart(e, 'task', t)} title={tx('Drag to reorder or move to another slot', 'اسحب لإعادة الترتيب أو النقل')}><GripVertical size={15} /></span>
           <button className="tcheck" onClick={() => onToggle(t.id)} aria-label="Toggle done">{t.done ? <CheckCircle2 size={18} /> : <Circle size={18} />}</button>
           <div className="tcol">
             <button className="tmain" onClick={() => onOpen(t.id)}>
-              <span className="ttitle">{t.title}{timeLabel(t) ? <span className="ttime">{timeLabel(t)}</span> : null}</span>
-              <span className="tmeta">{p && <span className="pdot" style={{ background: p.color }} />}{p && <span className="pname">{p.name}</span>}{t.notes && t.notes.length > 0 && <span className="badge"><StickyNote size={11} /> {t.notes.length}</span>}{hasVault(t) && <span className="badge vault-badge" title={tx('Time vault', 'خزنة موقّتة')}><Lock size={11} /></span>}</span>
+              <span className="ttitle">{p && <span className="lchip" style={{ '--lcolor': p.color }}>{p.name}</span>}{t.title}{timeLabel(t) ? <span className="ttime">{timeLabel(t)}</span> : null}</span>
+              {(t.notes?.length > 0 || hasVault(t)) && <span className="tmeta">{t.notes && t.notes.length > 0 && <span className="badge"><StickyNote size={11} /> {t.notes.length}</span>}{hasVault(t) && <span className="badge vault-badge" title={tx('Time vault', 'خزنة موقّتة')}><Lock size={11} /></span>}</span>}
             </button>
             {subs.length > 0 && (
               <button className="subs-fold" onClick={() => toggleFold(t.id)} aria-expanded={!folded.has(t.id)}>
@@ -264,7 +264,7 @@ function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labe
                 <button className="tcheck" onClick={() => onTogglePoolDone(it.id)} aria-label={tx('Mark done', 'وضع كمنجز')}>{it.done ? <CheckCircle2 size={17} /> : <Circle size={17} />}</button>
                 <button className="pool-main" onClick={() => onOpenPool(it.id)}>
                   <span className="pool-title">{it.title}</span>
-                  <span className="tmeta">{p && <span className="pdot" style={{ background: p.color }} />}{p && <span className="pname">{p.name}</span>}{it.subtasks && it.subtasks.length > 0 && <span className="badge"><CheckCircle2 size={11} /> {doneN}/{it.subtasks.length}</span>}</span>
+                  <span className="tmeta">{p && <span className="lchip" style={{ '--lcolor': p.color }}>{p.name}</span>}{it.subtasks && it.subtasks.length > 0 && <span className="badge"><CheckCircle2 size={11} /> {doneN}/{it.subtasks.length}</span>}</span>
                 </button>
                 <button className="tpl-act" title={tx('Schedule on the selected day', 'جدولة في اليوم المحدد')} onClick={() => onPoolToDay(it.id)}><CornerUpRight size={15} /></button>
               </li>); };

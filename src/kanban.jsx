@@ -25,7 +25,7 @@ const neighbour = (cols, col, dir) => {
   return i >= 0 && i < cols.length ? cols[i].id : null;
 };
 
-function Card({ card, columns, projectColor, onMove, onOpen, onDragStart }) {
+function Card({ card, columns, projectColor, label, onMove, onOpen, onDragStart }) {
   const col = columnOf(card, columns);
   const prev = neighbour(columns, col, -1);
   const next = neighbour(columns, col, 1);
@@ -33,11 +33,15 @@ function Card({ card, columns, projectColor, onMove, onOpen, onDragStart }) {
   return (
     <div
       className={`kb-card${card.done ? ' done' : ''}`}
-      style={{ borderInlineStartColor: projectColor }}
+      /* The label, not the project. Every card on a board belongs to the same
+         project, so a project-coloured edge told you nothing you could not
+         already see in the title above it. */
+      style={{ borderInlineStartColor: (label && label.color) || projectColor }}
       draggable
       onDragStart={(e) => { e.dataTransfer.setData('text/plain', card.id); e.dataTransfer.effectAllowed = 'move'; onDragStart(card); }}
     >
       <button type="button" className="kb-card-main" onClick={() => onOpen(card)}>
+        {label && <span className="lchip" style={{ '--lcolor': label.color }}>{label.name}</span>}
         <span className="kb-card-t">{card.title}</span>
         <span className="kb-card-m">
           {card.kind === 'pool'
@@ -100,7 +104,7 @@ function ColumnEditor({ columns, onColumns, onClose }) {
   );
 }
 
-export function KanbanBoard({ project, cards, onMove, onOpenTask, onBack, onAddTask, onColumns }) {
+export function KanbanBoard({ project, cards, labels = [], onMove, onOpenTask, onBack, onAddTask, onColumns }) {
   const [dragging, setDragging] = useState(null);
   const [over, setOver] = useState(null);
   const [editing, setEditing] = useState(false);
@@ -152,6 +156,7 @@ export function KanbanBoard({ project, cards, onMove, onOpenTask, onBack, onAddT
                   card={card}
                   columns={columns}
                   projectColor={project.color}
+                  label={card.projectId ? labels.find((l) => l.id === card.projectId) : null}
                   onMove={onMove}
                   onOpen={onOpenTask}
                   onDragStart={setDragging}

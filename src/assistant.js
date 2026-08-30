@@ -102,6 +102,18 @@ const TYPES = {
     const out = [...new Set(v.map((d) => String(d || '').slice(0, 3).toLowerCase()))].filter((d) => WEEKDAY_IDS.includes(d));
     return out.length ? out : null;
   },
+  /* A board column, by id or by the name printed beside it.
+     Columns are per project, so this can only check that the name exists
+     SOMEWHERE — which project it belongs to is settled at apply time, from the
+     task or project the action already names. That is still a real rail: a
+     column nobody has is refused here rather than reaching the board. */
+  column: (v, ctx) => {
+    const s = str(v);
+    if (!s) return null;
+    const cols = ctx.columns || [];
+    const lower = s.toLowerCase();
+    return cols.some((c) => c.id === s || String(c.name).toLowerCase() === lower) ? s : null;
+  },
   taskId: idIn('taskIds'),
   poolId: idIn('poolIds'),
   habitId: idIn('habitIds'),
@@ -167,6 +179,13 @@ export const ACTIONS = [
   { kind: 'add_project', fields: { name: 'text', target: 'count?', unit: 'text?', deadline: 'date?', goal: 'text?' }, doc: 'start a long-term project with a numeric target' },
   { kind: 'log_project', fields: { projectId: 'projectId', amount: 'amount', note: 'text?' }, doc: 'log progress against a project' },
   { kind: 'complete_project', fields: { projectId: 'projectId' }, doc: 'mark a project finished' },
+
+  // --- project boards ---
+  { kind: 'move_card', fields: { taskId: 'taskId', column: 'column' }, doc: "move a task to a column on its project's board; the Done column ticks it off" },
+  { kind: 'open_board', fields: { project: 'projectId' }, doc: "open a project's board" },
+  { kind: 'add_column', fields: { project: 'projectId', name: 'text' }, doc: 'add a column to a board' },
+  { kind: 'rename_column', fields: { project: 'projectId', column: 'column', name: 'text' }, doc: 'rename a board column' },
+  { kind: 'delete_column', fields: { project: 'projectId', column: 'column' }, doc: 'remove a board column; its cards fall back to the first column' },
 
   // --- points ---
   { kind: 'add_reward', fields: { name: 'text', cost: 'count' }, doc: 'add something points can buy' },
@@ -270,6 +289,10 @@ Rules:
   out unless they named an end — an omitted "until" already means one week,
   and inventing a date they did not give is worse than the default.
 - add_recurring only DEFINES a reusable task; it puts nothing on any day.
+- Every project has a board. Its columns are listed with the project, and
+  "Done" is on every board, cannot be renamed or removed, and means the task
+  is ticked off — so move_card to Done and complete_task are the same act.
+  Use whichever the person's words fit.
 - "project" attaches a task to a long-term project. Give its id or its exact
   name from the PROJECTS list. Whenever the request mentions something that
   appears in PROJECTS, that task MUST carry "project" — saying so in "reply"
@@ -324,7 +347,7 @@ export function buildDaySnapshot({
     let lastDate = null;
     for (const t of tasks) {
       if (t.date && t.date !== lastDate) { lastDate = t.date; L.push(`  --- ${t.date}${t.date === shownDate ? ' (the day on screen)' : ''} ---`); }
-      L.push(`  id=${t.id} block=${t.block} ${t.time ? `time=${t.time} ` : ''}done=${t.done ? 'yes' : 'no'} title="${t.title}"${t.project ? ` project="${t.project}"` : ''}`);
+      L.push(`  id=${t.id} block=${t.block} ${t.time ? `time=${t.time} ` : ''}done=${t.done ? 'yes' : 'no'} title="${t.title}"${t.project ? ` project="${t.project}"` : ''}${t.column ? ` column=${t.column}` : ''}`);
       // Numbered so complete_step can name one without every subtask id
       // having to be spelled out in the snapshot.
       const steps = Array.isArray(t.steps) ? t.steps : [];
@@ -349,7 +372,10 @@ export function buildDaySnapshot({
   L.push('');
   L.push('PROJECTS:');
   if (!projects || !projects.length) L.push('  (none)');
-  else for (const p of projects) L.push(`  id=${p.id} "${p.name}" ${p.target ? `${p.done}/${p.target} ${p.unit}` : '(no numeric target)'} ${p.status}${p.perDay ? ` need=${p.perDay}/day` : ''}${p.daysLeft != null ? ` daysLeft=${p.daysLeft}` : ''}`);
+  else for (const p of projects) {
+    L.push(`  id=${p.id} "${p.name}" ${p.target ? `${p.done}/${p.target} ${p.unit}` : '(no numeric target)'} ${p.status}${p.perDay ? ` need=${p.perDay}/day` : ''}${p.daysLeft != null ? ` daysLeft=${p.daysLeft}` : ''}`);
+    if (p.columns && p.columns.length) L.push(`    board columns: ${p.columns.map((c) => `${c.name}(${c.id})`).join(', ')}`);
+  }
   if (rewards && rewards.length) {
     L.push('');
     L.push(`POINTS: balance=${balance == null ? '?' : balance}`);
@@ -479,6 +505,12 @@ export function describeProposal(p, names = {}) {
     case 'add_project': return `${tx('New project', 'مشروع جديد')} ${q(p.name)}${p.target ? ` · ${p.target} ${p.unit || ''}`.trimEnd() : ''}`;
     case 'log_project': return `${tx('Log', 'سجّل')} ${p.amount > 0 ? '+' : ''}${p.amount} → ${J(p.projectId)}`;
     case 'complete_project': return `${tx('Complete project', 'أنهِ المشروع')}: ${J(p.projectId)}`;
+
+    case 'move_card': return `${tx('Move', 'انقل')} ${T(p.taskId)} → ${q(p.column)}`;
+    case 'open_board': return `${tx('Open the board for', 'افتح لوحة')} ${J(p.project)}`;
+    case 'add_column': return `${tx('New column', 'عمود جديد')} ${q(p.name)} → ${J(p.project)}`;
+    case 'rename_column': return `${tx('Rename column', 'أعد تسمية العمود')} ${q(p.column)} → ${q(p.name)} · ${J(p.project)}`;
+    case 'delete_column': return `${tx('Delete column', 'احذف العمود')} ${q(p.column)} · ${J(p.project)}`;
 
     case 'add_reward': return `${tx('New reward', 'مكافأة جديدة')} ${q(p.name)} · ${p.cost}`;
 
