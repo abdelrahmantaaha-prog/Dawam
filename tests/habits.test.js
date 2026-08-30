@@ -3,7 +3,7 @@
    tell someone deciding whether to bother today. These pin the numbers that
    survive a slip, and the one state worth shouting about. */
 import { describe, it, expect } from 'vitest';
-import { FULL, TINY, consistency, bestStreak, riskState, habitStats, nextMark, doneOn, wasTiny } from '../src/habits.js';
+import { FULL, TINY, consistency, bestStreak, riskState, habitStats, nextMark, doneOn, wasTiny, stackOrder, wouldCycle } from '../src/habits.js';
 import { fmtISO } from '../src/core.jsx';
 
 const TODAY = '2026-08-29';
@@ -128,5 +128,61 @@ describe('the log stays honest about which kind of day it was', () => {
     expect(doneOn(h, back(0))).toBe(true);
     expect(wasTiny(h, back(0))).toBe(true);
     expect(wasTiny(h, back(1))).toBe(false);
+  });
+});
+
+/* Habit stacking: "After [CURRENT HABIT], I will [NEW HABIT]".
+
+   Order carries the meaning here — a stacked habit listed above its own anchor
+   is a stack nobody can follow — so these are as much about sequence as about
+   the label. The cycle cases are not hypothetical: two habits can be set to
+   follow each other in two taps. */
+describe('stackOrder', () => {
+  const h = (id, after) => ({ id, name: id, after: after || null, log: {} });
+
+  it('puts a habit after its anchor', () => {
+    const out = stackOrder([h('b', 'a'), h('a')]);
+    expect(out.map((x) => x.id)).toEqual(['a', 'b']);
+  });
+
+  it('follows a chain of three', () => {
+    const out = stackOrder([h('c', 'b'), h('a'), h('b', 'a')]);
+    expect(out.map((x) => x.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('leaves unanchored habits in their own order', () => {
+    expect(stackOrder([h('a'), h('b'), h('c')]).map((x) => x.id)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('treats a prayer anchor as already satisfied', () => {
+    // The five prayers are the one thing here that happens every day at a
+    // known moment, which is exactly what an anchor is supposed to be.
+    expect(stackOrder([h('a', 'prayer:fajr')]).map((x) => x.id)).toEqual(['a']);
+  });
+
+  it('survives a cycle instead of recursing forever', () => {
+    const out = stackOrder([h('a', 'b'), h('b', 'a')]);
+    expect(out).toHaveLength(2);
+    expect(out.map((x) => x.id).sort()).toEqual(['a', 'b']);
+  });
+
+  it('loses nothing when an anchor was deleted', () => {
+    const out = stackOrder([h('a', 'ghost'), h('b')]);
+    expect(out.map((x) => x.id).sort()).toEqual(['a', 'b']);
+  });
+});
+
+describe('wouldCycle', () => {
+  const h = (id, after) => ({ id, name: id, after: after || null });
+  it('refuses a habit anchored to itself', () => {
+    expect(wouldCycle([h('a')], 'a', 'a')).toBe(true);
+  });
+  it('refuses a choice that would close a loop', () => {
+    expect(wouldCycle([h('a'), h('b', 'a')], 'a', 'b')).toBe(true);
+  });
+  it('allows an ordinary anchor', () => {
+    expect(wouldCycle([h('a'), h('b')], 'b', 'a')).toBe(false);
+    expect(wouldCycle([h('a')], 'a', 'prayer:fajr')).toBe(false);
+    expect(wouldCycle([h('a')], 'a', null)).toBe(false);
   });
 });

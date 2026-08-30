@@ -65,7 +65,18 @@
 .now-jump{margin-top:8px;font-size:12px;font-weight:600;color:var(--verdigris);background:none;border:1px solid var(--verdigris);border-radius:8px;padding:5px 11px;cursor:pointer}
 .now-jump:hover{background:rgba(62,138,108,.10)}
 
-.hdr{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;background:rgba(244,250,246,.9);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:14px;padding:10px 14px}
+/* Sticky, not fixed: it keeps its place in the flow, so nothing has to be
+   padded down by a magic number that goes wrong the moment the bar wraps to
+   two lines on a narrow screen. --hdr-h is what the views below hang their own
+   sticky bars from. */
+/* Set for real on :root by a ResizeObserver on the header; this is only the
+   value used before the first measurement.
+
+   Declared on :root ONLY. Repeating it on .rhythm would shadow the measured
+   value for the whole subtree that uses it — a custom property set on an
+   ancestor loses to any declaration on a descendant. */
+:root{--hdr-h:64px}
+.hdr{position:sticky;top:8px;z-index:30;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;background:rgba(244,250,246,.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--line);border-radius:14px;padding:10px 14px}
 .brand{display:flex;align-items:center;gap:11px}
 .brand-en{display:flex;flex-direction:column;line-height:1.15}
 .brand-en strong{font-family:'Cormorant',serif;font-weight:600;font-size:17px}.brand-en span{font-size:11.5px;color:var(--faint)}
@@ -977,6 +988,8 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 
 /* ---- Habits, Atomic-Habits shaped ---- */
 .habit-identity{display:block;font-size:10.5px;font-weight:700;letter-spacing:.02em;color:var(--verdigris);margin-bottom:1px}
+.habit-after{display:block;font-size:10.5px;font-weight:700;color:var(--muted);margin-top:2px}
+.habit-reward{margin-top:7px;padding:6px 10px;border-radius:9px;background:var(--soft);font-size:11.5px;font-weight:700;color:var(--verdigris)}
 .habit-cue{display:block;font-size:10.5px;color:var(--faint);margin-top:2px}
 .habit-cons{margin-inline-start:8px;font-size:10.5px;font-weight:800;color:var(--muted);font-variant-numeric:tabular-nums}
 .habit-best{margin-inline-start:6px;font-size:10px;font-weight:700;color:var(--faint)}
@@ -992,19 +1005,26 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 /* ---- Kanban board ----
    Three columns that scroll horizontally on a phone rather than squeezing to
    nothing: a card you cannot read is not a board. */
-.kb{max-width:1100px;margin:0 auto;padding:0 12px 90px}
-.kb-head{display:flex;align-items:center;gap:9px;padding:12px 0}
+.kb{max-width:1100px;margin:0 auto;padding:0 12px}
+/* Under the app bar, above the board. Both bars stay put and only the cards
+   move, which is the whole point of a board — you lose your place the moment
+   the column headers scroll off. */
+.kb-head{position:sticky;top:calc(var(--hdr-h) + 8px);z-index:12;display:flex;align-items:center;gap:9px;padding:12px 0;
+  background:var(--surface);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 .kb-dot{width:11px;height:11px;border-radius:50%;flex-shrink:0}
 .kb-title{font-size:16px;font-weight:800;color:var(--ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .kb-count{font-size:11px;font-weight:700;color:var(--muted)}
 
-.kb-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:start}
-.kb-col{display:flex;flex-direction:column;min-height:180px;border:1px solid var(--line);border-radius:12px;background:var(--soft);overflow:hidden}
+.kb-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:stretch}
+/* A bounded height is what makes the body scrollable at all — without it the
+   column grows and the page scrolls instead, which is the thing being fixed. */
+.kb-col{display:flex;flex-direction:column;min-height:200px;height:calc(100vh - var(--hdr-h) - 236px);
+  border:1px solid var(--line);border-radius:12px;background:var(--soft);overflow:hidden}
 .kb-col.over{border-color:var(--verdigris);background:var(--panel)}
-.kb-col-h{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:8px 11px;border-bottom:1px solid var(--line);
-  font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.kb-col-h{position:sticky;top:0;z-index:2;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:8px 11px;border-bottom:1px solid var(--line);
+  background:var(--soft);font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .kb-col-n{background:var(--panel);border-radius:9px;padding:1px 7px;font-size:11px;color:var(--ink)}
-.kb-col-body{display:flex;flex-direction:column;gap:7px;padding:9px}
+.kb-col-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:7px;padding:9px}
 
 .kb-card{display:flex;align-items:stretch;gap:4px;border:1px solid var(--line);border-inline-start:3px solid var(--verdigris);
   border-radius:10px;background:var(--panel);cursor:grab}
@@ -1039,13 +1059,27 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .kb-add:hover{border-color:var(--verdigris);color:var(--verdigris)}
 .kb-hint{max-width:520px;margin:14px auto 0;text-align:center}
 
+/* A project card shows the shape of the work, not a second task list. */
+.proj-lanebar{display:flex;gap:2px;height:7px;margin:8px 0 6px;border-radius:99px;overflow:hidden;background:var(--soft)}
+.proj-laneseg{background:var(--pcolor,var(--verdigris));opacity:.55;border-radius:99px;min-width:5px}
+.proj-laneseg.done{opacity:1}
+.proj-lanekeys{display:flex;flex-wrap:wrap;gap:10px}
+.proj-lanekey{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;font-weight:700;color:var(--muted)}
+.proj-lanedot{width:7px;height:7px;border-radius:50%;background:var(--pcolor,var(--verdigris));opacity:.55}
+.proj-lanedot.done{opacity:1}
+.proj-numbers{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.proj-num{padding:3px 8px;border-radius:8px;background:var(--soft);font-size:11px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
+.proj-num strong{color:var(--ink);font-size:12.5px}
+.proj-num.strong{background:var(--pcolor,var(--verdigris));color:#fff}
+
 .proj-board-btn{margin-inline-start:auto;display:inline-flex;align-items:center;gap:5px}
 .proj-lanes{font-variant-numeric:tabular-nums;font-size:10.5px;color:var(--faint);font-weight:700}
 .proj-tasks-h{display:flex;align-items:center;gap:8px}
 
 @media (max-width:640px){
   .kb-cols{grid-template-columns:repeat(3,78vw);overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:6px}
-  .kb-col{scroll-snap-align:start}
+  .kb-col{scroll-snap-align:start;height:calc(100vh - var(--hdr-h) - 250px)}
+  .kb-head{top:calc(var(--hdr-h) + 4px)}
 }
 
 /* ---- Calendar view (Day / Week / Month) ----
@@ -1053,7 +1087,8 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
    an event's top and height are just minutes x a constant — no flex maths that
    drifts as the window resizes. */
 .calv{max-width:1100px;margin:0 auto;padding:0 12px 90px;display:flex;flex-direction:column;min-height:0}
-.calv-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:10px 0}
+.calv-head{position:sticky;top:calc(var(--hdr-h) + 8px);z-index:12;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;
+  background:var(--surface);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
 .calv-nav{display:flex;align-items:center;gap:6px}
 .calv-title{font-size:15px;font-weight:800;color:var(--ink);min-width:150px;text-align:center}
 .calv-modes{flex-shrink:0}

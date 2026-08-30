@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Rows3 } from 'lucide-react';
 import { boardSummary, columnsOf } from './board.js';
-import { TINY, habitStats, wasTiny } from './habits.js';
+import { TINY, habitStats, isPrayerAnchor, stackOrder, wouldCycle } from './habits.js';
 import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 
@@ -30,13 +30,15 @@ function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, onA
           </div>
         )}
         {BLOCKS.map((b) => {
-          const group = habits.filter((h) => (h.block || 'morning') === b.id);
+          // Stacked habits follow their anchor: a stack listed out of order is
+          // a stack nobody can follow.
+          const group = stackOrder(habits.filter((h) => (h.block || 'morning') === b.id));
           if (!group.length) return null;
           return (
             <div key={b.id} className="habit-group">
               <div className="habit-group-h blk-ink" style={{ '--bi-light': b.accentDeep, '--bi-dark': b.accent }}>{bName(b)}{bSub(b) ? ` · ${bSub(b)}` : ''}</div>
               {group.map((h) => (
-                <HabitCard key={h.id} h={h} todayISO={todayISO} open={openId === h.id}
+                <HabitCard key={h.id} id={`habit-${h.id}`} h={h} habits={habits} todayISO={todayISO} open={openId === h.id}
                   onOpen={() => setOpenId(openId === h.id ? null : h.id)}
                   onUpd={(patch) => onUpd(h.id, patch)} onDel={() => { onDel(h.id); setOpenId(null); }}
                   onToggle={(iso) => onToggleDay(h.id, iso)} onFocus={(mins) => onFocus(h, mins)}
@@ -45,13 +47,23 @@ function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, onA
             </div>
           );
         })}
-        <button className="plan-day-btn proj-add" onClick={() => { const nh = onAdd(); setOpenId(nh.id); }}><Plus size={15} /> {tx('New habit', 'عادة جديدة')}</button>
+        <button className="plan-day-btn proj-add" onClick={() => {
+          const nh = onAdd();
+          setOpenId(nh.id);
+          // It lands in whichever period it defaults to, which is rarely the
+          // one you were looking at — so go to it rather than leaving the
+          // person to hunt for an editor that opened off-screen.
+          requestAnimationFrame(() => {
+            const el = document.getElementById(`habit-${nh.id}`);
+            if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          });
+        }}><Plus size={15} /> {tx('New habit', 'عادة جديدة')}</button>
       </div>
     </div>
   );
 }
 
-function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus, onMarkTiny = () => {} }) {
+function HabitCard({ id, h, habits = [], todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus, onMarkTiny = () => {} }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const isPrayer = !!h.prayer; // built-in, derived from the prayer log
   const streak = habitStreak(h, todayISO);
@@ -59,11 +71,16 @@ function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus,
   const doneToday = habitDoneOn(h, todayISO);
   const stats = habitStats(h, todayISO, 30);
   const tiny = String(h.tiny || '').trim();
+  const anchor = h.after
+    ? (isPrayerAnchor(h.after)
+      ? `${bName(blockById(h.after.slice(7)))} ${tx('prayer', 'صلاة')}`
+      : (habits.find((x) => x.id === h.after) || {}).name)
+    : null;
   // last 7 days, oldest → newest
   const today = parseISO(todayISO);
   const week = Array.from({ length: 7 }, (_, i) => { const d = addDays(today, i - 6); return { iso: fmtISO(d), d, done: habitDoneOn(h, fmtISO(d)) }; });
   return (
-    <div className={`habit-card glow-${glow}`} style={{ '--hcolor': h.color }}>
+    <div id={id} className={`habit-card glow-${glow}`} style={{ '--hcolor': h.color }}>
       <div className="habit-top">
         <button className={`habit-check ${doneToday ? 'on' : ''}`} onClick={() => onToggle(todayISO)} aria-label={tx('Toggle today', 'تبديل اليوم')}>
           {doneToday ? <CheckCircle2 size={22} /> : <Circle size={22} />}
@@ -79,6 +96,7 @@ function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus,
             {stats.consistency.of >= 7 ? <span className="habit-cons">{stats.consistency.pct}% · {stats.consistency.kept}/{stats.consistency.of}</span> : null}
             {stats.best > streak ? <span className="habit-best">{tx('best', 'الأفضل')} {stats.best}</span> : null}
           </span>
+          {anchor ? <span className="habit-after">{tx('After', 'بعد')} {anchor}</span> : null}
           {h.cue ? <span className="habit-cue">{h.cue}</span> : null}
         </button>
         <ChevronDown size={16} className="proj-caret" style={{ transform: open ? 'rotate(180deg)' : 'none' }} onClick={onOpen} />
@@ -112,6 +130,7 @@ function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus,
           {tx('Too little time?', 'وقتك ضيّق؟')} <strong>{tiny}</strong>
         </button>
       )}
+      {h.reward && stats.doneToday ? <div className="habit-reward">{tx('Now:', 'الآن:')} {h.reward}</div> : null}
       {stats.tinyToday && <div className="habit-tinytag">{tx('kept small today — still counts', 'أُنجزت مصغّرة اليوم — وتُحتسب')}</div>}
       {open && (
         <div className="proj-edit">
@@ -130,10 +149,33 @@ function HabitCard({ h, todayISO, open, onOpen, onUpd, onDel, onToggle, onFocus,
             <p className="hint-text" style={{ margin: '4px 0 0' }}>{tx('Every time you keep it, it is a vote for this. The goal is not to read a book — it is to become a reader.', 'كل مرة تلتزم بها هي صوت لصالح هذا. الهدف ليس قراءة كتاب — بل أن تصير قارئًا.')}</p>
           </div>
           <div className="proj-field">
+            <span>{tx('Stack it after', 'اربطها بعد')}</span>
+            <select className="time-input" value={h.after || ''} onChange={(e) => onUpd({ after: e.target.value || null })}>
+              <option value="">{tx('— nothing —', '— لا شيء —')}</option>
+              <optgroup label={tx('Prayers', 'الصلوات')}>
+                {PRAYER_BLOCKS.map((pid) => <option key={pid} value={`prayer:${pid}`}>{tx('After', 'بعد')} {bName(blockById(pid))}</option>)}
+              </optgroup>
+              {habits.filter((x) => x.id !== h.id && !x.prayer && !wouldCycle(habits, h.id, x.id)).length > 0 && (
+                <optgroup label={tx('Habits', 'العادات')}>
+                  {habits.filter((x) => x.id !== h.id && !x.prayer && !wouldCycle(habits, h.id, x.id)).map((x) => (
+                    <option key={x.id} value={x.id}>{tx('After', 'بعد')} {x.name}</option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <p className="hint-text" style={{ margin: '4px 0 0' }}>{tx('A new habit needs an old one to hang on. Pick something that already happens without fail — the prayers are the surest anchors here.', 'العادة الجديدة تحتاج قديمة تتعلق بها. اختر ما يحدث بالفعل دون تخلّف — والصلوات أضمن المراسي هنا.')}</p>
+          </div>
+          <div className="proj-field">
             <span>{tx('What triggers it', 'ما الذي يبدؤها')}</span>
             <input className="projname" value={h.cue || ''} onChange={(e) => onUpd({ cue: e.target.value })}
               placeholder={tx('After Fajr, at the desk', 'بعد الفجر، على المكتب')} />
             <p className="hint-text" style={{ margin: '4px 0 0' }}>{tx('A habit needs a moment to hang on. Name the one that already happens every day — the period above is half of it; this is the rest.', 'العادة تحتاج لحظة تتعلق بها. سمِّ ما يحدث يوميًا بالفعل — الفترة أعلاه نصف الأمر، وهذا باقيه.')}</p>
+          </div>
+          <div className="proj-field">
+            <span>{tx('What you get right after', 'ما تناله مباشرة بعدها')}</span>
+            <input className="projname" value={h.reward || ''} onChange={(e) => onUpd({ reward: e.target.value })}
+              placeholder={tx('Coffee on the balcony', 'قهوة في الشرفة')} />
+            <p className="hint-text" style={{ margin: '4px 0 0' }}>{tx('What is rewarded immediately gets repeated. The reward has to arrive now, not at the end of the month.', 'ما يُكافأ فورًا يتكرر. لا بد أن تصل المكافأة الآن، لا في آخر الشهر.')}</p>
           </div>
           <div className="proj-field">
             <span>{tx('The two-minute version', 'نسخة الدقيقتين')}</span>
@@ -251,29 +293,54 @@ function ProjectCard({ p, open, onOpen, onUpd, onDel, onLog, taskInfo, onToggleT
         {pace.projectedEnd && <span className="proj-stat"><Flag size={12} /> {tx('finishing', 'الانتهاء')} ~{pace.projectedEnd.getDate()} {mon(pace.projectedEnd.getMonth())}</span>}
       </div>}
 
-      {tasks.length > 0 && (
+      {/* A summary, not a second task list.
+            It used to list eight tasks here — a worse copy of the board that
+            was one tap away, and one that pushed every other project off the
+            screen. What a project card is for is the shape of the thing: how
+            much is left, how much is moving, and whether the number is on
+            track. The board is where individual tasks are worked. */}
+      {(tasks.length > 0 || hasTarget) && (
         <div className="proj-tasks">
           <div className="proj-tasks-h">
-            {tx('Tasks', 'المهام')} <span className="proj-rollup">{taskInfo.done}/{taskInfo.total} {tx('done', 'منجز')}</span>
+            {tx('Inside', 'بالداخل')}
+            {tasks.length > 0 && <span className="proj-rollup">{taskInfo.done}/{taskInfo.total} {tx('done', 'منجز')}</span>}
             {onBoard && (
               <button className="ghost sm proj-board-btn" onClick={onBoard}>
-                <Rows3 size={13} /> {tx('Board', 'اللوحة')}
-                <span className="proj-lanes">{lanes.lanes.map((l) => l.n).join('/')}</span>
+                <Rows3 size={13} /> {tx('Open board', 'افتح اللوحة')}
               </button>
             )}
           </div>
-          <ul className="proj-task-list">
-            {tasks.slice(0, 8).map((tk) => (
-              <li key={tk.id} className={`proj-task ${tk.done ? 'done' : ''}`}>
-                <button className="tcheck sm" onClick={() => onToggleTask(tk)} aria-label="Toggle done">{tk.done ? <CheckCircle2 size={15} /> : <Circle size={15} />}</button>
-                <button className="proj-task-main" onClick={() => onOpenTask(tk)}>
-                  <span className="proj-task-title">{tk.title}</span>
-                  <span className="proj-task-date">{tk.kind === 'pool' ? tx('backlog', 'الانتظار') : `${wd(tk.date.getDay())} ${tk.date.getDate()} ${mon(tk.date.getMonth())}`}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-          {tasks.length > 8 && <div className="hint-text" style={{ margin: '2px 0 0' }}>{tx('+ more', '+ المزيد')} {tasks.length - 8}</div>}
+
+          {tasks.length > 0 && (
+            <>
+              <div className="proj-lanebar" role="img"
+                aria-label={lanes.lanes.map((l) => `${l.n} ${l.name}`).join(', ')}>
+                {lanes.lanes.map((l) => (l.n > 0 ? (
+                  <span key={l.id} className={`proj-laneseg ${l.id === 'done' ? 'done' : ''}`}
+                    style={{ flexGrow: l.n }} title={`${l.name}: ${l.n}`} />
+                ) : null))}
+              </div>
+              <div className="proj-lanekeys">
+                {lanes.lanes.filter((l) => l.n > 0).map((l) => (
+                  <span key={l.id} className="proj-lanekey">
+                    <span className={`proj-lanedot ${l.id === 'done' ? 'done' : ''}`} />{l.n} {l.name}
+                  </span>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* The number, said plainly. A target with no arithmetic next to it
+              is a wish; this is the remainder and the rate it needs. */}
+          {hasTarget && !completed && (
+            <div className="proj-numbers">
+              <span className="proj-num"><strong>{pace.done}</strong>/{p.target} {unit}</span>
+              <span className="proj-num">{Math.max(0, (Number(p.target) || 0) - pace.done)} {tx('to go', 'متبقٍ')}</span>
+              {pace.expected != null && <span className="proj-num">{tx('expected by now', 'المتوقع الآن')} {Math.round(pace.expected)}</span>}
+              {pace.perDay ? <span className="proj-num strong">{Math.ceil(pace.perDay)} {unit}/{tx('day', 'يوم')}</span> : null}
+              {pace.daysLeft != null && <span className="proj-num">{pace.daysLeft} {tx('days left', 'يوم متبقٍ')}</span>}
+            </div>
+          )}
         </div>
       )}
 

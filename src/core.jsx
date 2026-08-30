@@ -351,7 +351,7 @@ const LABEL_ICON = null;
    contact with a planner: who this makes you, what triggers it, and the
    two-minute version you can still do on the worst day. All optional — a
    habit with only a name works exactly as it always did. */
-const newHabit = () => ({ id: uid(), name: tx('New habit', 'عادة جديدة'), color: LABEL_SWATCHES[Math.floor(Math.random() * LABEL_SWATCHES.length)], block: 'morning', createdAt: fmtISO(new Date()), log: {}, identity: '', cue: '', tiny: '' });
+const newHabit = () => ({ id: uid(), name: tx('New habit', 'عادة جديدة'), color: LABEL_SWATCHES[Math.floor(Math.random() * LABEL_SWATCHES.length)], block: 'morning', createdAt: fmtISO(new Date()), log: {}, identity: '', cue: '', tiny: '', after: null, reward: '' });
 const habitDoneOn = (h, iso) => !!(h.log && h.log[iso]);
 function habitStreak(h, uptoISO) {
   const upto = uptoISO ? parseISO(uptoISO) : (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })();

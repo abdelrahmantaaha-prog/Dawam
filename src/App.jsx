@@ -1616,6 +1616,22 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     return () => { cancelled = true; };
   }, [ready, boardProject, settings.weekStartDay]);
 
+  /* Every sticky bar below the app header hangs off --hdr-h, and the header
+     wraps to two lines on a narrow screen — a hard-coded height would let the
+     board's own bar slide underneath it exactly where the screen is smallest.
+     Measured instead, and kept measured. */
+  const hdrRef = useRef(null);
+  useEffect(() => {
+    const el = hdrRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const apply = () => document.documentElement.style.setProperty('--hdr-h', `${Math.round(el.getBoundingClientRect().height)}px`);
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    window.addEventListener('resize', apply);
+    return () => { ro.disconnect(); window.removeEventListener('resize', apply); };
+  }, [ready]);
+
   useEffect(() => { if (view !== 'projects') setBoardProject(null); }, [view]);
 
   const moveBoardCard = useCallback((card, col) => {
@@ -2414,7 +2430,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           </svg>
         ))}
       </div>
-      <header className="hdr">
+      <header className="hdr" ref={hdrRef}>
         <div className="brand">
           <AppIcon size={36} />
           <div className="brand-en"><strong>Rhythm <span className="ver-tag">v{APP_VERSION}</span></strong><span>{tx('plan your day around the day', 'خطّط يومك حول اليوم')}</span></div>

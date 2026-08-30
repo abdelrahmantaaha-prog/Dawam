@@ -104,6 +104,65 @@ export function habitStats(h, todayISO, days = 30) {
   };
 }
 
+/* ------------------------------------------------------------------ */
+/*  Habit stacking                                                     */
+/* ------------------------------------------------------------------ */
+/* "After [CURRENT HABIT], I will [NEW HABIT]." The book's point is that a new
+   habit needs an existing one to hang on, and the anchor has to be something
+   that already happens without fail — which is why the five prayers are
+   offerable as anchors here alongside real habits. They are the one thing in
+   this app that genuinely happens every day at a known moment.
+
+   Order matters as much as the label: a stacked habit listed above its own
+   anchor is a stack you cannot follow. */
+
+export const isPrayerAnchor = (id) => typeof id === 'string' && id.startsWith('prayer:');
+
+/* Habits ordered so every one follows its anchor.
+ *
+ * Cycle-safe, and that is not hypothetical: two habits can each be set to
+ * follow the other in two taps, and a naive walk would recurse until the stack
+ * overflowed. Anything caught in a cycle is emitted in its original position
+ * with its anchor ignored rather than dropped — losing a habit off the screen
+ * would be far worse than showing it unstacked. */
+export function stackOrder(habits) {
+  const list = habits || [];
+  const byId = new Map(list.map((h) => [h.id, h]));
+  const out = [];
+  const placed = new Set();
+  const visiting = new Set();
+
+  const place = (h) => {
+    if (placed.has(h.id)) return;
+    if (visiting.has(h.id)) return;      // a cycle: stop, the caller emits it
+    visiting.add(h.id);
+    const anchor = h.after && !isPrayerAnchor(h.after) ? byId.get(h.after) : null;
+    if (anchor) place(anchor);
+    visiting.delete(h.id);
+    if (!placed.has(h.id)) { placed.add(h.id); out.push(h); }
+  };
+
+  for (const h of list) place(h);
+  return out;
+}
+
+/* True when following this anchor would close a loop — used to keep the
+   editor from offering a choice that cannot mean anything. */
+export function wouldCycle(habits, id, anchorId) {
+  if (!anchorId || isPrayerAnchor(anchorId)) return false;
+  if (anchorId === id) return true;
+  const byId = new Map((habits || []).map((h) => [h.id, h]));
+  const seen = new Set();
+  let cur = byId.get(anchorId);
+  while (cur && cur.after && !isPrayerAnchor(cur.after)) {
+    if (cur.after === id) return true;
+    if (seen.has(cur.after)) return false;   // a pre-existing loop, not ours
+    seen.add(cur.after);
+    cur = byId.get(cur.after);
+  }
+  return false;
+}
+
 /* The next mark for a day, cycling through the three states a day can be in.
    Returns undefined for "clear it", which is what the caller deletes on. */
 export function nextMark(current, { hasTiny }) {
