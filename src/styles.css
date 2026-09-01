@@ -1078,6 +1078,39 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .note-body code{background:rgba(0,0,0,.07);padding:1px 5px;border-radius:5px;font-size:.9em}
 .note-sheet-foot{display:flex;align-items:center;justify-content:space-between;gap:9px;padding:9px 12px;border-top:1px solid rgba(0,0,0,.10)}
 
+/* ---- Notes at night ----
+   A notebook keeps its own paper colour in the dark — that part was already
+   deliberate. What was not: the blanket dark-mode rules went on repainting
+   the controls STANDING on that paper. ".rhythm.dark .icon" put a #161C25
+   chip behind the toolbar's #1E332C glyphs (1.06:1 — bold, italic and the
+   rest were simply not there), and ".rhythm.dark input" turned the title
+   into a dark box on a pale sheet.
+
+   So rather than restate every control, hand the paper back the daylight
+   palette. Custom properties inherit, so .icon's var(--panel)/var(--line)/
+   var(--muted) resolve to their light values inside the sheet, a note that
+   somehow carries no colour falls back to pale paper instead of the dark
+   panel, and a control added here later comes out right with no new rule.
+   color-scheme travels with them, for the caret and the body's scrollbar. */
+.rhythm.dark .note-sheet,
+.rhythm.dark .note-card{
+  --ink:#1E332C; --muted:#6B8577; --faint:#A8C2B2; --line:#A9CBB4;
+  --panel:#F4FAF6; --soft:rgba(107,133,119,.10);
+  color-scheme:light;
+}
+/* Both sets of buttons on the sheet ask for ink rather than the .icon
+   default of muted, and ".rhythm.dark .icon" is one class heavier than the
+   rules that say so. :not(.on) leaves the lit pin its verdigris. */
+.rhythm.dark .note-sheet .icon:not(.on){color:var(--ink)}
+/* The two dark rules that hardcode a colour rather than read a token, which
+   is why the palette above cannot reach them on its own. */
+.rhythm.dark .note-sheet input{background:none;color:var(--ink)}
+.rhythm.dark .note-sheet .danger{color:#B23A3A;border-color:#E4C4C4}
+.rhythm.dark .note-sheet .danger:hover{background:#FBEAEA}
+/* The wall's search box is not paper — it belongs to the dark page. It only
+   needs to stop being a second, darker rectangle inside its own pill. */
+.rhythm.dark .note-search input{background:none}
+
 /* ---- notebooks listed inside a task ---- */
 .nb-list{margin-top:12px;padding-top:11px;border-top:1px solid var(--line)}
 .nb-head{font-size:10.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:7px}
@@ -1176,10 +1209,23 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .kb-title{font-size:16px;font-weight:800;color:var(--ink);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .kb-count{font-size:11px;font-weight:700;color:var(--muted)}
 
-.kb-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:stretch}
+/* Columns share the width while they comfortably fit and stop shrinking at a
+   card's readable width; past that the row scrolls sideways. Sized by
+   auto-flow rather than a repeat() of the column count, because the count is
+   the board's to choose — five columns on a laptop used to squeeze exactly
+   the way four did on a phone.
+
+   200px is picked against the page, not by eye: .rhythm caps the app at
+   920px, so the four columns a board starts with land at ~216px each and
+   still fill the width with no scrollbar. A fifth column is what first drops
+   below the minimum, and that is the point where scrolling beats squeezing. */
+.kb-cols{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(200px,1fr);gap:10px;align-items:stretch;
+  overflow-x:auto;overscroll-behavior-x:contain;padding-bottom:6px}
 /* A bounded height is what makes the body scrollable at all — without it the
-   column grows and the page scrolls instead, which is the thing being fixed. */
-.kb-col{display:flex;flex-direction:column;min-height:200px;height:calc(100vh - var(--hdr-h) - 236px);
+   column grows and the page scrolls instead, which is the thing being fixed.
+   dvh, not vh: on a phone vh is measured against the browser chrome retracted,
+   so the bottom of every column sat under the address bar. */
+.kb-col{display:flex;flex-direction:column;min-height:200px;height:calc(100dvh - var(--hdr-h) - 236px);
   border:1px solid var(--line);border-radius:12px;background:var(--soft);overflow:hidden}
 .kb-col.over{border-color:var(--verdigris);background:var(--panel)}
 .kb-col-h{position:sticky;top:0;z-index:2;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:8px 11px;border-bottom:1px solid var(--line);
@@ -1241,9 +1287,15 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .proj-tasks-h{display:flex;align-items:center;gap:8px}
 
 @media (max-width:640px){
-  .kb-cols{grid-template-columns:repeat(3,78vw);overflow-x:auto;scroll-snap-type:x mandatory;padding-bottom:6px}
-  .kb-col{scroll-snap-align:start;height:calc(100vh - var(--hdr-h) - 250px)}
-  .kb-head{top:calc(var(--hdr-h) + 4px)}
+  /* One column at a time, with the edge of the next one showing so the board
+     reads as a row you can push along rather than a page that ends. */
+  .kb-cols{grid-auto-columns:78vw;scroll-snap-type:x mandatory}
+  .kb-col{scroll-snap-align:start;height:calc(100dvh - var(--hdr-h) - 250px)}
+  /* The title had flex:1 against five other controls, so on a phone it was
+     the one thing squeezed to nothing and the board lost its own name. Let
+     the head wrap and give the title a width it will not go under. */
+  .kb-head{top:calc(var(--hdr-h) + 4px);flex-wrap:wrap;row-gap:7px}
+  .kb-title{flex:1 1 140px}
 }
 
 /* ---- Calendar view (Day / Week / Month) ----

@@ -191,7 +191,14 @@ export function KanbanBoard({
           onOpen={onOpenMeeting} onToggleDone={onToggleMeetingDone} />
       )}
 
-      <div className="kb-cols" style={{ gridTemplateColumns: `repeat(${columns.length}, minmax(0, 1fr))` }}>
+      {/* The track list belongs to the stylesheet, not to this element. An
+          inline grid-template-columns outranks every media query, so setting
+          one here was quietly overriding the phone layout in styles.css and
+          dividing 375px between however many columns the board had — four of
+          them left a card narrow enough to wrap its title one letter per
+          line. CSS sizes the columns from their own readable minimum now and
+          scrolls the row when they no longer fit. */}
+      <div className="kb-cols">
         {columns.map((c) => (
           <section
             key={c.id}

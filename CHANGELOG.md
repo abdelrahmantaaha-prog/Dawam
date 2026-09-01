@@ -77,6 +77,27 @@ and this project uses a simple incrementing version number (0.1 per release).
   offering a switch.
 
 ### Fixed
+- **A project's board was unusable on a phone.** The board set
+  `grid-template-columns` as an inline style, and an inline declaration
+  outranks every media query — so the phone layout that was already written
+  for it had simply never applied. Four columns divided 375px between them
+  and a card came out narrow enough to wrap its title one letter per line.
+  The track list belongs to the stylesheet now: one column at a time on a
+  phone, snapping, with the edge of the next one showing. The same change
+  fixes the laptop, where a board with five columns was squeezing exactly the
+  way four did on a phone — columns hold a readable 200px and the row scrolls
+  rather than shrinking past it. The board's own name also survives on a
+  phone now; it had `flex:1` against five other controls and was the one
+  thing squeezed to nothing.
+- **The note editor's controls disappeared after dark.** A notebook keeps its
+  own paper colour in the dark on purpose — a yellow note with white text is
+  not a note — but the blanket dark rules went on repainting the controls
+  standing on that paper. `.rhythm.dark .icon` put a #161C25 chip behind the
+  toolbar's #1E332C glyphs, 1.06:1: bold, italic, the lists and the link
+  button were simply not there. `.rhythm.dark input` turned the title into a
+  dark box on a pale sheet, and Delete sat at 2.4:1. The paper now carries the
+  daylight palette as inherited tokens, so every control on it — including any
+  added later — reads exactly as it does by day.
 - **Picking a day left no mark in dark mode.** `.rhythm.dark .chip` is three
   classes and `.chip.sel` is two, so dark mode was quietly repainting the
   selected day — and a drag's drop target — back to plain panel. The
