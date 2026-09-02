@@ -9,6 +9,13 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## [2.9] — 2026-09-02
+
+The assistant can now reach every part of the app, both of them can be spoken
+to rather than typed at, and the phone can finally see its own account: the
+APK had been reporting "no sync backend" against a deployment that was up and
+answering the whole time.
+
 ### Added
 - **Dictation, on the laptop and on the phone.** The planning assistant and the
   brain dump both have a microphone now. Where the browser has working Web
@@ -77,6 +84,34 @@ and this project uses a simple incrementing version number (0.1 per release).
   offering a switch.
 
 ### Fixed
+- **The APK said it had no sync backend, against a deployment that was up and
+  answering.** Two faults, both in `src/sync.js`, and either one alone was
+  enough to produce that sentence.
+
+  Every API call went out with `credentials: 'include'` as soon as a base URL
+  was set — which is exactly the case in the app shell. The deployment answers
+  a shell origin with `Access-Control-Allow-Origin` and deliberately **no**
+  `Access-Control-Allow-Credentials`: that absence is what keeps the cookie
+  session same-origin and its CSRF posture intact. A browser fails such a
+  response outright when the request asked for credentials, so the `/api/me`
+  probe threw "Failed to fetch" and never saw the 200 sitting underneath it.
+  `capability.sync` stayed false, and Settings reported a backend-less build.
+  Reproduced in a real browser against a fixture mirroring the deployment's
+  headers — `include` throws, `omit` gets the 200 — and the round trip
+  (probe, pull, push, "Status: idle") now completes across that same origin
+  boundary. Cross-origin the Bearer device token is the credential; a cookie
+  could never have travelled there anyway.
+
+  The base URL was also resolved once at module load from `window.Capacitor`,
+  which quietly made the whole of sync depend on the native bridge winning a
+  race against the bundle. Losing it pinned the base to `''` — the app asking
+  its own WebView for `/api` — for the life of the process. It is resolved per
+  call now.
+
+  `tests/sync-transport.test.js` covers both, and the phone no longer offers a
+  "Continue with Google" button it cannot honour: Google refuses OAuth in an
+  embedded WebView, so the shell leads with the device code, which is the way
+  in that actually works there.
 - **A project's board was unusable on a phone.** The board set
   `grid-template-columns` as an inline style, and an inline declaration
   outranks every media query — so the phone layout that was already written

@@ -677,11 +677,20 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                 )}
               </>) : !sync.user ? (<>
                 <div className="security-note"><Shield size={15} /><p>{tx('Sign in to keep your planner on your other devices. Your data is stored under your account and merged per item by most-recent-edit — nothing is shared with anyone else.', 'سجّل الدخول للحفاظ على مخططك على أجهزتك الأخرى. تُحفظ بياناتك ضمن حسابك وتُدمج لكل عنصر بالأحدث تعديلًا — ولا تُشارك مع أي شخص آخر.')}</p></div>
-                <div className="io-actions" style={{ marginTop: 10 }}>
-                  <button className="primary" onClick={sync.signIn}><KeyRound size={14} /> {tx('Continue with Google', 'المتابعة بحساب Google')}</button>
-                </div>
-                <p className="hint-text" style={{ marginTop: 8 }}>{tx('Staying signed out keeps Rhythm exactly as it is: local-only.', 'البقاء دون تسجيل دخول يُبقي التطبيق كما هو: محلي بالكامل.')}</p>
-                <div className="sect-h" style={{ marginTop: 16 }}><KeyRound size={13} /> {tx('Or link with a code', 'أو اربط برمز')}</div>
+                {/* Google refuses OAuth in an embedded WebView, so on the phone
+                    this button could only ever navigate the app away from
+                    itself and land on disallowed_useragent. The code is the
+                    way in there, so lead with it rather than offering a door
+                    that is painted on. */}
+                {sync.inAppShell ? (
+                  <p className="hint-text" style={{ marginTop: 10 }}>{tx('Google sign-in cannot run inside the Android app — Google refuses embedded browsers. Link this phone with a code instead, from a device where you are already signed in.', 'لا يمكن تشغيل تسجيل دخول جوجل داخل تطبيق أندرويد — ترفض جوجل المتصفحات المدمجة. اربط هذا الهاتف برمز من جهاز سجّلت الدخول عليه.')}</p>
+                ) : (<>
+                  <div className="io-actions" style={{ marginTop: 10 }}>
+                    <button className="primary" onClick={sync.signIn}><KeyRound size={14} /> {tx('Continue with Google', 'المتابعة بحساب Google')}</button>
+                  </div>
+                  <p className="hint-text" style={{ marginTop: 8 }}>{tx('Staying signed out keeps Rhythm exactly as it is: local-only.', 'البقاء دون تسجيل دخول يُبقي التطبيق كما هو: محلي بالكامل.')}</p>
+                </>)}
+                <div className="sect-h" style={{ marginTop: 16 }}><KeyRound size={13} /> {sync.inAppShell ? tx('Link with a code', 'اربط برمز') : tx('Or link with a code', 'أو اربط برمز')}</div>
                 <p className="hint-text" style={{ marginTop: 0 }}>{tx('On a device where you are already signed in, open Settings → Sync → "Code for another device" and paste it here. Made for the Android app, where Google sign-in cannot run.', 'من جهاز سجّلت الدخول عليه، افتح الإعدادات ← المزامنة ← «رمز لجهاز آخر» والصقه هنا. مصمم لتطبيق أندرويد حيث لا يعمل تسجيل دخول جوجل.')}</p>
                 <div className="cal-add">
                   <input value={linkCode} onChange={(e) => { setLinkCode(e.target.value); setLinkMsg(''); }} placeholder="dt1.…" aria-label={tx('Link code', 'رمز الربط')} />

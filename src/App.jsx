@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3, Mic, Square, ListChecks, CalendarRange } from 'lucide-react';
 import {brokerFrom, hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
-import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken } from './sync.js';
+import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken, inAppShell } from './sync.js';
 import { readLedger, balanceOf, award, revoke, spend } from './points.js';
 import { updateWidget } from './widget.js';
 import { writeNowFile } from './nowfile.js';
@@ -3175,7 +3175,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           templates={templates} onAddTemplate={addTemplate} onUpdTemplate={updTemplate} onDelTemplate={delTemplate}
           onExport={buildExport} onImport={applyImport}
           onSetPin={setPin}
-          sync={{ ...sync, linkWithToken, mintPhoneCode, isLinkedDevice: !!deviceToken() }}
+          sync={{ ...sync, linkWithToken, mintPhoneCode, isLinkedDevice: !!deviceToken(), inAppShell: inAppShell() }}
           notify={notifyState} onEnableNotify={enableNotify} onTestNotify={testNotify} onRecheck={probeNotify}
           storageOk={storageOk} onClose={() => setShowSettings(false)}
           onClearDay={() => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.day !== selectedDay) }); flash(tx('Day cleared.', 'تم مسح اليوم.')); }}

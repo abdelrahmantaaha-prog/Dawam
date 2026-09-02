@@ -24,18 +24,51 @@ import { rawList, rawGet, rawSet, rawDelete } from './storage.js';
 
    On the web this is same-origin and empty is right. Inside the Android shell
    the page is served from https://localhost — the WebView's own asset server —
-   so a relative "/api/me" never leaves the phone, and sync silently reports
-   "no backend" no matter what the deployment has configured. VITE_API_BASE
-   points the calls at a real deployment for builds that need it.
+   so a relative "/api/me" never leaves the phone, and sync reports "no
+   backend" no matter what the deployment has configured. VITE_API_BASE still
+   overrides, for any build that needs to point somewhere else.
 
-   Note this only fixes the data calls. Cookie-based sign-in from a different
-   origin is a separate problem (see README → Sync in the APK). */
-/* Inside the Android shell the page's own origin is the WebView's localhost,
-   so same-origin API calls can never reach a backend — the deployment is the
-   default there. VITE_API_BASE still overrides for any build that needs to. */
-const CAP_NATIVE = typeof window !== 'undefined' && window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform();
+   Resolved on every call rather than once at module load. `window.Capacitor`
+   is injected by the native bridge before the bundle runs, but reading it at
+   module scope makes the whole of sync depend on that ordering, and losing
+   that race would pin the base to '' — the app asking its own WebView for
+   /api — for the life of the process, with nothing on screen to say why. */
 const NATIVE_DEFAULT = 'https://rhythm-ruby.vercel.app';
-const BASE = (import.meta.env && import.meta.env.VITE_API_BASE) || (CAP_NATIVE ? NATIVE_DEFAULT : '');
+const ENV_BASE = (import.meta.env && import.meta.env.VITE_API_BASE) || '';
+const capNative = () => {
+  try { return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()); }
+  catch { return false; }
+};
+export const apiBase = () => ENV_BASE || (capNative() ? NATIVE_DEFAULT : '');
+/* Google refuses to run OAuth inside an embedded WebView, so the APK's only
+   way onto an account is a pasted device code. The UI asks this rather than
+   showing a button that ends on Google's disallowed_useragent page with the
+   app navigated away from itself. */
+export const inAppShell = () => capNative();
+const api = (path) => `${apiBase()}${path}`;
+
+/* THE OTHER HALF OF THE APK'S "no sync backend": the credentials mode.
+
+   The deployment answers a shell origin with Access-Control-Allow-Origin but
+   deliberately NO Access-Control-Allow-Credentials — that absence is what
+   keeps the cookie session same-origin and its CSRF posture intact (see the
+   CORS note in api/index.js). A fetch with credentials:'include' against a
+   response lacking that header fails the CORS check outright: the caller gets
+   a thrown "Failed to fetch" and never sees the 200 underneath it. So the boot
+   probe could not read a perfectly healthy /api/me, capability.sync stayed
+   false, and Settings said this build had no backend — against a deployment
+   that was up and answering the whole time.
+
+   Cross-origin, the device token in the Authorization header IS the
+   credential; a cookie could never have travelled there anyway. Same-origin —
+   the web build, and any VITE_API_BASE pointing at our own origin — still
+   wants the session cookie, so it stays 'same-origin' there. */
+export function credentialsMode() {
+  const b = apiBase();
+  if (!b) return 'same-origin';
+  try { return new URL(b, location.href).origin === location.origin ? 'same-origin' : 'omit'; }
+  catch { return 'omit'; }
+}
 
 /* The device token that links this install to an account without cookies —
    see the server's device-token notes. Deliberately NOT a planner: key, so it
@@ -43,14 +76,14 @@ const BASE = (import.meta.env && import.meta.env.VITE_API_BASE) || (CAP_NATIVE ?
 const DEVICE_TOKEN_KEY = 'rhythm:sync:deviceToken';
 export const deviceToken = () => { try { return localStorage.getItem(DEVICE_TOKEN_KEY) || ''; } catch { return ''; } };
 const setDeviceToken = (t) => { try { t ? localStorage.setItem(DEVICE_TOKEN_KEY, t) : localStorage.removeItem(DEVICE_TOKEN_KEY); } catch { /* full */ } };
-export const apiBase = () => BASE;
 
+/* Getters, because the base is no longer known at module load. */
 const API = {
-  me: `${BASE}/api/me`,
-  sync: `${BASE}/api/sync`,
-  csrf: `${BASE}/api/auth/csrf`,
-  signIn: `${BASE}/api/auth/signin/google`,
-  signOut: `${BASE}/api/auth/signout`,
+  get me() { return api('/api/me'); },
+  get sync() { return api('/api/sync'); },
+  get csrf() { return api('/api/auth/csrf'); },
+  get signIn() { return api('/api/auth/signin/google'); },
+  get signOut() { return api('/api/auth/signout'); },
 };
 
 /* ---------- transport ----------
@@ -58,8 +91,8 @@ const API = {
    planner's origin is rhythm://app, so a renderer fetch could never carry the
    deployment's session cookie. The bridge answers with { ok, status, body };
    this wraps it back into a Response-shaped object so the callers cannot tell
-   the difference. Everywhere else it is fetch(), with credentials included
-   when the API lives on another origin. */
+   the difference. Everywhere else it is fetch(), and see credentialsMode()
+   above for why a cross-origin call must NOT ask for cookies. */
 const desktopSync = () => (typeof window !== 'undefined' && window.rhythmFocus && window.rhythmFocus.sync) || null;
 
 async function apiFetch(url, init = {}) {
@@ -72,7 +105,7 @@ async function apiFetch(url, init = {}) {
   }
   const dt = deviceToken();
   const headers = dt ? { ...(init.headers || {}), Authorization: `Bearer ${dt}` } : init.headers;
-  return fetch(url, { credentials: BASE ? 'include' : 'same-origin', ...init, headers });
+  return fetch(url, { credentials: credentialsMode(), ...init, headers });
 }
 
 /* Local bookkeeping. `meta` is when this device last wrote each key, and it is
@@ -203,7 +236,7 @@ export const signOut = async () => {
 export async function linkWithToken(raw) {
   const t = String(raw || '').trim();
   if (!/^dt1\./.test(t)) return { ok: false, error: 'not-a-code' };
-  const r = await fetch(`${BASE}/api/me`, { headers: { Authorization: `Bearer ${t}` } });
+  const r = await fetch(api('/api/me'), { credentials: credentialsMode(), headers: { Authorization: `Bearer ${t}` } });
   if (!r.ok) return { ok: false, error: 'HTTP ' + r.status };
   const j = await r.json();
   if (!j.user) return { ok: false, error: 'code-rejected' };
@@ -215,7 +248,7 @@ export async function linkWithToken(raw) {
 /* Minting the code for a phone — only works with a cookie session, which is
    exactly the point. */
 export async function mintPhoneCode() {
-  const r = await apiFetch(`${BASE}/api/device-token`, { method: 'POST' });
+  const r = await apiFetch(api('/api/device-token'), { method: 'POST' });
   if (!r.ok) throw new Error('mint-' + r.status);
   const j = await r.json();
   return j.token;

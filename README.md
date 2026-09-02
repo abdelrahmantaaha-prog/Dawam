@@ -232,10 +232,13 @@ which sorts keys; **none use `JSON.stringify`.** Keep it that way.
 
 The APK serves the bundled build from `https://localhost` — the WebView's own
 asset server. That is what makes Rhythm work with no network at all, but it
-also means a relative `/api/me` never leaves the phone. Sync then reports "no
+also means a relative `/api/me` never leaves the phone: sync would report "no
 backend" however the deployment is configured, and no amount of rebuilding
-changes it. Settings shows the URL it actually probed, which is how you tell
-that case apart from a genuinely backend-less build.
+would change it. The app therefore aims its data calls at the deployment by
+default when it is running natively (see the second option below). Settings
+shows the URL it actually probed and what came back, which is how you tell a
+misaimed probe apart from a genuinely backend-less build — read it before
+theorising.
 
 Two ways out, and they trade against each other:
 
@@ -263,11 +266,31 @@ option B needs.
 Nothing above affects reminders, the widget or the vault — those are native and
 origin-independent. Only account sync depends on sign-in.
 
-**Keep the bundle local and point only the API elsewhere.** `VITE_API_BASE`
-prefixes the data calls at build time, so on-device data and offline start
-survive. Cookie sign-in from a different origin does not — `SameSite=Lax`
-session cookies aren't sent from `https://localhost`, so this needs token-based
-auth and a deep link back from the browser. Not built.
+**Keep the bundle local and point only the API elsewhere.** This is what the
+APK does now, with no flag to set: `apiBase()` in `src/sync.js` returns the
+deployment whenever `Capacitor.isNativePlatform()` is true, and `VITE_API_BASE`
+overrides it for a build that needs somewhere else. On-device data and offline
+start survive, because only the data calls move. Cookie sign-in does not travel
+— `SameSite=Lax` session cookies aren't sent from `https://localhost` — so the
+phone gets onto an account with a **device code** instead: mint one in Settings
+→ Sync on a signed-in device, paste it into the APK. That is built and it works.
+
+Two rules this path lives or dies by, both learned the hard way:
+
+- **The base is resolved per call, never once at module load.** Reading
+  `window.Capacitor` at module scope makes sync depend on the native bridge
+  winning a race against the bundle. Lose it and the base is pinned to `''` for
+  the life of the process — the app asking its own WebView for `/api`.
+- **A cross-origin call must NOT ask for cookies.** The deployment answers a
+  shell origin with `Access-Control-Allow-Origin` and deliberately no
+  `Access-Control-Allow-Credentials`; that absence is what keeps the cookie
+  session same-origin and its CSRF posture intact. A fetch with
+  `credentials: 'include'` against such a response fails the CORS check
+  outright — the caller gets a thrown "Failed to fetch" and never sees the 200
+  underneath. That is precisely how the APK came to report "no sync backend"
+  against a deployment that was up and answering: the `/api/me` probe could not
+  read its own success. Cross-origin, the Bearer device token IS the credential
+  (`credentialsMode()`); `tests/sync-transport.test.js` holds the line.
 
 ## Project layout
 

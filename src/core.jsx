@@ -1,5 +1,5 @@
 /* Rhythm core - pure logic: i18n, dates, prayer math, sky, blocks, model. */
-const APP_VERSION = '2.8';
+const APP_VERSION = '2.9';
 
 /* ------------------------------------------------------------------ */
 /*  i18n — lightweight, module-level translator (same pattern as the   */
