@@ -9,6 +9,52 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## [3.0] — 2026-09-03
+
+A device that runs out of storage used to drop every save in silence — and
+then tell the other devices its stale copy was the newest thing anyone had.
+
+### Fixed
+- **A full device stopped saving, said nothing, and rolled back the other
+  one.** Reported as "both are not accepting any new tasks, and anything I add
+  disappears and isn't in the backup". Every part of that was one bug wearing
+  three faces.
+
+  `rawSet` in `src/storage.js` caught a quota error, logged it to a console
+  nobody has open, and returned as if the write had landed. The task stayed in
+  React state, so the screen showed it; storage still held the old value, so a
+  reload lost it and an export never contained it. Worse, `saveKey` ran the
+  save hook anyway, which marked the key **dirty** — so the device told the
+  server that the value it had failed to replace was its newest edit. The
+  server believed it, the phone pulled it, and a healthy device replaced its
+  own good copy with a stale one. A single full store could roll back the pair.
+
+  Now every write reports whether it landed. `saveKey` marks nothing dirty
+  when it did not, `applyDoc` refuses to record a timestamp for a value it
+  could not write, and sync **stops entirely** rather than push a document it
+  cannot trust. Verified against a genuinely full store in a browser, not a
+  mock: the warning appears on the first refused save, and the recovery below
+  puts the device back to work.
+- **The store filled up because nothing ever emptied it.** Removing a calendar
+  left `planner:calcache:<id>` behind for good, and one busy shared calendar
+  is megabytes. The pruner now drops caches whose feed is gone — verified that
+  a live feed's cache survives the sweep and only the orphan goes.
+- **A backup carried the other device's caches.** `buildExport` skipped the
+  prayer tables but not the calendar or Trello caches, so a backup made on the
+  laptop transplanted its expanded calendars into the phone, where they were
+  worth nothing and cost the same megabytes. Backups now skip exactly what
+  sync skips — `isDerived` in `shared/model.js` is the single list both read.
+  An import that runs out of room stops and says so instead of leaving the
+  planner half-replaced.
+
+### Added
+- **Settings → Backup now shows the storage on this device**: what is used,
+  across how many items, how much room is genuinely left (measured by writing
+  until the browser refuses — there is no honest API for it), which keys are
+  the largest, and how much of it is rebuildable cache. Plus **Free up space**,
+  which clears only derived keys: prayer times recompute, calendars and Trello
+  refetch, and nothing of yours is in there.
+
 ## [2.9] — 2026-09-02
 
 The assistant can now reach every part of the app, both of them can be spoken

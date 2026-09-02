@@ -32,8 +32,16 @@ export const MAX_DOC_BYTES = 4 * 1024 * 1024;
    small, it is the person's own configuration, and a calendar added on the
    laptop should be there on the phone. */
 const DERIVED = ["planner:prayers:", "planner:calcache:", "planner:trellocache"];
+
+/* Derived keys are device-local and rebuildable, which is why sync skips them.
+   A BACKUP must skip them for the same reason and one more: a backup made on
+   the laptop used to carry its calendar cache into the phone, where it was
+   worth nothing and cost the same megabytes. Exported so the backup and the
+   free-up-space sweep agree with sync about what is disposable. */
+export const isDerived = (k) => typeof k === "string" && DERIVED.some((p) => k.startsWith(p));
+
 export const isSyncable = (k) =>
-  typeof k === "string" && k.startsWith("planner:") && k !== "planner:__probe" && !DERIVED.some((p) => k.startsWith(p));
+  typeof k === "string" && k.startsWith("planner:") && k !== "planner:__probe" && !isDerived(k);
 
 const ts = (e) => (!e ? 0 : Number(e.deletedAt || e.updatedAt || 0) || 0);
 const isTomb = (e) => !!(e && e.deletedAt);

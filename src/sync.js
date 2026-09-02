@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { mergeState, fingerprint, sameDoc, migrate, isSyncable, DOC_VERSION } from '../shared/model.js';
-import { rawList, rawGet, rawSet, rawDelete } from './storage.js';
+import { rawList, rawGet, rawSet, rawDelete, writesFailing } from './storage.js';
 
 /* Where the API lives.
 
@@ -167,6 +167,7 @@ export async function applyDoc(doc, { onKey } = {}) {
   const m = syncMeta();
   const t = tombs();
   const touched = [];
+  const refused = [];
   for (const [k, e] of Object.entries(clean.keys)) {
     if (e.deletedAt) {
       const existing = await rawGet(k);
@@ -177,13 +178,17 @@ export async function applyDoc(doc, { onKey } = {}) {
     }
     const local = await rawGet(k);
     if (local === e.value) { m[k] = e.updatedAt; continue; } // already identical
-    await rawSet(k, e.value);           // raw write: does NOT re-enter the dirty queue
+    // Raw write: does NOT re-enter the dirty queue. If the store refuses it,
+    // say nothing about holding it — recording e.updatedAt for a value that is
+    // not there tells the next push that this device's stale copy is current.
+    if (!(await rawSet(k, e.value))) { refused.push(k); continue; }
     m[k] = e.updatedAt;
     delete t[k];
     touched.push(k);
     if (onKey) { try { onKey(k, e.value); } catch (err) { console.warn('apply failed for', k, err); } }
   }
   setSyncMeta(m); setTombs(t);
+  if (refused.length) throw new Error('storage-full');
   return touched;
 }
 
@@ -348,6 +353,17 @@ export function useSync({ localVersion, onApplied, loaded }) {
     // a manual "Sync now" is an explicit request, so it overrides the guard
     if (reason !== 'manual' && userIsEditing()) { deferred.current = true; return; }
 
+    /* A device whose writes are being refused holds a document it cannot
+       trust: every failed save left the OLD value in storage while the app
+       moved on. Pushing that would hand the server a stale copy stamped with
+       a fresh time, and the other device would adopt it over its own good
+       one. So a full store stops sync dead rather than spreading. */
+    if (writesFailing()) {
+      setStatus('error');
+      setError("This device is out of storage, so syncing is paused — it would send an out-of-date copy to your other devices. Settings → Backup has what's taking the room.");
+      return;
+    }
+
     busy.current = true;
     deferred.current = false;
     setStatus('syncing');
@@ -393,7 +409,9 @@ export function useSync({ localVersion, onApplied, loaded }) {
     } catch (e) {
       const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
       setStatus(offline ? 'offline' : 'error');
-      setError(e.message === 'doc-too-large' ? 'Your data is too large to sync.' : "Sync didn't complete — it'll retry.");
+      setError(e.message === 'doc-too-large' ? 'Your data is too large to sync.'
+        : e.message === 'storage-full' ? "This device is out of storage, so some of what your other devices sent could not be saved here. Settings → Backup has what's taking the room."
+        : "Sync didn't complete — it'll retry.");
       if (reason !== 'retry') console.warn('sync failed', e);
     } finally {
       busy.current = false;

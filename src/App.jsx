@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3, Mic, Square, ListChecks, CalendarRange } from 'lucide-react';
 import {brokerFrom, hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
-import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook } from './storage.js';
+import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook, onStorageHealth, writesFailing, storageStats, storageHeadroom, recheckWrites } from './storage.js';
+import { isDerived } from '../shared/model.js';
 import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken, inAppShell } from './sync.js';
 import { readLedger, balanceOf, award, revoke, spend } from './points.js';
 import { updateWidget } from './widget.js';
@@ -60,6 +61,7 @@ export default function Rhythm() {
   const [todayData, setTodayData] = useState(null);
   const [nowTick, setNowTick] = useState(0);
   const [storageOk, setStorageOk] = useState(true);
+  const [storageFull, setStorageFull] = useState(false);
   const [view, setView] = useState('now');         // 'overdue' | 'now' | 'plan' | 'calendar' | 'projects' | 'habits' | 'focus'
   // The last focus round that ended and has not been answered yet. The shell
   // raises the window when a round linked to a task finishes, so the question
@@ -210,6 +212,14 @@ export default function Rhythm() {
   useEffect(() => { weekRef.current = week; }, [week]);
   useEffect(() => { poolRef.current = pool; }, [pool]);
   useEffect(() => { todayRef.current = todayData; }, [todayData]);
+
+  /* The boot probe below proves localStorage EXISTS. It cannot prove the next
+     write will be accepted: it writes one byte and takes it straight back, so
+     a store sitting at its quota passes it. This subscription is the other
+     half — the first refused write flips the banner on, and an accepted one
+     turns it off again. Until it existed, a full device dropped every save in
+     silence. */
+  useEffect(() => onStorageHealth(({ failing }) => { setStorageFull(failing); setStorageOk(!failing); }), []);
 
   /* ---- init ---- */
   useEffect(() => {
@@ -423,7 +433,7 @@ export default function Rhythm() {
     for (let cur = new Date(winStart); cur <= winEnd; cur = addDays(cur, 7)) probed.push(`planner:week:${fmtISO(cur)}`);
     const keys = Array.from(new Set([...(await rawList('planner:')), ...probed]));
     for (const k of keys) {
-      if (k.startsWith('planner:prayers:') || k === 'planner:__probe' || data[k] != null) continue;
+      if (isDerived(k) || k === 'planner:__probe' || data[k] != null) continue;
       if (k.startsWith('planner:snapshot:') || k === 'planner:lastExport') continue; // snapshots must never nest inside exports/snapshots
       if (k.startsWith('planner:week:') && !wkInWindow(k.slice(13))) continue;
       try { const v = await loadKey(k); if (v != null) data[k] = v; } catch { /* skip */ }
@@ -437,8 +447,9 @@ export default function Rhythm() {
     const d = parsed.data;
     let n = 0;
     for (const [k, v] of Object.entries(d)) {
-      if (!k.startsWith('planner:') || k.startsWith('planner:prayers:') || k === 'planner:__probe') continue;
-      await saveKey(k, v); n++;
+      if (!k.startsWith('planner:') || isDerived(k) || k === 'planner:__probe') continue;
+      if (!(await saveKey(k, v))) return { ok: false, msg: tx(`This device ran out of storage after ${n} item${n !== 1 ? 's' : ''} — the import stopped rather than leave your planner half-replaced. Free up room in Settings → Backup and try again.`, `نفدت مساحة التخزين على هذا الجهاز بعد ${n} عنصرًا — توقف الاستيراد بدلًا من ترك مخططك ناقصًا. أفرغ مساحة من الإعدادات ← النسخ الاحتياطي ثم أعد المحاولة.`) };
+      n++;
     }
     const s = d['planner:settings'];
     const merged = s ? migrateSettings(s) : settings;
@@ -457,6 +468,39 @@ export default function Rhythm() {
     return { ok: true, msg: tx(`Imported ${n} item${n !== 1 ? 's' : ''}. Your planner has been refreshed.`, `تم استيراد ${n} عنصرًا. تم تحديث مخططك.`) };
   };
 
+  /* ---- storage readout ----
+     Written because "this device is out of storage" is not an answer a person
+     can act on. It names the biggest keys and measures the real headroom by
+     writing until the browser refuses, which is the only honest way to ask
+     localStorage how much room is left. */
+  const readStorage = async () => {
+    await recheckWrites(); // ask the store directly rather than trusting a stale latch
+    const stats = await storageStats('planner:');
+    const derived = await rawList('planner:');
+    let derivedBytes = 0;
+    for (const k of derived) {
+      if (!isDerived(k)) continue;
+      derivedBytes += (k.length + ((await rawGet(k)) || '').length) * 2;
+    }
+    return { ...stats, derivedBytes, headroom: await storageHeadroom(), failing: writesFailing() };
+  };
+
+  /* Derived keys only: prayer tables recompute from your coordinates, and the
+     calendar and Trello caches refetch. Nothing here is yours to lose. */
+  const freeSpace = async () => {
+    let removed = 0, bytes = 0;
+    for (const k of await rawList('planner:')) {
+      if (!isDerived(k)) continue;
+      bytes += (k.length + ((await rawGet(k)) || '').length) * 2;
+      await rawDelete(k);
+      removed++;
+    }
+    // Nothing was marked deleted on purpose: these keys never synced, so the
+    // server has no opinion about them and no tombstone is owed.
+    await recheckWrites(); // clears the failure latch now that there is room
+    return { removed, bytes };
+  };
+
   /* ---- prune ---- */
   const pruneStorage = async (wsd) => {
     const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -465,8 +509,17 @@ export default function Rhythm() {
     const monthWin = startOfWeek(windowBounds().start, wsd);
     const fourBack = addDays(startOfWeek(today, wsd), -28);
     const winStartWeek = monthWin < fourBack ? monthWin : fourBack;
+    // Read the feed list from storage rather than state: the pruner runs early
+    // and a stale snapshot here would delete a live calendar's cache.
+    const feedList = await loadKey('planner:calendars');
+    const liveFeeds = new Set((Array.isArray(feedList) ? feedList : []).map((f) => f && f.id).filter(Boolean));
     for (const k of await rawList('planner:')) {
       if (k.startsWith('planner:prayers:')) { const d = new Date(k.slice('planner:prayers:'.length) + 'T00:00:00'); if (isNaN(d) || d < addDays(today, -2)) await rawDelete(k); }
+      // A removed calendar left its expanded events behind forever — nothing
+      // ever deleted planner:calcache:<id>, and one busy shared calendar is
+      // megabytes. Enough of those and every save on the device starts being
+      // refused, which is how this pruner came to care about caches at all.
+      else if (k.startsWith('planner:calcache:') && !liveFeeds.has(k.slice('planner:calcache:'.length))) await rawDelete(k);
       else if (k.startsWith("planner:week:")) { const d = new Date(k.slice(13) + "T00:00:00"); if (!isNaN(d) && d < winStartWeek) { await rawDelete(k); markDeleted(k); } }
     }
     await pruneCalDone(winStartWeek);
@@ -2611,7 +2664,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       </header>
 
       {!storageOk && (
-        <div className="warn"><AlertCircle size={15} /><span>{tx("This device isn't saving between sessions. Your plan lives only in this view — export it from Settings to keep it.", 'هذا الجهاز لا يحفظ بين الجلسات. خطتك موجودة في هذا العرض فقط — صدّرها من الإعدادات للاحتفاظ بها.')}</span></div>
+        <div className="warn"><AlertCircle size={15} /><span>{storageFull
+          ? tx('This device is out of storage, so nothing you add is being saved and syncing is paused. Settings → Backup shows what is taking the room and can clear it.', 'لا توجد مساحة تخزين على هذا الجهاز، لذا لا يُحفظ ما تضيفه وتم إيقاف المزامنة. تعرض الإعدادات ← النسخ الاحتياطي ما يشغل المساحة ويمكنها تفريغها.')
+          : tx("This device isn't saving between sessions. Your plan lives only in this view — export it from Settings to keep it.", 'هذا الجهاز لا يحفظ بين الجلسات. خطتك موجودة في هذا العرض فقط — صدّرها من الإعدادات للاحتفاظ بها.')}</span></div>
       )}
 
       {/* NOW — one thing at a time. The queue is the WHOLE day (Fajr → next
@@ -3173,7 +3228,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {showSettings && (
         <SettingsPanel settings={settings} onChange={persistSettings} onLang={changeLang}
           templates={templates} onAddTemplate={addTemplate} onUpdTemplate={updTemplate} onDelTemplate={delTemplate}
-          onExport={buildExport} onImport={applyImport}
+          onExport={buildExport} onImport={applyImport} onReadStorage={readStorage} onFreeSpace={freeSpace}
           onSetPin={setPin}
           sync={{ ...sync, linkWithToken, mintPhoneCode, isLinkedDevice: !!deviceToken(), inAppShell: inAppShell() }}
           notify={notifyState} onEnableNotify={enableNotify} onTestNotify={testNotify} onRecheck={probeNotify}

@@ -463,7 +463,7 @@ function PinScreen({ onVerify, onSuccess }) {
 /* ------------------------------------------------------------------ */
 /*  Settings                                                           */
 /* ------------------------------------------------------------------ */
-function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, notify, onEnableNotify, onTestNotify, onRecheck, storageOk, onClose, onClearDay, dayLabel, onLang, calendar, trello }) {
+function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, notify, onEnableNotify, onTestNotify, onRecheck, storageOk, onReadStorage, onFreeSpace, onClose, onClearDay, dayLabel, onLang, calendar, trello }) {
   const [local, setLocal] = useState(settings);
   const [tab, setTab] = useState('general');
   // Keep the local editing copy in sync when the parent persists settings from
@@ -477,6 +477,13 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
   const [exp, setExp] = useState(''); const [imp, setImp] = useState(''); const [busy, setBusy] = useState(false); const [status, setStatus] = useState('');
   const [linkCode, setLinkCode] = useState(''); const [linkMsg, setLinkMsg] = useState('');
   const [phoneCode, setPhoneCode] = useState(''); const [phoneMsg, setPhoneMsg] = useState('');
+  /* The storage readout is measured, not guessed — and measuring it means
+     writing until the browser refuses, so it runs when the Backup tab is
+     opened rather than on every render. */
+  const [store, setStore] = useState(null);
+  const readStore = async () => { if (onReadStorage) { try { setStore(await onReadStorage()); } catch { setStore(null); } } };
+  useEffect(() => { if (tab === 'backup') readStore(); }, [tab]);
+  const mb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB');
   const doExport = async () => { setBusy(true); setStatus(tx('Preparing…', 'جارٍ التحضير…')); try { setExp(await onExport()); setStatus(''); } catch { setStatus(tx('Export failed.', 'فشل التصدير.')); } setBusy(false); };
   const doCopy = async () => { try { await navigator.clipboard.writeText(exp); setStatus(tx('Copied.', 'تم النسخ.')); } catch { setStatus(tx('Copy blocked — select the text manually.', 'تعذّر النسخ — حدّد النص يدويًا.')); } };
   /* One step: build the export and save it. Two buttons (generate, then
@@ -769,7 +776,39 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
           {tab === 'backup' && (
             <div className="sect">
               <div className="sect-h"><Copy size={13} /> {tx('Backup & move devices', 'النسخ الاحتياطي ونقل الأجهزة')}</div>
-              {!storageOk && <p className="hint-text" style={{ marginTop: 0, color: '#9C4221' }}>{tx("This device isn't persisting between sessions — export is the only way to keep your plan.", 'هذا الجهاز لا يحفظ بين الجلسات — التصدير هو الطريقة الوحيدة للاحتفاظ بخطتك.')}</p>}
+              {/* Only when the store is unavailable outright. A FULL store is a
+                  different problem with a different answer, and the readout
+                  below says so — printing both read as self-contradiction. */}
+              {!storageOk && !(store && store.failing) && <p className="hint-text" style={{ marginTop: 0, color: '#9C4221' }}>{tx("This device isn't persisting between sessions — export is the only way to keep your plan.", 'هذا الجهاز لا يحفظ بين الجلسات — التصدير هو الطريقة الوحيدة للاحتفاظ بخطتك.')}</p>}
+
+              {/* What is actually in the store. This exists because "your
+                  changes aren't saving" used to be something the app knew and
+                  never said: a full device dropped every write in silence,
+                  showed the task on screen anyway, and then sent its stale
+                  copy to the other devices. */}
+              <div className="sect-h" style={{ marginTop: 0 }}><Shield size={13} /> {tx('Storage on this device', 'التخزين على هذا الجهاز')}</div>
+              {store && store.failing && (
+                <p className="hint-text vault-warn" style={{ marginTop: 0 }}><AlertCircle size={12} /> {tx('This device is out of room, so nothing you add is being saved and syncing is paused. Free up space below, then add it again.', 'لا توجد مساحة على هذا الجهاز، لذا لا يُحفظ ما تضيفه وتم إيقاف المزامنة مؤقتًا. أفرغ مساحة أدناه ثم أضفه من جديد.')}</p>
+              )}
+              {store ? (<>
+                <p className="hint-text" style={{ marginTop: 0, overflowWrap: 'anywhere' }}>
+                  {tx('Used', 'المستخدم')}: <code>{mb(store.bytes)}</code> {tx('across', 'موزعة على')} <code>{store.keys}</code> {tx('items', 'عنصرًا')}
+                  {' · '}{tx('room left', 'المتبقي')}: <code>{mb(store.headroom)}</code>
+                  {store.derivedBytes > 0 ? <><br />{tx('of that, rebuildable cache', 'منها ذاكرة مؤقتة يمكن إعادة بنائها')}: <code>{mb(store.derivedBytes)}</code></> : null}
+                  {store.top && store.top.length ? <><br />{tx('largest', 'الأكبر')}: {store.top.slice(0, 3).map((r) => `${r.key.replace('planner:', '')} (${mb(r.bytes)})`).join(' · ')}</> : null}
+                </p>
+                <div className="io-actions" style={{ marginTop: 6 }}>
+                  <button className="ghost sm" onClick={async () => {
+                    setStatus(tx('Freeing…', 'جارٍ التفريغ…'));
+                    const r = await onFreeSpace();
+                    await readStore();
+                    setStatus(r.removed ? tx(`Cleared ${mb(r.bytes)} of cache. Prayer times, calendars and Trello rebuild themselves.`, `تم تفريغ ${mb(r.bytes)} من الذاكرة المؤقتة. ستُعاد أوقات الصلاة والتقويمات وترللو تلقائيًا.`) : tx('No cache to clear.', 'لا توجد ذاكرة مؤقتة.'));
+                  }}>{tx('Free up space (clears rebuildable cache)', 'إفراغ مساحة (حذف الذاكرة المؤقتة)')}</button>
+                  <button className="ghost sm" onClick={readStore}>{tx('Re-measure', 'إعادة القياس')}</button>
+                </div>
+              </>) : (
+                <p className="hint-text" style={{ marginTop: 0 }}>{tx('Measuring…', 'جارٍ القياس…')}</p>
+              )}
               <div className="drive-box"><div className="drive-title">{tx('Local-only by design', 'محلي فقط حسب التصميم')}</div><p className="hint-text" style={{ marginTop: 0, marginBottom: 0 }}>{tx('Everything lives in this browser on this device — nothing is sent anywhere. That means backups are on you: export a file now and then, especially before clearing browser data.', 'كل شيء محفوظ في هذا المتصفح على هذا الجهاز — لا يُرسل شيء إلى أي مكان. لذا فالنسخ الاحتياطي مسؤوليتك: صدّر ملفًا بين الحين والآخر، خاصة قبل مسح بيانات المتصفح.')}</p></div>
               <div className="drive-box" style={{ marginTop: 12 }}><div className="drive-title"><Sparkles size={13} /> {tx('AI features (optional)', 'الميزات الذكية (اختياري)')}</div>
                 <p className="hint-text" style={{ marginTop: 0, marginBottom: 8 }}>{tx('The brain-dump sorter, the planning assistant, dictation and task sizing all run on Google Gemini (free tier), called straight from your browser with your own key. Dictation uses the browser’s own speech recognition where it has one and costs nothing; where it does not — on the phone, and in the desktop app — the clip goes to Gemini to be written down, and is never stored. Keys are stored only on this device; your text goes to Google when you use these features — the one exception to "nothing is sent anywhere". Note: on the free tier Google may use prompts to improve its products.', 'يعمل فارز الأفكار ومساعد التخطيط والإملاء وتقدير المهام عبر Google Gemini (خطة مجانية) مباشرة من متصفحك بمفتاحك الخاص. يستخدم الإملاء التعرّف على الكلام المدمج في المتصفح حين يتوفّر بلا أي تكلفة، وحين لا يتوفّر — على الهاتف وفي تطبيق سطح المكتب — يُرسل المقطع إلى Gemini لتفريغه، ولا يُحفظ أبدًا. تُحفظ المفاتيح على هذا الجهاز فقط، ويُرسل نصك إلى Google عند استخدامها — وهو الاستثناء الوحيد لمبدأ «لا يُرسل شيء». ملاحظة: قد تستخدم Google المدخلات في الخطة المجانية لتحسين منتجاتها.')}</p>
