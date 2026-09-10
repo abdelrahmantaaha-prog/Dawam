@@ -35,6 +35,22 @@ function get() {
   return RhythmWidget;
 }
 
+/* What the launch asked for, once.
+
+   The widget's + puts an action on its launch intent; this collects it. Called
+   on boot AND on every resume, because Android delivers a warm start's intent
+   to an app that is already running — onNewIntent, not onCreate — and there is
+   no other moment at which the app can notice.
+
+   Answers null on an ordinary open, and on the web, where there is no widget
+   and nothing to collect. */
+export async function takeWidgetAction() {
+  const w = get();
+  if (!w || typeof w.takeAction !== 'function') return null;
+  try { const r = await w.takeAction(); return (r && r.action) || null; }
+  catch { return null; }
+}
+
 let last = '';
 
 /* Push the current Now summary to the widget. Cheap and idempotent: an

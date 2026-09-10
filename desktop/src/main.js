@@ -95,7 +95,6 @@ if (!app.requestSingleInstanceLock()) {
   let presenceWin = null;
   let awayWins = [];
   let lockWins = [];
-  let lockHoldUntil = 0;   // a completed hold buys time outside, until this instant
   let lockTimer = null;
   let lastPresentAt = Date.now();
   let awaySuppressed = false; // manual dismiss holds until the camera sees a face again
@@ -231,9 +230,13 @@ if (!app.requestSingleInstanceLock()) {
      with one difference: the planner window is allowed ABOVE it, because the
      way out of the lock is through the planner — plan the task, start the
      round. showLockScreens raises the planner a level for exactly that. */
+  /* No grace period. There used to be one — a completed hold on the lock
+     screen bought a few minutes outside — and the test it failed was not
+     technical: it became the ordinary way to open the laptop rather than the
+     exception it was drawn as. The only thing that lifts the lock now is a
+     round actually running. */
   function lockWanted() {
     if (!store.data.settings.commitmentMode) return false;
-    if (Date.now() < lockHoldUntil) return false;
     const s = sessions.getState();
     return s.phase === 'idle';
   }
@@ -697,15 +700,14 @@ if (!app.requestSingleInstanceLock()) {
       return store.data.settings;
     });
     ipcMain.handle('open-planner', () => showPlanner());
-    ipcMain.handle('lock-step-out', () => {
-      const min = Math.max(1, Math.min(60, Number(store.data.settings.unlockMin) || 5));
-      lockHoldUntil = Date.now() + min * 60000;
-      hideLockScreens();
-      if (lockTimer) clearTimeout(lockTimer);
-      lockTimer = setTimeout(updateLock, min * 60000 + 500);
-      notify('Stepped out', `Rhythm locks again in ${min} minutes.`);
-      return { until: lockHoldUntil };
-    });
+    /* `lock-step-out` used to live here: a 2.5-second hold on the lock screen
+       bought `unlockMin` minutes outside. Removed, not disabled — an IPC
+       channel that still answers is a channel something will eventually call.
+
+       The reasoning is in windows/lock.js. Briefly: it was built as friction
+       and became a ritual, which is the habit the mode exists to interrupt.
+       The laptop opens by naming what you are about to do, and resting is one
+       of the things you can name — the focus page starts rounds on rewards. */
 
     /* ---- account sync ----
        The planner runs on rhythm://app, which is not the deployment's origin,

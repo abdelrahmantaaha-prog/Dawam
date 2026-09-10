@@ -17,6 +17,8 @@ const SORT_LABEL = {
   date: () => tx('Date', 'التاريخ'),
   title: () => tx('Title', 'الاسم'),
   recent: () => tx('Recent', 'الأحدث'),
+  tag: () => tx('Tag', 'الوسم'),
+  project: () => tx('Project', 'المشروع'),
 };
 
 export function FilterBar({ filter, onChange, labels = [], projects = [], sorts = ['manual'], compact = false }) {

@@ -33,6 +33,17 @@ used to be: the always-on-top overlay, the drift watch, force-return, break and
 away blackouts, chair detection, hard blocks and free times. Anchor is not a
 separate program any more — see `desktop/README.md`.
 
+**Commitment mode has no step-out.** There was one — a 2.5-second hold on the
+lock screen bought five minutes outside — and the test it failed was not
+technical: it became the ordinary way to open the laptop, a ritual performed
+without deciding anything, which is precisely the habit the mode exists to
+interrupt. A door with a slow handle is a door. The machine opens by naming what
+you are about to do, and **resting is one of the things you can name**: the
+focus page starts a real round on a reward, with its own clock and its own end,
+which is the difference between resting and drifting. Nothing is charged for it
+— cashing a reward in is a deliberate act on the points page, and making every
+rest cost something would only teach you not to rest.
+
 What the merge is for is the seam between the two halves. A round is started
 **from a planned task**, sized by that task's own slot or by what past rounds
 taught Rhythm it takes; "focus this" anywhere in the planner starts a real round
@@ -303,6 +314,12 @@ src/views.jsx       Habits, Projects, Settings, PIN screen
 src/App.jsx         the main component: state, handlers, wizard, gate, routing
 src/sync.js         backend-agnostic merge engine + twice-a-day cadence
 src/focus.jsx       the focus suite's view + bridge hooks (desktop only)
+src/recur.js        when a recurring task is actually due (daily / weekly /
+                    monthly), and how a monthly date lands in a short month
+src/quota.js        a numbered project's share of TODAY, divided by the
+                    sittings that are left rather than the calendar days
+src/nowlock.js      the fifteen-minute lock: is it due, and what clears it
+src/applock.js      lock task mode on Android — the phone half of that lock
 src/calendar.js     iCalendar reader: parsing, recurrence, busy intervals
 src/calsync.js      where feed text comes from (shell / direct / relay) and
                     where the expanded events are cached
@@ -322,7 +339,8 @@ Notes for future work:
 - The translator is `tx(en, ar)` — renamed from `t` specifically so `.map((t) => …)`
   callbacks can never shadow it again. Keep it that way.
 - All stored weeks are preloaded into the session cache at startup, so
-  cross-week features (tasks under a Project, overdue) are complete.
+  cross-week features (tasks under a Project, overdue, and multi-day tasks that
+  start in one week and end in the next) are complete.
 - `npm test` covers pace math, streaks, block resolution, and the sync merge and
   cadence. Extend it when touching `core.jsx` or `sync.js`.
 - Careful with `.sub > span` in CSS: it also matches `.sub-bullet` and will
@@ -440,6 +458,190 @@ the focus lock all apply. "Clear slots" removes only what the button wrote —
 hand-set times are never touched, and editing a time by hand releases that task
 from future clears.
 
+## Multi-day tasks
+
+A task can carry an **until** date and then belongs to every day from its own
+through that one. There is still exactly one task: it is stored once, in the
+week that owns its first day, and ticking it anywhere finishes it everywhere.
+The later days show a reference — "day 2 of 4" — rather than a copy, which is
+what lets that number be true.
+
+The rule that makes the feature worth having is that a spanning task is **not
+overdue while its span is still running**. "Read the report by Thursday" should
+sit quietly on Tuesday and start shouting on Friday. `slotPassed` judges it on
+the last day of the span, not the first.
+
+A borrowed copy cannot be dragged — it lives somewhere else, and moving it from
+a day it does not belong to would be a lie about what happened. Tapping it
+opens the real task on its own day.
+
+## Recurring tasks have a schedule
+
+Every day, weekly on the weekdays you pick, or monthly on the dates you pick.
+**Plan the day** offers only what is due on the day being planned.
+
+That is the whole point: a weekly chore offered seven times a week is how a
+person learns to press Skip without reading, and once that habit forms the
+wizard has stopped working for everything else too.
+
+A monthly date past the end of a short month lands on its last day — the 31st
+fires on 30 September and on 28 February. A rent reminder that skips February
+is worse than one that arrives a day early. A schedule with nothing picked yet
+is due every day rather than never: mid-edit is not a silent stop, and a
+recurrence that quietly stops appearing is indistinguishable from a deleted one.
+
+Recurring tasks also carry a project now, and hand it to every task they create.
+
+## Projects that ask for their share of the day
+
+A project with a number on it (**Projects → Remind me to work on this**) can
+name the weekdays it is worked on and the period it should surface in. On those
+days it appears in Plan and in Now — "The Book · 11 pages today" — with the box
+to log progress on the line itself, and goes quiet the moment the share is in.
+
+**The pace divides by the sittings that are left, not the calendar days.** A
+hundred pages in ten days is ten a day only if you work all ten; someone who
+writes on Tuesdays and Thursdays has three sittings, and telling them "ten
+pages" every Tuesday sets them up to miss by a factor of three, invisibly. The
+number rounds up, because a third of a page is still a page you have to open.
+
+Effectively a habit with an end date, which is why it reads like one.
+
+## Focus targets
+
+A task can carry a **focus target** in minutes: not "is this finished" but "did
+it get the time I promised it". Measured rounds count towards it, per date, so
+a target on something you return to all week means something on each of those
+days. Minutes are banked when a round ends whether or not the task is ticked
+off — work that is never really "done" is exactly the case a target is for.
+
+## The queue does not negotiate
+
+A task the Now queue has actually presented — offered as the thing to do now,
+not merely listed under **Next** — stops being movable. Its grip becomes a
+lock, and its date, period and times freeze in the editor.
+
+The one-thing-at-a-time design makes rearranging Plan feel free: drag the task
+you do not want below the next one and the queue obligingly hands you something
+easier. Four of those and the day has been renegotiated into whatever was most
+comfortable, with no moment where you noticed you were doing it.
+
+Two answers remain: do it, or **delete** it. Deleting stays available on
+purpose — the point is not to trap you with a task that turned out to be wrong,
+it is to make dropping it a decision with a name rather than a drag that leaves
+it looking planned. Ticking it off releases every field again, so undoing a
+mis-tap does not leave it frozen.
+
+## The Now lock
+
+Off unless you switch it on (**Settings → The Now lock**). Once on: every
+fifteen minutes in which nothing at all was finished, the app stops being an
+app. Not a banner behind which the planner keeps working — nothing is
+reachable, including Settings and the switch itself, until one task or a single
+step of one is ticked.
+
+Three rules keep it from being a trap:
+
+- **It never fires on a day with nothing left to do.** Locking someone out of a
+  finished day is punishing them for finishing it.
+- **Any completion clears it.** A subtask counts; the two-minute version of a
+  habit counts. The bar is "you moved", not "you moved enough" — a lock that
+  demands a big task is a lock that gets solved by force-quitting the app.
+- **The clock runs from the last thing you finished**, not from the top of the
+  hour, so a productive stretch is never interrupted and a lock you just
+  satisfied does not come straight back.
+
+### On a phone
+
+Covering the app is the whole lock on a laptop, where the desktop shell owns
+every display. On a phone it is barely half of one: the page can be as complete
+as it likes and Home still leaves. So the lock asks Android for **lock task
+mode**, the platform's own kiosk primitive, which takes Home, Recents and the
+notification shade away for as long as it is held — there is no route out to
+Settings either.
+
+It comes in two strengths, and the card says which one it actually got rather
+than claiming the better one:
+
+| Mode | What it is |
+| --- | --- |
+| **pinned** | The ordinary case. Android shows its own confirmation and you can leave by holding Back and Overview together. A speed bump with a name. |
+| **locked** | Rhythm is the device owner. Nothing leaves until the app releases it. |
+
+The second needs provisioning once, by hand, from a computer, on a device with
+no accounts on it yet:
+
+```bash
+adb shell dpm set-device-owner app.rhythm.planner/.RhythmDeviceAdmin
+```
+
+That cliff is deliberate. Device ownership is the real thing and should cost a
+cable and a wiped phone, not a toggle flipped while annoyed. The receiver it
+needs declares **no policies at all** — every other power device ownership
+carries (wiping the device, forcing a password, disabling the camera) is left
+unclaimed.
+
+> **What this deliberately does not do: block the Accessibility settings page.**
+> An app cannot block the system Settings app, and it cannot single out one
+> screen inside it. The technique that used to — an accessibility service
+> watching for that screen, or an overlay drawn on top of it — is exactly what
+> Android hardened against (Settings hides overlays from Android 12 on), and
+> Play policy restricts accessibility services to accessibility. It would break
+> on the next release and could not be published. Lock task mode is stronger
+> for this purpose anyway: it does not block one screen of Settings, it blocks
+> leaving Rhythm at all.
+
+## Points can go down
+
+Rewards make the number worth having; **penalties** are what make it worth
+protecting, and they are for the habits you are trying to stop. Two shapes, both
+priced by you: a **cost**, which subtracts a fixed number, and a **wipe**, which
+takes the balance to zero.
+
+A wipe is still an entry, never a delete. It writes minus whatever the balance
+was, so the ledger sums to nothing and the whole history is still there to read
+— a balance of zero with no history is a balance with no meaning. And unlike
+ticking a task, penalties are deliberately **not idempotent**: the same slip
+twice costs twice, because it happened twice.
+
+Charging one is a two-tap confirm, and a wipe names the number it is about to
+take before it takes it.
+
+## Quick add
+
+One button, one line, from any page. The same parser every other box uses, so
+"call the dentist tomorrow 3pm #calls %Health" lands where it says it lands.
+Without a date in the words it goes onto today at whatever period is running —
+the answer that needs no decision — and the backlog is one tap away.
+
+While you type a `#tag` or a `%project`, the matches appear under the box.
+The list is generated by the **parser's own matcher**, so picking a name and
+typing the letters can never mean different things; a list that disagreed with
+the parser would teach a syntax the app does not have. A chosen name with a
+space in it is quoted, because unquoted `%Bugs and Features` tags "Bugs" and
+leaves two words loose in the title.
+
+On Android the home-screen widget has a **+** that opens the app straight into
+that sheet. A widget cannot host a text field — RemoteViews has no such view,
+which is why every "quick add" widget on Android is a shortcut into its app —
+so this is the honest whole of what one can be.
+
+## Habit stacking, made real
+
+"After I pray Fajr, I will read ten pages" used to be a sentence printed on a
+card while both habits sat in the queue at once, in whatever order their blocks
+ran. The stack was a label on something the app was not doing.
+
+A stacked habit now **waits**. It stays out of the Now queue until its anchor is
+done that day, and the moment the anchor is ticked it is the very next thing you
+see. That is the whole mechanism the book describes — the anchor is the cue, and
+a cue that fires at the wrong time is not a cue.
+
+Three things it refuses to do, each of which would lose a habit off the screen:
+a missing anchor (deleted, or from an old backup) releases it; a cycle releases
+both; and a chain is walked, so a habit three deep waits for everything above it
+rather than only its parent.
+
 ## Sleep
 
 During Isha the Now page shows bedtimes counted back from Fajr in ~90-minute
@@ -466,7 +668,21 @@ task's subtasks folded in — so nothing left behind earlier in the day gets
 skipped. Checking the card slides it out to the left and the next one in from
 the right (skipped under `prefers-reduced-motion`).
 
-Two things sit outside that queue:
+Four things sit outside that queue:
+
+- **Outstanding prayers.** A prayer whose period has passed and was never
+  marked leaves the queue entirely and sits above everything until it is dealt
+  with. The queue works by hiding what is not next, which is exactly the wrong
+  treatment here: it put the prayer behind however many tasks happened to sit
+  above it. The prayer for the *current* period has not been missed yet and
+  stays in the queue where it belongs.
+- **Getting ready.** A timed task appears under **Get ready** `leadMin`
+  minutes before it starts (30 by default, Settings → The Now page, zero turns
+  it off). A meeting that surfaces at the minute it begins has already begun;
+  the lead is the difference between being told about a thing and being able to
+  be at it.
+
+and the two that always did:
 
 - **Caught up.** When the head of the queue belongs to a *later* block,
   everything through the current period is clear: Now says *"You're all caught

@@ -5,18 +5,27 @@
   <link rel="stylesheet" href="lock.css" />
 </head>
 <body>
+  <!-- There used to be a second button here: hold two and a half seconds to
+       step out for five minutes. It is gone on purpose.
+
+       The hold was meant to be friction, and friction is not what it turned
+       into. It became the ordinary way to open the laptop — a ritual you
+       perform without deciding anything, which is the exact shape of the habit
+       commitment mode exists to break. A door with a slow handle is still a
+       door.
+
+       So there is one way in now, and it is to say what you are going to do.
+       That includes resting: a reward is a legitimate answer, and Rhythm's
+       focus page will start a round on one. What is no longer on offer is
+       opening the machine without answering the question at all. -->
   <div class="lock-wrap">
     <div class="lock-mark">&#9672;</div>
     <h1>Rhythm holds the day</h1>
     <p class="lock-sub">The laptop opens when you know what you're working on, and for how long.</p>
     <div class="lock-actions">
       <button id="open-rhythm" class="lock-btn primary">Open Rhythm &amp; start a round</button>
-      <button id="hold-out" class="lock-btn ghost">
-        <span class="hold-fill"></span>
-        <span class="hold-text">Hold to step out for <span id="hold-min">5</span> min</span>
-      </button>
     </div>
-    <p class="lock-note">Stepping out is a hold, not a click &mdash; on purpose.</p>
+    <p class="lock-note">Resting counts &mdash; pick a reward and focus on that.</p>
   </div>
   <script src="lock.js"></script>
 </body>

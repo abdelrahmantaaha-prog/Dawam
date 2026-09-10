@@ -1,40 +1,15 @@
-/* The lock screen's whole vocabulary: open the planner, or hold to step out.
-   The hold is measured here (2.5s of continuous press) and only then reported
-   to the main process — releasing early resets, and a click does nothing. */
-const HOLD_MS = 2500;
-const btn = document.getElementById('hold-out');
-const fill = btn.querySelector('.hold-fill');
+/* The lock screen has one word now: open Rhythm and start a round.
 
+   The hold-to-step-out button that used to sit beside it is gone. It was built
+   as friction — two and a half seconds of deliberate press — and friction is
+   not what it became. It turned into the ordinary way to open the laptop, a
+   ritual performed without deciding anything, which is precisely the habit
+   commitment mode exists to interrupt. A door with a slow handle is a door.
+
+   What replaces it is not more severity. Rhythm's focus page will start a
+   round on a reward, so "I am going to rest for twenty minutes" is an answer
+   the lock accepts. The thing that is no longer possible is opening the
+   machine without answering at all. */
 document.getElementById('open-rhythm').addEventListener('click', () => {
   window.rhythmFocus.openPlanner();
-});
-
-let t0 = null;
-let raf = null;
-
-function tick() {
-  const frac = Math.min(1, (Date.now() - t0) / HOLD_MS);
-  fill.style.width = `${frac * 100}%`;
-  if (frac >= 1) {
-    t0 = null;
-    fill.style.width = '0%';
-    window.rhythmFocus.lockStepOut();
-    return;
-  }
-  raf = requestAnimationFrame(tick);
-}
-function stop() {
-  t0 = null;
-  if (raf) cancelAnimationFrame(raf);
-  fill.style.width = '0%';
-}
-btn.addEventListener('pointerdown', () => { t0 = Date.now(); raf = requestAnimationFrame(tick); });
-btn.addEventListener('pointerup', stop);
-btn.addEventListener('pointerleave', stop);
-btn.addEventListener('pointercancel', stop);
-
-/* The unlock minutes come from settings so the label tells the truth. */
-window.rhythmFocus.getData().then((d) => {
-  const m = (d.settings && d.settings.unlockMin) || 5;
-  document.getElementById('hold-min').textContent = m;
 });

@@ -31,11 +31,15 @@ const DEFAULTS = {
     // Desktop-only: the planner window is the app's face, so it opens on
     // launch unless the person would rather start in the tray.
     openPlannerAtStart: true,
-    // Commitment mode: while no work round runs, every display is covered by a
-    // lock screen — the laptop opens by naming a task and a duration. The
-    // escape is a deliberate 2.5s hold that buys unlockMin minutes outside.
-    commitmentMode: false,
-    unlockMin: 5
+    /* Commitment mode: while no work round runs, every display is covered by a
+       lock screen, and the laptop opens by naming a task and a duration.
+
+       There is no escape hatch. There was one — a 2.5-second hold worth
+       `unlockMin` minutes — and it stopped being friction and became the
+       ordinary way in. `unlockMin` is left out rather than left unused: a
+       setting nothing reads is a promise the app is not keeping. Old data
+       files carrying it are harmless; the spread below simply ignores it. */
+    commitmentMode: false
   },
   templates: [],
   history: []

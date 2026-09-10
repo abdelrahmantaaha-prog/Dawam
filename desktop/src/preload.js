@@ -26,7 +26,6 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
   openPlanner: () => ipcRenderer.invoke('open-planner'),
   // Commitment lock: the held-out escape. Granting it is the main process's
   // decision; this only reports that the hold completed.
-  lockStepOut: () => ipcRenderer.invoke('lock-step-out'),
 
   /* Account sync, relayed through the main process — see main.js for why the
      renderer cannot do this itself. Present only on the desktop; sync.js

@@ -24,6 +24,9 @@ public class RhythmWidget extends AppWidgetProvider {
     static final String K_BODY = "body";
     static final String K_UPCOMING = "upcoming";
     static final String K_UPDATED = "updatedAt";
+    /* The extra the + puts on its launch intent, read once by the web layer
+       through RhythmWidgetPlugin.takeAction(). */
+    static final String K_ACTION = "rhythm_action";
 
     /* Re-render every placed instance. Called from onUpdate (Android's own
        schedule and on add) and from the plugin the moment Now changes. */
@@ -32,6 +35,18 @@ public class RhythmWidget extends AppWidgetProvider {
         ComponentName me = new ComponentName(context, RhythmWidget.class);
         int[] ids = mgr.getAppWidgetIds(me);
         for (int id : ids) render(context, mgr, id);
+    }
+
+    /* The launch intent, optionally carrying something for the app to do on
+       arrival. ACTION_MAIN + CATEGORY_LAUNCHER so an already-running Rhythm
+       comes forward instead of starting a second copy. */
+    static Intent openIntent(Context context, String action) {
+        Intent open = new Intent(context, MainActivity.class);
+        open.setAction(Intent.ACTION_MAIN);
+        open.addCategory(Intent.CATEGORY_LAUNCHER);
+        open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        if (action != null) open.putExtra(K_ACTION, action);
+        return open;
     }
 
     static void render(Context context, AppWidgetManager mgr, int widgetId) {
@@ -59,12 +74,17 @@ public class RhythmWidget extends AppWidgetProvider {
 
         // Tapping anywhere opens Rhythm. singleTask + the launch intent means an
         // already-running app comes forward rather than starting a second copy.
-        Intent open = new Intent(context, MainActivity.class);
-        open.setAction(Intent.ACTION_MAIN);
-        open.addCategory(Intent.CATEGORY_LAUNCHER);
-        open.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
-        v.setOnClickPendingIntent(R.id.widget_root, PendingIntent.getActivity(context, 0, open, flags));
+        v.setOnClickPendingIntent(R.id.widget_root, PendingIntent.getActivity(context, 0, openIntent(context, null), flags));
+
+        /* The + carries an action the web layer reads on the way in, so the app
+           opens with the add sheet up rather than on whatever page it was last
+           left on. A DIFFERENT request code (1) is essential: two PendingIntents
+           that are equal apart from their extras are the same PendingIntent to
+           Android, and FLAG_UPDATE_CURRENT would quietly give both taps
+           whichever set of extras was written last — the body of the widget
+           would start opening the add sheet too. */
+        v.setOnClickPendingIntent(R.id.widget_add, PendingIntent.getActivity(context, 1, openIntent(context, "quick-add"), flags));
 
         mgr.updateAppWidget(widgetId, v);
     }

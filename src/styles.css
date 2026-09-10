@@ -1641,3 +1641,44 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .tsug-kind{font-size:9.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:var(--faint);flex-shrink:0}
 .tsug-row.new .tsug-name{font-style:italic;color:var(--muted)}
 .rhythm.dark .tsug{box-shadow:0 10px 26px rgba(0,0,0,.45)}
+
+/* ---- quick add: one line, from anywhere ---- */
+/* Above the nav on the side the language does not start from, so it never
+   covers the first tab — which is Overdue in English and Habits in Arabic. */
+.qa-fab{position:fixed;z-index:45;bottom:calc(78px + env(safe-area-inset-bottom, 0px));inset-inline-end:18px;
+  width:52px;height:52px;border-radius:50%;border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
+  background:var(--verdigris);color:#fff;box-shadow:0 8px 22px rgba(62,138,108,.42)}
+.qa-fab:hover{filter:brightness(1.06)}
+@media (prefers-reduced-motion:no-preference){ .qa-fab{transition:transform .15s ease,filter .15s ease} .qa-fab:active{transform:scale(.94)} }
+/* Bottom-anchored: the keyboard takes the bottom half of a phone and a centred
+   dialog would open underneath it. */
+.qa-overlay{align-items:flex-end;padding:0}
+.qa-sheet{width:100%;max-width:540px;margin:0 auto;background:var(--panel);border:1px solid var(--line);
+  border-radius:18px 18px 0 0;padding:16px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+  box-shadow:0 -14px 40px rgba(23,48,39,.28)}
+@media (min-width:768px){ .qa-overlay{align-items:center;padding:24px 14px} .qa-sheet{border-radius:18px} }
+.qa-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px}
+.qa-title{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:800;letter-spacing:.6px;
+  text-transform:uppercase;color:var(--faint)}
+.qa-field input{font-size:16px;padding:11px 12px}   /* 16px: anything smaller makes iOS zoom the page */
+.qa-actions{display:flex;gap:8px;margin-top:12px}
+.qa-actions button{flex:1;justify-content:center}
+.qa-hint{margin:9px 0 0;text-align:center}
+/* The suggestion list opens UPWARD here — downward it would be behind the
+   keyboard, which is the only place it must never be. */
+.qa-sheet .tsug{top:auto;bottom:calc(100% + 3px)}
+.rhythm.dark .qa-sheet{box-shadow:0 -14px 40px rgba(0,0,0,.5)}
+
+/* ---- resting, on the clock ---- */
+.focus-rest-h{margin:14px 0 6px}
+.focus-taskbtn.reward{border-style:dashed}
+.focus-afford{color:var(--verdigris);font-weight:800}
+
+/* ---- habits held back by their anchor ---- */
+/* A stacked habit that is simply absent looks exactly like one that was
+   deleted, which is the whole objection to gating. This is the answer: muted,
+   and saying what it is waiting for. */
+.now-waiting{display:flex;flex-direction:column;gap:5px;margin-top:12px;padding-top:10px;border-top:1px solid var(--soft)}
+.now-waiting-row{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--faint)}
+.now-waiting-for{font-size:10px;font-weight:800;letter-spacing:.3px;text-transform:uppercase;color:var(--faint);
+  background:var(--soft);border-radius:99px;padding:1px 7px}

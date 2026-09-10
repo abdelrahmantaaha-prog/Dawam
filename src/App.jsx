@@ -5,7 +5,7 @@ import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable,
 import { isDerived } from '../shared/model.js';
 import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken, inAppShell } from './sync.js';
 import { readLedger, balanceOf, award, revoke, spend, penalise, wipe } from './points.js';
-import { updateWidget } from './widget.js';
+import { takeWidgetAction, updateWidget } from './widget.js';
 import { writeNowFile } from './nowfile.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence, scheduleWakeAlarm, cancelWakeAlarm, pendingWakeAlarm } from './notify.js';
 import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, describeProposal, parseAssistantReply, parseEstimates, callAssistant, seriesDates } from './assistant.js';
@@ -35,7 +35,7 @@ import { dueOn as recurDueOn, describeRepeat, isScheduled, normalizeRepeat } fro
 import { TrelloCards } from './trelloview.jsx';
 import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
 
-import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,ProjectTag,QuotaLine,SkyScene,SubtaskEditor,TaskEditor,TokenSuggest,pyramidPath } from './components.jsx';
+import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,ProjectTag,QuickAdd,QuotaLine,SkyScene,SubtaskEditor,TaskEditor,TokenSuggest,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
 
 /* The pool rejected this app's token. Said plainly, and pointing at the field
@@ -210,6 +210,7 @@ export default function Rhythm() {
   const [lastDoneAt, setLastDoneAt] = useState(() => Date.now());
   const marked = () => setLastDoneAt(Date.now());
   const [notifyState, setNotifyState] = useState({ supported: false, state: 'unsupported' });
+  const [quickAdd, setQuickAdd] = useState(false);   // the one-line add sheet
   const pendingEditRef = useRef(null);                  // open editor after jumping to an overdue task's week
 
   const weekRef = useRef(week);
@@ -676,7 +677,7 @@ export default function Rhythm() {
     // Points ride on the log as it stood BEFORE the toggle: the multiplier is
     // earned by the days leading up to this one, not by this one.
     if (!before) return;
-    if (habitDoneOn(before, iso)) revokeRef(`habit:${id}:${iso}`); else awardHabitDay(before, iso);
+    if (habitDoneOn(before, iso)) revokeRef(`habit:${id}:${iso}`); else { marked(); awardHabitDay(before, iso); }
   };
 
   /* ---- PIN (soft lock) ---- */
@@ -1407,6 +1408,9 @@ export default function Rhythm() {
     // Unmark → punish (re-lock 15 min). Re-mark → clear any pending penalty.
     if (!willBeDone) { prayerPenaltyRef.current[key] = Date.now(); savePenalty(); }
     else if (prayerPenaltyRef.current[key]) { delete prayerPenaltyRef.current[key]; savePenalty(); }
+    // A prayer is a thing finished. The Now lock says "finish one thing" and
+    // has to mean it wherever the thing is finished, not only on its own card.
+    if (willBeDone) marked();
     day[blockId] = willBeDone;
     prayers[dIdx] = day;
     await writeWeek(wsISO, { ...cur, prayers });
@@ -2054,8 +2058,37 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     if (!t.done) toggleDone(id);
     rememberDuration(t.title, minutes, 'kept');
   };
+  /* Minutes actually focused, banked against the task's own target.
+
+     This is the half of a focus target that cannot be typed in: the goal is a
+     promise and this is the measurement. It runs on every finished round,
+     whether or not the task gets ticked off — the whole point of a target is
+     that it answers for work which is never really "done", so a round that
+     ends with the task still open is exactly the case that has to count.
+
+     Written through mutateTask like any other edit, so it syncs and merges the
+     same way. Per date: a target on something you return to all week means
+     something on each of those days rather than once. */
+  const bankFocus = (id, minutes) => {
+    const iso = fmtISO(logicalDayMid());
+    const t = (weekRef.current.tasks || []).find((x) => x.id === id);
+    if (!t || !(minutes > 0)) return;
+    mutateTask(id, (x) => addFocusMinutes(x, iso, minutes));
+    const goal = focusTargetMin(t);
+    if (goal != null) {
+      const after = focusSpent(t, iso) + Math.round(minutes);
+      if (after >= goal && focusSpent(t, iso) < goal) flash(`${tx('Focus target met', 'تحقّق هدف التركيز')} — ${t.title}`);
+    }
+  };
   const focusLearn = (title, minutes) => { rememberDuration(title, minutes, 'kept'); };
-  useRoundEnded((entry) => { setPendingRound(entry); setView('focus'); });
+  useRoundEnded((entry) => {
+    // Bank the measured minutes before anything is asked: the round happened
+    // whether or not the question about it gets answered, and a dismissed card
+    // should not throw away the one number that was actually measured.
+    if (entry && entry.taskId) bankFocus(entry.taskId, Math.round((entry.focusedSec || 0) / 60));
+    setPendingRound(entry);
+    setView('focus');
+  });
 
   const nowStart = cleanTime(todayTimings[activeBlock.startKey]) || '';
   const nowEnd = activeBlock.endKey ? cleanTime(todayTimings[activeBlock.endKey]) || '' : '';
@@ -2623,6 +2656,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   };
   const habitGate = stackGate(settings.habits || [], habitDoneNow);
   const waitingHabitIds = new Set(habitGate.waiting.map((h) => h.id));
+  // Held back, and not yet kept. These are neither in the queue nor finished,
+  // so the day's counter has to know about them or it reads them as done.
+  const waitingHabits = habitGate.waiting.filter((h) => !habitDoneOn(h, nowHabitISO));
   const todayStartMsQ = new Date(todayMid.getFullYear(), todayMid.getMonth(), todayMid.getDate()).getTime();
   const mStartMin = (m) => Math.max(0, Math.min(1439, Math.round((m.startMs - todayStartMsQ) / 60000)));
   const pastByBlock = {};
@@ -2648,7 +2684,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   }
   const startedPrayers = PRAYER_BLOCKS.filter((pid) => blockIdx(pid) <= activeIdx).length;
   const totalN = nowList.length + (settings.habits || []).length + startedPrayers + startedOrDoneMeetings.length;
-  const doneN = totalN - queue.length - liveNow.length - soonNow.length - liveMeetings.length - missedPrayers.length;
+  const doneN = totalN - queue.length - liveNow.length - soonNow.length - liveMeetings.length - missedPrayers.length - waitingHabits.length;
   const next = queue[0] || null;
   // Everything up to and through the current period is clear when the head of
   // the queue belongs to a LATER block. Then it stops being "do this now" and
@@ -2658,7 +2694,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
      open is not a clear day, and saying so while either is on the screen would
      be the app contradicting itself two inches apart. */
   const caughtUp = nextIsLater && liveNow.length === 0 && soonNow.length === 0 && missedPrayers.length === 0;
-  const nothingLeft = !next && liveNow.length === 0 && soonNow.length === 0 && missedPrayers.length === 0 && liveMeetings.length === 0;
+  const nothingLeft = !next && liveNow.length === 0 && soonNow.length === 0 && missedPrayers.length === 0
+    && liveMeetings.length === 0 && waitingHabits.length === 0;
 
   /* Projects that asked for a share of today, and have not had it yet. The
      block they chose decides when they appear: a project set to the morning
@@ -2775,6 +2812,22 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     ? { title: ongoingText.title, body: ongoingText.body, upcoming: widgetUpcoming.length ? `${tx('then', 'ثم')}: ${widgetUpcoming.join(' · ')}` : '' }
     : null;
   const widgetKey = widgetPayload ? `${widgetPayload.title}|${widgetPayload.body}|${widgetPayload.upcoming}` : '';
+  /* The widget's + asks for the add sheet. Collected on boot and on every
+     resume, because a warm start delivers the intent to an app that is already
+     running and there is no other moment to notice it. */
+  useEffect(() => {
+    if (!ready) return undefined;
+    let stop = false;
+    const collect = async () => {
+      const a = await takeWidgetAction();
+      if (!stop && a === 'quick-add') { setView('now'); setQuickAdd(true); }
+    };
+    collect();
+    const onShow = () => { if (document.visibilityState === 'visible') collect(); };
+    document.addEventListener('visibilitychange', onShow);
+    return () => { stop = true; document.removeEventListener('visibilitychange', onShow); };
+  }, [ready]);
+
   useEffect(() => {
     if (!ready) return;
     updateWidget(widgetPayload);
@@ -3121,6 +3174,19 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               ) : (
                 <div className="now-empty">{tx('Nothing scheduled today.', 'لا شيء مجدول اليوم.')} {bHint(activeBlock)}.</div>
               )}
+            {/* Habits waiting on their anchor. Muted, and stated: "after Fajr"
+                is a promise the app is keeping, and a habit that is merely
+                absent looks exactly like a habit that was deleted. */}
+            {todayInView && waitingHabits.length > 0 && (
+              <div className="now-waiting">
+                {waitingHabits.map((h) => (
+                  <span key={h.id} className="now-waiting-row">
+                    <Flame size={11} /> {h.name}
+                    <span className="now-waiting-for">{tx('after', 'بعد')} {anchorLabel(h, settings.habits || [], { prayerName: (id) => { const b = blockById(id); return tx(`${b.name} prayer`, `صلاة ${b.ar}`); } })}</span>
+                  </span>
+                ))}
+              </div>
+            )}
             {/* Projects with a number on them, on the days they asked for. A
                 deadline is not something a person can act on; a share of it is. */}
             {todayInView && quotasNow.length > 0 && (
@@ -3818,6 +3884,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {view === 'focus' && isDesktop() && (
         <FocusView
           tasks={focusTasks}
+          rewards={(settings.rewards || []).filter((r) => r.name)}
+          balance={balance}
           durationFor={durationFor}
           pendingRound={pendingRound}
           onDismissRound={() => setPendingRound(null)}
@@ -3837,7 +3905,12 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {nowLocked && !locked && (
         <div className="nowlock" role="dialog" aria-modal="true">
           <div className="nowlock-card">
-            <div className="nowlock-h"><Lock size={17} /> {tx('Nothing has moved for', 'لم يتحرك شيء منذ')} {lockEvery(settings)} {tx('minutes', 'دقيقة')}</div>
+            <div className="nowlock-h"><Lock size={17} /> {(() => {
+              const n = lockEvery(settings);
+              // "1 minutes" is the sort of thing that makes a serious sentence
+              // read like a placeholder, which is not what this screen can afford.
+              return `${tx('Nothing has moved for', 'لم يتحرك شيء منذ')} ${n === 1 ? tx('a minute', 'دقيقة') : `${n} ${tx('minutes', 'دقيقة')}`}`;
+            })()}</div>
             <p className="nowlock-sub">{tx('Finish one thing — a task, or a single step of one — and the day is yours again.', 'أنجز شيئًا واحدًا — مهمة أو خطوة واحدة منها — ويعود اليوم إليك.')}</p>
             {next || liveNow.length || missedPrayers.length ? (
               <div className="nowlock-item">
@@ -3890,6 +3963,31 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       )}
 
       {toast && <div className="toast">{toast}</div>}
+
+      {/* One line, from anywhere. Sits above the nav on the side the language
+          does not start from, so it never covers the first tab; hidden while
+          the lock is up, which is the one moment adding work is not the point. */}
+      {!nowLocked && !locked && !gateActive && (
+        <button className="qa-fab" onClick={() => setQuickAdd(true)} aria-label={tx('Quick add', 'إضافة سريعة')} title={tx('Quick add', 'إضافة سريعة')}>
+          <Plus size={22} />
+        </button>
+      )}
+      {quickAdd && (
+        <QuickAdd
+          onClose={() => setQuickAdd(false)}
+          parseHint={parseHint}
+          labels={settings.labels || []}
+          projects={settings.projects || []}
+          blockName={todayInView ? bName(activeBlock) : bName(blockById('morning'))}
+          onAdd={(text, { toPool }) => {
+            // Straight onto today at whatever period is running, unless the
+            // words themselves say otherwise — addParsedTask already honours a
+            // date in the text over the row it was typed into.
+            if (toPool) { addParsedTask(text, { toPool: true }); flash(tx('Added to backlog.', 'أُضيفت إلى قائمة الانتظار.')); return; }
+            const day = todayInView ? todayCol : selectedDay;
+            addParsedTask(text, { dayIdx: day, blockId: todayInView ? activeId : 'morning' });
+          }} />
+      )}
 
       <nav className="bottomnav">
         <button className={`navbtn ${view === 'overdue' ? 'on' : ''}`} onClick={() => go('overdue')} aria-label={tx('Overdue', 'المتأخرات')}>

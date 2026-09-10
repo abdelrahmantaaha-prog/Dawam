@@ -9,4 +9,6 @@
     <string name="widget_empty_title">Open Rhythm</string>
     <string name="widget_empty_body">It will fill in once the app has run.</string>
     <string name="widget_clear_title">Nothing right now.</string>
+    <string name="widget_add">+</string>
+    <string name="widget_add_desc">Add a task</string>
 </resources>

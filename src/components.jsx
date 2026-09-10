@@ -130,6 +130,60 @@ function TokenSuggest({ inputRef, keys, value, onChange, labels = [], projects =
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  Quick add — one line, from anywhere.                               */
+/*                                                                     */
+/*  Adding a task on a phone meant: open Plan, find the day, find the   */
+/*  block, tap Add. Four taps and a decision about where it goes before */
+/*  you have written down the thing you were afraid of forgetting —     */
+/*  which is how things get forgotten.                                  */
+/*                                                                     */
+/*  So: one button, one line, and the same parser every other box uses. */
+/*  "call the dentist tomorrow 3pm #calls %Health" lands where it says  */
+/*  it lands. Without a date it goes into today's current period, which */
+/*  is the answer that needs no decision — and the backlog is one tap   */
+/*  away for the things that genuinely have no home yet.                */
+/*                                                                     */
+/*  Sheet rather than modal, and bottom-anchored, because the keyboard  */
+/*  takes the bottom half of the screen and a centred dialog would open */
+/*  underneath it.                                                      */
+/* ------------------------------------------------------------------ */
+function QuickAdd({ onAdd, onClose, parseHint, blockName, labels = [], projects = [] }) {
+  const [text, setText] = useState('');
+  const ref = useRef(null);
+  const keys = useRef(null);
+  useEffect(() => { const id = setTimeout(() => ref.current && ref.current.focus(), 60); return () => clearTimeout(id); }, []);
+  const submit = (toPool) => { if (!text.trim()) return; onAdd(text, { toPool }); setText(''); onClose(); };
+  return (
+    <div className="overlay qa-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="qa-sheet">
+        <div className="qa-head">
+          <span className="qa-title"><Plus size={15} /> {tx('Quick add', 'إضافة سريعة')}</span>
+          <button className="icon" onClick={onClose} aria-label={tx('Close', 'إغلاق')}><X size={17} /></button>
+        </div>
+        <div className="quick qa-field">
+          <input ref={ref} value={text} onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (keys.current && keys.current(e)) return;
+              if (e.key === 'Enter') submit(false);
+              if (e.key === 'Escape') onClose();
+            }}
+            placeholder={tx('Anything… (tomorrow 3pm #tag %project)', 'أي شيء… (بكرة ٣ عصر #وسم %مشروع)')} />
+          <TokenSuggest inputRef={ref} keys={keys} value={text} onChange={setText} labels={labels} projects={projects} />
+          <ParseChip text={text} hint={parseHint} />
+        </div>
+        <div className="qa-actions">
+          <button className="ghost" disabled={!text.trim()} onClick={() => submit(true)}><Inbox size={15} /> {tx('To backlog', 'إلى قائمة الانتظار')}</button>
+          <button className="primary" disabled={!text.trim()} onClick={() => submit(false)}>
+            <Plus size={15} /> {blockName ? `${tx('Add to', 'أضف إلى')} ${blockName}` : tx('Add', 'إضافة')}
+          </button>
+        </div>
+        <p className="hint-text qa-hint">{tx('A date or a time in the words wins over the period above.', 'التاريخ أو الوقت المكتوب في النص يتقدّم على الفترة أعلاه.')}</p>
+      </div>
+    </div>
+  );
+}
+
 function ParseChip({ text, hint }) {
   const s = hint ? hint(text || '') : '';
   if (!s) return null;
@@ -976,4 +1030,4 @@ function PointsPanel({ balance, ledger, rewards, penalties = [], onClose, onAddR
 /* ------------------------------------------------------------------ */
 /*  Habits — daily commitments; streaks glow brighter up to seven days */
 /* ------------------------------------------------------------------ */
-export { AppIcon,BlockRow,ProjectTag,QuotaLine,TokenSuggest,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };
+export { AppIcon,BlockRow,ProjectTag,QuickAdd,QuotaLine,TokenSuggest,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };

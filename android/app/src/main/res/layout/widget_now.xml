@@ -10,16 +10,46 @@
     android:background="@drawable/widget_bg"
     android:padding="14dp">
 
-    <TextView
-        android:id="@+id/widget_eyebrow"
-        android:layout_width="wrap_content"
+    <!-- The eyebrow and the add button share a row: a widget is a few
+         centimetres of glass and a button on its own line costs more of that
+         than the button is worth. -->
+    <LinearLayout
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="@string/widget_eyebrow"
-        android:textColor="#8CA79A"
-        android:textSize="10sp"
-        android:letterSpacing="0.09"
-        android:textStyle="bold"
-        android:maxLines="1" />
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <TextView
+            android:id="@+id/widget_eyebrow"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="wrap_content"
+            android:text="@string/widget_eyebrow"
+            android:textColor="#8CA79A"
+            android:textSize="10sp"
+            android:letterSpacing="0.09"
+            android:textStyle="bold"
+            android:maxLines="1" />
+
+        <!-- RemoteViews cannot host a text field — no widget can, which is why
+             every "quick add" widget on Android is a shortcut into its app.
+             This one opens Rhythm with the add sheet already up and the
+             keyboard already there, which is the whole of what a home-screen
+             quick add can honestly be. -->
+        <TextView
+            android:id="@+id/widget_add"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/widget_add"
+            android:contentDescription="@string/widget_add_desc"
+            android:textColor="#3E8A6C"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:paddingLeft="14dp"
+            android:paddingRight="4dp"
+            android:paddingTop="2dp"
+            android:paddingBottom="2dp" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/widget_title"

@@ -78,7 +78,7 @@ export function useRoundEnded(handler) {
 /* ------------------------------------------------------------------ */
 /*  The view                                                           */
 /* ------------------------------------------------------------------ */
-export function FocusView({ tasks = [], durationFor, pendingRound, onDismissRound, onMarkTaskDone, onLearnDuration }) {
+export function FocusView({ tasks = [], rewards = [], balance = 0, durationFor, pendingRound, onDismissRound, onMarkTaskDone, onLearnDuration }) {
   const { api, state, data, reload } = useFocus();
   const [tab, setTab] = useState('focus'); // focus | history | settings
   const [taskId, setTaskId] = useState('');
@@ -132,7 +132,11 @@ export function FocusView({ tasks = [], durationFor, pendingRound, onDismissRoun
       const saved = (list || []).find((t) => String(t.name).toLowerCase() === name.toLowerCase());
       if (saved) useId = saved.id;
     }
-    await api.startWork({ task, workMin: minutes, allowed, taskId: taskId || null, templateId: useId });
+    // A reward's id is not a task id. Passing it on would have the planner
+    // hunting for a task that does not exist when the round ends, and offering
+    // to tick off nothing.
+    const realTask = taskId && !String(taskId).startsWith('reward:') ? taskId : null;
+    await api.startWork({ task, workMin: minutes, allowed, taskId: realTask, templateId: useId });
     reload();
   };
 
@@ -170,6 +174,34 @@ export function FocusView({ tasks = [], durationFor, pendingRound, onDismissRoun
                       <span className="focus-taskname">{t.title}</span>
                       {t.minutes ? <span className="ttime">{t.minutes}m</span> : null}
                       {t.when ? <span className="ttime">{t.when}</span> : null}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {/* Resting is a thing you can be doing.
+
+                The lock screen has no step-out any more, and that is only fair
+                if "I am going to rest for twenty minutes" is an answer it
+                accepts. It is: a reward starts a real round, with its own
+                clock and its own end, so the rest is bounded the same way the
+                work is. That is the difference between resting and drifting,
+                and it is the entire reason this list is here rather than a
+                button that simply unlocks the machine.
+
+                Nothing is charged. Cashing a reward in is a deliberate act on
+                the points page; taking a break is not a purchase, and making
+                every rest cost something would only teach you not to rest. */}
+            {rewards.length > 0 && (
+              <>
+                <p className="hint-text focus-rest-h">{tx('Or rest, on the clock — a round with an end, not a drift.', 'أو استرِح بتوقيت — جولة لها نهاية، لا انجراف.')}</p>
+                <div className="focus-tasklist focus-rewardlist">
+                  {rewards.map((r) => (
+                    <button key={r.id} className={`focus-taskbtn reward ${taskId === `reward:${r.id}` ? 'on' : ''}`}
+                      onClick={() => { setTaskId(`reward:${r.id}`); setTitle(r.name); setMinutes(clamp(Number(r.minutes) || 20, 1, 240)); }}>
+                      <span className="focus-taskname">{r.name}</span>
+                      {Number(r.cost) > 0 && Number(r.cost) <= balance ? <span className="ttime focus-afford">{tx('earned', 'مستحقة')}</span> : null}
                     </button>
                   ))}
                 </div>
@@ -439,8 +471,8 @@ function FocusSettings({ api, settings, templates, onSaved }) {
 
       <h4 className="focus-h4">{tx('Commitment', 'الالتزام')}</h4>
       {toggle('commitmentMode', tx('Lock the whole laptop between rounds', 'قفل الجهاز كله بين الجولات'),
-        tx('Every screen is covered until you start a focus round with a task and a duration. A 2.5-second hold on the lock screen steps out temporarily.', 'تُغطى كل الشاشات حتى تبدأ جولة تركيز بمهمة ومدة. الضغط المطوّل (٢٫٥ ثانية) على شاشة القفل يمنح خروجًا مؤقتًا.'))}
-      {num('unlockMin', tx('Step-out minutes', 'دقائق الخروج المؤقت'), 1, 60, tx('How long a completed hold keeps the laptop open.', 'مدة بقاء الجهاز مفتوحًا بعد الضغط المطوّل.'))}
+        tx('Every screen is covered until you start a round with something named and a duration. There is no step-out any more: resting is an answer — pick a reward below and focus on that — but opening the machine without naming anything is not.',
+          'تُغطى كل الشاشات حتى تبدأ جولة بشيء محدّد ومدة. لم يعد هناك خروج مؤقت: الراحة إجابة مقبولة — اختر مكافأة من الأسفل وركّز عليها — أما فتح الجهاز دون تحديد أي شيء فلا.'))}
 
       <h4 className="focus-h4">{tx('Lists', 'القوائم')}</h4>
       {list('distractions', tx('Distractions', 'الملهيات'), tx('Matched against the window title, the app name and the address-bar domain.', 'تُطابق عنوان النافذة واسم التطبيق ونطاق شريط العنوان.'))}
