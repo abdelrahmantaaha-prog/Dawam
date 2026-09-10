@@ -30,11 +30,12 @@ import { MeetingSheet } from './meetingsheet.jsx';
 import { nextMark, TINY, stackGate, isPrayerAnchor, anchorLabel } from './habits.js';
 import { dueProjects, normalizePlan, todayQuota, worksOn } from './quota.js';
 import { lockDue, lockEvery, lockOn, minutesToLock } from './nowlock.js';
+import { holdDevice, lockSupported, releaseDevice } from './applock.js';
 import { dueOn as recurDueOn, describeRepeat, isScheduled, normalizeRepeat } from './recur.js';
 import { TrelloCards } from './trelloview.jsx';
 import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
 
-import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,ProjectTag,QuotaLine,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
+import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,ProjectTag,QuotaLine,SkyScene,SubtaskEditor,TaskEditor,TokenSuggest,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
 
 /* The pool rejected this app's token. Said plainly, and pointing at the field
@@ -2687,6 +2688,32 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   // view underneath on Plan would only mean a strange flash on release.
   useEffect(() => { if (nowLocked && view !== 'now') setView('now'); }, [nowLocked]);   // eslint-disable-line
 
+  /* The phone half.
+
+     Covering the app is the whole lock on a laptop, where the shell owns every
+     display. On a phone it is barely half of one: the page can be as complete
+     as it likes and Home still leaves, which makes the lock theatre. Lock task
+     mode is Android's own answer — it takes Home, Recents and the shade away
+     for as long as the app asks, so there is no route out to Settings either.
+
+     How firmly depends on how the phone was set up, and the app says which it
+     got rather than claiming the stronger one. See src/applock.js.
+
+     Released on the way out AND when the component unmounts: a phone left
+     pinned by an app that has gone away is the failure worth being careful
+     about, because the person cannot reach the setting that would fix it. */
+  const [heldBy, setHeldBy] = useState(null);   // 'locked' | 'pinned' | null
+  useEffect(() => {
+    if (!ready || !lockSupported()) return undefined;
+    let stop = false;
+    (async () => {
+      const r = nowLocked ? await holdDevice() : await releaseDevice();
+      if (!stop) setHeldBy(r.held ? r.mode : null);
+    })();
+    return () => { stop = true; };
+  }, [ready, nowLocked]);
+  useEffect(() => () => { if (lockSupported()) releaseDevice(); }, []);
+
   /* Mark what the queue has actually put in front of you.
 
      Only the head of the queue when it is a real turn (not the muted Next
@@ -3332,6 +3359,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 onOpenSpan={(tk) => openProjectTask(tk.__spanHome)}
                 onAdd={(title) => addParsedTask(title, { blockId: b.id })}
                 parseHint={parseHint}
+                suggestLabels={settings.labels || []} suggestProjects={settings.projects || []}
                 onDragStart={startDrag}
                 dragActive={dragActive} dragOver={drag && drag.over && drag.over.type === 'block' && drag.over.id === b.id}
                 draggingId={drag && drag.kind === 'task' ? drag.id : null}
@@ -3351,6 +3379,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               onAddPool={(title) => addParsedTask(title, { toPool: true })}
               onClearDonePool={clearDonePool}
               parseHint={parseHint}
+              suggestLabels={settings.labels || []} suggestProjects={settings.projects || []}
               onOpenPool={setEditingPool}
               onEditTpl={setEditingTpl}
               onTogglePoolDone={togglePoolDone}
@@ -3848,6 +3877,13 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 })()}
               </div>
             ) : null}
+            {heldBy && (
+              <p className="nowlock-held">
+                {heldBy === 'locked'
+                  ? tx('The phone is held here. Home, Recents and Settings are all closed until something is done.', 'الهاتف مثبّت هنا. الرئيسية والتطبيقات الأخيرة والإعدادات كلها مغلقة حتى يُنجز شيء.')
+                  : tx('The phone is pinned here. Holding Back and Overview together still lets you out — that is Android\u2019s own escape, not a setting Rhythm can take away.', 'الهاتف مثبّت هنا. الضغط المطوّل على «رجوع» و«الأخيرة» معًا ما زال يخرجك — هذا مخرج أندرويد نفسه، ولا يمكن لـRhythm إزالته.')}
+              </p>
+            )}
             <p className="nowlock-note">{tx('You asked for this in Settings → The Now lock. You can turn it off there once one thing is done.', 'طلبت هذا من الإعدادات ← قفل «الآن». يمكنك إيقافه من هناك بعد إنجاز شيء واحد.')}</p>
           </div>
         </div>

@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
         // or the bridge comes up without them and every call rejects with
         // "not implemented".
         registerPlugin(RhythmWidgetPlugin.class);
+        registerPlugin(RhythmLockPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

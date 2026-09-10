@@ -5,7 +5,7 @@
    that does not exist — and plain prose still parses as a plain title, because
    a parser that grabs at ordinary words is worse than no parser. */
 import { describe, it, expect } from 'vitest';
-import { parseTaskText, describeParse, hasHints } from '../src/parse.js';
+import { parseTaskText, describeParse, hasHints, tokenAt, suggestFor, applySuggestion } from '../src/parse.js';
 
 // A Saturday, so weekday maths is visible rather than accidental.
 const TODAY = new Date('2026-08-29T10:00:00');
@@ -249,5 +249,111 @@ describe('describeParse', () => {
   });
   it('says nothing about plain text', () => {
     expect(describeParse(P('call the dentist'))).toBe('');
+  });
+});
+
+/* Typing `%bu` already resolved to "Bugs and Features" — what it did not do was
+   say so, and finding out after pressing Enter is a coin toss you have to undo.
+   The rule that matters here is that the suggestion list and the parser agree:
+   picking a name from the list and typing the letters yourself must never mean
+   different things. */
+describe('tokenAt', () => {
+  it('finds the token the caret sits in', () => {
+    expect(tokenAt('call mum %bu', 12)).toMatchObject({ kind: 'project', query: 'bu' });
+    expect(tokenAt('call mum #cal', 13)).toMatchObject({ kind: 'tag', query: 'cal' });
+  });
+  it('finds a bare sigil, so tapping # offers everything', () => {
+    expect(tokenAt('call mum #', 10)).toMatchObject({ kind: 'tag', query: '' });
+  });
+  it('reports where the token starts and ends, sigil included', () => {
+    const tok = tokenAt('do %bug now', 7);
+    expect(tok).toMatchObject({ start: 3, end: 7, query: 'bug' });
+  });
+  it('works mid-string, not only at the end', () => {
+    expect(tokenAt('%bu call mum', 3)).toMatchObject({ kind: 'project', query: 'bu' });
+  });
+  it('ignores a sigil that does not start a word', () => {
+    // "50%off" is a discount, not a project.
+    expect(tokenAt('50%off today', 6)).toBe(null);
+    expect(tokenAt('a#b', 3)).toBe(null);
+  });
+  it('is null in ordinary prose', () => {
+    expect(tokenAt('call mum tomorrow', 9)).toBe(null);
+    expect(tokenAt('', 0)).toBe(null);
+  });
+  it('does not run past the caret into what is already written', () => {
+    // Editing the middle of a token completes what is behind the cursor.
+    expect(tokenAt('%bugs', 3)).toMatchObject({ query: 'bu', end: 3 });
+  });
+});
+
+describe('suggestFor', () => {
+  const labels = [{ id: 'l1', name: 'Bugs' }, { id: 'l2', name: 'Admin' }];
+  const projects = [
+    { id: 'p1', name: 'Bugs and Features' },
+    { id: 'p2', name: 'The Book' },
+    { id: 'p3', name: 'Old thing', completedAt: '2026-01-01' },
+  ];
+
+  it('matches a prefix of the name, or of any word in it — the parser\'s own rule', () => {
+    const hits = suggestFor(tokenAt('%bu', 3), { labels, projects });
+    expect(hits.map((h) => h.name)).toEqual(['Bugs and Features']);
+    const inner = suggestFor(tokenAt('%boo', 4), { labels, projects });
+    expect(inner.map((h) => h.name)).toEqual(['The Book']);
+  });
+
+  it('never offers a completed project', () => {
+    expect(suggestFor(tokenAt('%old', 4), { labels, projects })).toEqual([]);
+  });
+
+  it('offers to create an unknown tag, because typing one does create it', () => {
+    const hits = suggestFor(tokenAt('#newthing', 9), { labels, projects });
+    expect(hits).toEqual([{ id: null, name: 'newthing', kind: 'tag', isNew: true }]);
+  });
+
+  it('never offers to create a project — a typo must not invent one', () => {
+    expect(suggestFor(tokenAt('%zzz', 4), { labels, projects })).toEqual([]);
+  });
+
+  it('offers everything for a bare sigil', () => {
+    expect(suggestFor(tokenAt('#', 1), { labels, projects }).map((h) => h.name)).toEqual(['Bugs', 'Admin']);
+  });
+
+  it('caps the list — this renders under an input on a phone', () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({ id: `p${i}`, name: `Book ${i}` }));
+    expect(suggestFor(tokenAt('%bo', 3), { labels: [], projects: many }).length).toBeLessThanOrEqual(6);
+  });
+
+  it('has nothing to say without a token', () => {
+    expect(suggestFor(null, { labels, projects })).toEqual([]);
+  });
+});
+
+describe('applySuggestion', () => {
+  it('replaces the token and leaves the caret after it', () => {
+    const r = applySuggestion('call mum %bu', tokenAt('call mum %bu', 12), 'Health');
+    expect(r.text).toBe('call mum %Health ');
+    expect(r.caret).toBe(r.text.length);
+  });
+
+  it('quotes a name with a space, because that is the only form the parser reads back', () => {
+    // Unquoted, "%Bugs and Features" tags "Bugs" and leaves two stray words in
+    // the title — the exact failure the suggestion exists to prevent.
+    const r = applySuggestion('fix it %bu', tokenAt('fix it %bu', 10), 'Bugs and Features');
+    expect(r.text).toBe('fix it %"Bugs and Features" ');
+    const parsed = parseTaskText(r.text, { projects: [{ id: 'p1', name: 'Bugs and Features' }] });
+    expect(parsed.projectId).toBe('p1');
+    expect(parsed.title).toBe('fix it');
+  });
+
+  it('keeps what was typed after the token', () => {
+    const text = 'call %bu mum tomorrow';
+    const r = applySuggestion(text, tokenAt(text, 8), 'Health');
+    expect(r.text).toBe('call %Health  mum tomorrow');
+    expect(r.caret).toBe('call %Health '.length);
+  });
+
+  it('leaves the text alone with no token', () => {
+    expect(applySuggestion('plain words', null, 'X')).toMatchObject({ text: 'plain words' });
   });
 });

@@ -1622,3 +1622,22 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .proj-plan-when{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:12px;font-weight:700;color:var(--muted)}
 .proj-plan-when select{flex:1;max-width:200px}
 .rhythm.dark .proj-plan{background:rgba(22,28,37,.6)}
+.nowlock-held{margin:14px 0 0;font-size:12px;line-height:1.6;font-weight:700;color:var(--verdigris)}
+
+/* ---- completing a #tag or %project while typing ---- */
+/* Anchored to the quick-add box rather than the page, so it follows the input
+   it belongs to — and above the parse chip, which is a summary of what was
+   understood and belongs under the list rather than over it. */
+.quick{position:relative}
+.tsug{position:absolute;z-index:40;left:0;right:0;top:calc(100% + 3px);display:flex;flex-direction:column;
+  border:1px solid var(--line);border-radius:10px;background:var(--panel);overflow:hidden;
+  box-shadow:0 10px 26px rgba(23,48,39,.18);max-height:220px;overflow-y:auto}
+.tsug-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:none;background:none;cursor:pointer;
+  font-family:inherit;font-size:13px;color:var(--ink);text-align:start;width:100%}
+.rhythm[dir="rtl"] .tsug-row{text-align:right}
+.tsug-row.on{background:var(--soft)}
+.tsug-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.tsug-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.tsug-kind{font-size:9.5px;font-weight:800;letter-spacing:.4px;text-transform:uppercase;color:var(--faint);flex-shrink:0}
+.tsug-row.new .tsug-name{font-style:italic;color:var(--muted)}
+.rhythm.dark .tsug{box-shadow:0 10px 26px rgba(0,0,0,.45)}

@@ -4,6 +4,7 @@ import { taskLocked,taskShown,taskUntil,spanLength,focusTargetMin,focusSpent,foc
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 import { durationFor } from './durations.js';
 import { describeRepeat, isScheduled } from './recur.js';
+import { applySuggestion, suggestFor, tokenAt } from './parse.js';
 
 function FlameGlyph({ level = 0, size = 14 }) {
   const l = Math.max(0, Math.min(7, level));
@@ -39,6 +40,96 @@ function HabitLine({ h, iso, onToggle }) {
 /* ------------------------------------------------------------------ */
 /*  Block row (drop target for tasks, pool items, templates)           */
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/*  Finishing the tag or project you are typing.                       */
+/*                                                                     */
+/*  The matching is not new — `%bu` has resolved to "Bugs and Features" */
+/*  for as long as the syntax has existed. What was missing was any way */
+/*  to know that it had, before pressing Enter and finding out.         */
+/*                                                                     */
+/*  Three things this insists on:                                       */
+/*                                                                     */
+/*    it uses the parser's own matcher (tokenAt / suggestFor in         */
+/*      parse.js), so picking a name and typing the letters can never   */
+/*      mean different things. A list that disagreed with the parser    */
+/*      would teach a syntax the app does not have.                     */
+/*    the caret survives. Replacing the token moves it, and setting the */
+/*      value alone drops the caret to the end — mid-sentence that      */
+/*      scatters the rest of what you were writing.                     */
+/*    Enter picks the highlighted row instead of submitting. Submitting */
+/*      out from under an open list is how you get the task you were    */
+/*      half way through describing.                                    */
+/*                                                                     */
+/*  The key handler is published through `keys`, a ref the caller owns  */
+/*  and calls from the input's own onKeyDown — because the keys that    */
+/*  drive a list under an input are the same keys the input uses, and   */
+/*  only the input knows which of them it still wants.                  */
+/* ------------------------------------------------------------------ */
+function TokenSuggest({ inputRef, keys, value, onChange, labels = [], projects = [] }) {
+  const [caret, setCaret] = useState(null);
+  const [sel, setSel] = useState(0);
+  const tok = caret == null ? null : tokenAt(value, caret);
+  const items = tok ? suggestFor(tok, { labels, projects }) : [];
+  const open = items.length > 0;
+
+  /* The caret is read from the element, not from React: every key, click and
+     selection change moves it and no single React event covers all three. */
+  useEffect(() => {
+    const el = inputRef && inputRef.current;
+    if (!el) return undefined;
+    const read = () => setCaret(el.selectionStart);
+    // A row is chosen on mousedown, which fires before blur; the delay is only
+    // so a blur from anywhere else still closes the list.
+    const blur = () => setTimeout(() => setCaret(null), 120);
+    for (const ev of ['keyup', 'click', 'input', 'focus']) el.addEventListener(ev, read);
+    el.addEventListener('blur', blur);
+    return () => {
+      for (const ev of ['keyup', 'click', 'input', 'focus']) el.removeEventListener(ev, read);
+      el.removeEventListener('blur', blur);
+    };
+  }, [inputRef]);
+
+  useEffect(() => { setSel(0); }, [tok && tok.query, tok && tok.kind]);
+
+  const pick = (item) => {
+    const r = applySuggestion(value, tok, item.name);
+    onChange(r.text);
+    const el = inputRef && inputRef.current;
+    // After React has written the new value — setting it first and moving the
+    // caret second is the only order that survives a controlled input.
+    if (el) requestAnimationFrame(() => {
+      try { el.focus(); el.setSelectionRange(r.caret, r.caret); setCaret(r.caret); } catch { /* detached */ }
+    });
+  };
+
+  if (keys) {
+    keys.current = (e) => {
+      if (!open) return false;
+      if (e.key === 'ArrowDown') { e.preventDefault(); setSel((i) => (i + 1) % items.length); return true; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setSel((i) => (i - 1 + items.length) % items.length); return true; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pick(items[Math.min(sel, items.length - 1)]); return true; }
+      if (e.key === 'Escape') { e.preventDefault(); setCaret(null); return true; }
+      return false;
+    };
+  }
+
+  if (!open) return null;
+  return (
+    <div className="tsug" role="listbox">
+      {items.map((it, i) => (
+        <button key={`${it.kind}:${it.id || it.name}`} type="button" role="option" aria-selected={i === sel}
+          className={`tsug-row ${i === sel ? 'on' : ''} ${it.isNew ? 'new' : ''}`}
+          onMouseEnter={() => setSel(i)}
+          onMouseDown={(e) => { e.preventDefault(); pick(it); }}>
+          <span className="tsug-dot" style={{ background: it.color || 'var(--faint)' }} />
+          <span className="tsug-name">{it.name}</span>
+          <span className="tsug-kind">{it.isNew ? tx('new tag', 'وسم جديد') : it.kind === 'tag' ? tx('tag', 'وسم') : tx('project', 'مشروع')}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function ParseChip({ text, hint }) {
   const s = hint ? hint(text || '') : '';
   if (!s) return null;
@@ -112,11 +203,13 @@ function QuotaLine({ project, quota, onLog, onOpen, compact = false }) {
   );
 }
 
-function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, projectById = () => null, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over, events = [], cards = [], onAddCard, addedCards, onToggleCalEvent, parseHint, onOpenSpan, onLockedDrag }) {
+function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, projectById = () => null, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over, events = [], cards = [], onAddCard, addedCards, onToggleCalEvent, parseHint, onOpenSpan, onLockedDrag, suggestLabels = [], suggestProjects = [] }) {
   const [folded, setFolded] = useState(() => new Set()); // collapsed subtask lists, per task id (session-local)
   const toggleFold = (id) => setFolded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [quick, setQuick] = useState('');
   const [adding, setAdding] = useState(false);
+  const quickRef = useRef(null);
+  const quickKeys = useRef(null);
   const submit = () => { if (quick.trim()) { onAdd(quick); setQuick(''); } };
   // Insertion-line position for a task being dragged within this block.
   // Subtasks are NOT reorderable here — that lives in the task's detail editor,
@@ -223,9 +316,17 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
           </div>
           </div>); })}
         {adding ? (
-          <div className="quick"><input autoFocus value={quick} onChange={(e) => setQuick(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') { setAdding(false); setQuick(''); } }}
+          <div className="quick"><input ref={quickRef} autoFocus value={quick} onChange={(e) => setQuick(e.target.value)}
+            onKeyDown={(e) => {
+              // The list gets first refusal on Enter, Tab, the arrows and
+              // Escape — submitting out from under an open list is how you get
+              // the task you were half way through describing.
+              if (quickKeys.current && quickKeys.current(e)) return;
+              if (e.key === 'Enter') submit();
+              if (e.key === 'Escape') { setAdding(false); setQuick(''); }
+            }}
             onBlur={() => { submit(); setAdding(false); }} placeholder={tx('Add a task… (tomorrow 3pm #tag %project)', 'أضف مهمة… (بكرة ٣ عصر #وسم %مشروع)')} />
+            <TokenSuggest inputRef={quickRef} keys={quickKeys} value={quick} onChange={setQuick} labels={suggestLabels} projects={suggestProjects} />
             <ParseChip text={quick} hint={parseHint} /></div>
         ) : (tasks.length > 0 || habits.length > 0) ? (<button className="add-row" onClick={() => setAdding(true)}><Plus size={14} /> {tx('Add', 'إضافة')}</button>) : null}
     </div>
@@ -296,10 +397,12 @@ function SkyScene({ sky, stars, light, label, time, blockName, blockAr, range })
 /* ------------------------------------------------------------------ */
 /*  Plan sidebar — Recurring + Backlog in one box, switchable          */
 /* ------------------------------------------------------------------ */
-function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labelById, projectById = () => null, usedTpl = {}, onDragStart, onTplToPool, onTplToDay, onAddTpl, onManage, onEditTpl, onAddPool, onOpenPool, onTogglePoolDone, onPoolToDay, poolDropActive, poolDropOver, parseHint, onClearDonePool }) {
+function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labelById, projectById = () => null, usedTpl = {}, onDragStart, onTplToPool, onTplToDay, onAddTpl, onManage, onEditTpl, onAddPool, onOpenPool, onTogglePoolDone, onPoolToDay, poolDropActive, poolDropOver, parseHint, onClearDonePool, suggestLabels = [], suggestProjects = [] }) {
   const [val, setVal] = useState('');
   const [doneOpen, setDoneOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
+  const poolRef = useRef(null);
+  const poolKeys = useRef(null);
   const submitPool = () => { if (val.trim()) { onAddPool(val); setVal(''); } };
   const isBacklog = tab === 'backlog';
   return (
@@ -337,7 +440,10 @@ function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labe
       ) : (
         <div className="pool-body">
           {poolDropActive && <div className="pool-hint drop">{tx('drop a task here to unschedule', 'أفلت مهمة هنا لإلغاء جدولتها')}</div>}
-          <div className="quick pool-add"><input value={val} onChange={(e) => setVal(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submitPool(); }} placeholder={tx('Add to backlog… (#tag %project)', 'أضف إلى قائمة الانتظار… (#وسم %مشروع)')} /><button className="ghost sm" onClick={submitPool}><Plus size={14} /></button>
+          <div className="quick pool-add"><input ref={poolRef} value={val} onChange={(e) => setVal(e.target.value)}
+            onKeyDown={(e) => { if (poolKeys.current && poolKeys.current(e)) return; if (e.key === 'Enter') submitPool(); }}
+            placeholder={tx('Add to backlog… (#tag %project)', 'أضف إلى قائمة الانتظار… (#وسم %مشروع)')} /><button className="ghost sm" onClick={submitPool}><Plus size={14} /></button>
+            <TokenSuggest inputRef={poolRef} keys={poolKeys} value={val} onChange={setVal} labels={suggestLabels} projects={suggestProjects} />
             <ParseChip text={val} hint={parseHint} /></div>
           {(() => {
             /* A backlog is a list of what is left, so what is finished does not
@@ -870,4 +976,4 @@ function PointsPanel({ balance, ledger, rewards, penalties = [], onClose, onAddR
 /* ------------------------------------------------------------------ */
 /*  Habits — daily commitments; streaks glow brighter up to seven days */
 /* ------------------------------------------------------------------ */
-export { AppIcon,BlockRow,ProjectTag,QuotaLine,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };
+export { AppIcon,BlockRow,ProjectTag,QuotaLine,TokenSuggest,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };
