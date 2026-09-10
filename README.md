@@ -318,6 +318,8 @@ src/recur.js        when a recurring task is actually due (daily / weekly /
                     monthly), and how a monthly date lands in a short month
 src/quota.js        a numbered project's share of TODAY, divided by the
                     sittings that are left rather than the calendar days
+src/weekdoc.js      a week document carries its own week (`ws`), and the stamp
+                    decides where a write lands — not the caller
 src/nowlock.js      the fifteen-minute lock: is it due, and what clears it
 src/applock.js      lock task mode on Android — the phone half of that lock
 src/calendar.js     iCalendar reader: parsing, recurrence, busy intervals
@@ -341,6 +343,18 @@ Notes for future work:
 - All stored weeks are preloaded into the session cache at startup, so
   cross-week features (tasks under a Project, overdue, and multi-day tasks that
   start in one week and end in the next) are complete.
+- **A week document is only meaningful next to the key it is filed under**, since
+  tasks carry a 0–6 day index and nothing else saying which week. Two rules keep
+  that pairing honest, and both were learned by losing a week to it:
+  never compare a week ISO against `weekStart` inside an async function or a
+  memoised callback (use `weekStartRef.current` / `displayedISO()` — a value
+  captured by an enclosing render can be answering for a view that has moved
+  on); and never save a week document by any route but `saveWeekDoc`, which
+  asks the document which week it is via `writeTarget` and redirects a
+  misaimed write instead of letting it overwrite a different week.
+- Read the displayed week's tasks from `weekShown`, not `week`. Picking a date
+  sets `weekStart` synchronously while the document loads in an effect;
+  `weekShown` resolves it during render so the two can never be a week apart.
 - `npm test` covers pace math, streaks, block resolution, and the sync merge and
   cadence. Extend it when touching `core.jsx` or `sync.js`.
 - Careful with `.sub > span` in CSS: it also matches `.sub-bullet` and will

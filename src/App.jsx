@@ -25,6 +25,7 @@ import { parseTaskText, describeParse } from './parse.js';
 import { NotesView, NoteEditor } from './notesview.jsx';
 import { FilterBar } from './filterbar.jsx';
 import { EMPTY as EMPTY_FILTER, applyFilter, arrange, isFiltering, matches as filterMatches } from './filters.js';
+import { stampWeek, writeTarget } from './weekdoc.js';
 import { loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, isEmptyNote, excerpt as noteExcerpt } from './notes.js';
 import { MeetingSheet } from './meetingsheet.jsx';
 import { nextMark, TINY, stackGate, isPrayerAnchor, anchorLabel } from './habits.js';
@@ -221,6 +222,68 @@ export default function Rhythm() {
   const birds = useMemo(() => Array.from({ length: 11 }, () => ({ x: 4 + Math.random() * 90, y: 4 + Math.random() * 66, scale: 0.6 + Math.random() * 0.7, dl: Math.random() * 5 })), []);
   const weekKey = `planner:week:${fmtISO(weekStart)}`;
   const bumpRefresh = () => setRefresh((n) => n + 1);
+  /* ---- which week is on screen, and which week the loaded document IS ----
+
+     Both are assigned during render rather than in an effect, because the gap
+     an effect leaves is exactly the gap that lost data.
+
+     The bug: every "is this the displayed week?" test used to read `weekStart`
+     out of the enclosing render's closure. Any async write that straddled a
+     week navigation therefore compared against the week that was on screen
+     when it STARTED, and happily adopted its document into the view that had
+     since moved on. Concretely — the Now queue's seenAt stamp awaited a read,
+     the person tapped "next week" during that await, and the stamp came back
+     and called setWeek() with the OLD week's document. The screen then showed
+     last week's tasks under this week's dates, and the next edit persisted
+     them under this week's key, wiping whatever was really there.
+
+     weekStartRef answers "what is on screen NOW". weekDocISORef answers the
+     question that actually prevents the loss: "which week does the document in
+     weekRef belong to?" An edit is written to THAT week, so even a write that
+     races a navigation lands on its own week instead of overwriting another's.
+
+     Rule for anything added later: never compare a week ISO against
+     `weekStart` inside an async function. Use weekStartRef.current. */
+  const weekStartRef = useRef(weekStart);
+  weekStartRef.current = weekStart;
+  // persistWeek is memoised with no dependencies; this is how it reaches the
+  // current saveWeekDoc without capturing a render's closure.
+  const saveWeekDocRef = useRef(null);
+  const weekDocISORef = useRef(fmtISO(weekStart));
+  const displayedISO = () => fmtISO(weekStartRef.current);
+  /* THE DOCUMENT FOR THE WEEK ON SCREEN — and the reason this is not just
+     `week`.
+
+     Picking a date sets weekStart and selectedDay synchronously, but the week
+     document is loaded by an effect, which runs after the render. For at least
+     one frame the dates say next week while `week` still holds this week's
+     tasks. Everything downstream believed the dates: the timeline drew last
+     week's day-0 tasks under next week's Saturday (the "tasks shifted back a
+     week"), and — far worse — anything written in that frame took
+     `weekRef.current`, which was the OLD document, and saved it under the NEW
+     week's key. Adding or ticking one thing straight after changing week
+     replaced that week wholesale with a copy of the previous one.
+
+     Every stored week is already preloaded into the session cache, so the
+     right document is almost always available synchronously. Resolving it here
+     means the tasks on screen can never be a week out of step with the dates
+     above them, and a write in that frame has the correct document to build
+     on. The async load stays for the rare uncached week and simply confirms
+     what this already found. */
+  const shownISO = fmtISO(weekStart);
+  const weekShown = weekDocISORef.current === shownISO
+    ? week
+    : (weeksRef.current[shownISO] || { tasks: [] });
+  // Handlers fire outside render; this is how they reach the same answer.
+  const weekShownRef = useRef({ iso: shownISO, doc: weekShown });
+  weekShownRef.current = { iso: shownISO, doc: weekShown };
+  // Adopt a document as the displayed week, recording which week it is.
+  const adoptWeek = (wsISO, doc) => {
+    // Adoption is the app stating "this IS that week's document", which is a
+    // legitimate labelling — unlike a write that merely assumes it.
+    const d = stampWeek(doc, wsISO);
+    weekDocISORef.current = wsISO; weekRef.current = d; setWeek(d);
+  };
   useEffect(() => { weekRef.current = week; }, [week]);
   useEffect(() => { poolRef.current = pool; }, [pool]);
   useEffect(() => { todayRef.current = todayData; }, [todayData]);
@@ -293,10 +356,37 @@ export default function Rhythm() {
     weeksRef.current[wsISO] = base;
     return base;
   };
+  /* THE ONE PLACE A WEEK DOCUMENT IS SAVED.
+
+     Every route in goes through writeTarget (src/weekdoc.js), which asks the
+     DOCUMENT which week it is rather than trusting the caller. A write aimed
+     at the wrong week — by a stale render, an await that outlived its view, a
+     handler holding a document from a week ago — lands on the week it actually
+     belongs to instead of overwriting a different one.
+
+     The redirect is logged rather than swallowed. This should now be
+     unreachable; if it ever fires, the console says which week was asked for
+     and which was written, which is the evidence the original bug never left. */
+  const saveWeekDoc = (wsISO, weekObj) => {
+    const r = writeTarget(weekObj, wsISO);
+    if (r.iso == null) return null;
+    if (r.redirected) {
+      console.warn(`[rhythm] a week write aimed at ${r.asked} belonged to ${r.iso}; saved where it belongs. This should not happen — please report it.`);
+    }
+    weeksRef.current[r.iso] = r.doc;
+    saveKey(`planner:week:${r.iso}`, r.doc);
+    return r;
+  };
+
+  saveWeekDocRef.current = saveWeekDoc;
+
   const writeWeek = async (wsISO, weekObj) => {
-    weeksRef.current[wsISO] = weekObj;
-    saveKey(`planner:week:${wsISO}`, weekObj);
-    if (wsISO === fmtISO(weekStart)) { weekRef.current = weekObj; setWeek(weekObj); }
+    const r = saveWeekDoc(wsISO, weekObj);
+    if (!r) return;
+    wsISO = r.iso; weekObj = r.doc;
+    // weekStartRef, not weekStart: this is called from async paths that can
+    // outlive the render they started in. See the note by weekStartRef.
+    if (wsISO === displayedISO()) { adoptWeek(wsISO, weekObj); }
     else if (wsISO === todayWeekISO()) { todayRef.current = weekObj; setTodayData(weekObj); }
   };
 
@@ -304,7 +394,19 @@ export default function Rhythm() {
   useEffect(() => {
     if (!ready) return;
     let cancelled = false;
-    (async () => { const w = await readWeek(fmtISO(weekStart)); if (!cancelled) { weekRef.current = w; setWeek(w); } })();
+    const cachedISO = fmtISO(weekStart);
+    // Already in the session cache (every stored week is preloaded): adopt it
+    // now rather than after an await, so the gap described at weekShown never
+    // opens in the first place.
+    const cached = weeksRef.current[cachedISO];
+    if (cached) { adoptWeek(cachedISO, cached); return undefined; }
+    (async () => {
+      const wsISO = fmtISO(weekStart);
+      const w = await readWeek(wsISO);
+      // Not just "was this effect cancelled" but "is this still the week on
+      // screen" — two navigations in quick succession can land out of order.
+      if (!cancelled && wsISO === displayedISO()) adoptWeek(wsISO, w);
+    })();
     return () => { cancelled = true; };
   }, [weekStart, ready]);
 
@@ -417,11 +519,20 @@ export default function Rhythm() {
 
 
   /* ---- persistence ---- */
-  const persistWeek = useCallback((next) => {
-    const wsISO = fmtISO(weekStart);
-    weeksRef.current[wsISO] = next; weekRef.current = next; setWeek(next);
-    saveKey(`planner:week:${wsISO}`, next);
-  }, [weekStart]);
+  /* An edit belongs to the document it was made against, not to whatever week
+     happens to be on screen by the time it lands. Keying this off the view was
+     the second half of the data loss: a document read from week A, edited, and
+     persisted after a navigation went into week B's key and took B's tasks
+     with it. weekDocISORef is the document's own identity, so the worst a race
+     can now do is write a correct edit to a week you are no longer looking at. */
+  const persistWeek = useCallback((next, targetISO) => {
+    const r = saveWeekDocRef.current(targetISO || weekDocISORef.current || displayedISO(), next);
+    if (!r) return;
+    if (targetISO && !r.redirected) weekDocISORef.current = r.iso;
+    // Only reflect it on screen if that is the week being shown.
+    if (r.iso === displayedISO()) { weekDocISORef.current = r.iso; weekRef.current = r.doc; setWeek(r.doc); }
+    else bumpRefresh();
+  }, []);
   const persistSettings = useCallback((next) => { setSettings(next); saveKey('planner:settings', next); }, []);
   const changeLang = useCallback((lng) => { setLang(lng); setSettings((prev) => { const n = { ...prev, lang: lng }; saveKey('planner:settings', n); return n; }); }, []);
   const persistPool = (next) => { poolRef.current = next; setPool(next); saveKey('planner:pool', next); };
@@ -475,7 +586,7 @@ export default function Rhythm() {
     persistPool(plArr);
     setTemplates(Array.isArray(d['planner:templates']) ? d['planner:templates'] : []);
     setWeekStart(wsNew);
-    const w = await readWeek(fmtISO(wsNew)); weekRef.current = w; setWeek(w);
+    const w = await readWeek(fmtISO(wsNew)); adoptWeek(fmtISO(wsNew), w);
     flash(tx('Backup imported.', 'تم استيراد النسخة الاحتياطية.'));
     return { ok: true, msg: tx(`Imported ${n} item${n !== 1 ? 's' : ''}. Your planner has been refreshed.`, `تم استيراد ${n} عنصرًا. تم تحديث مخططك.`) };
   };
@@ -600,12 +711,11 @@ export default function Rhythm() {
   const patchProjectTask = (ref, patch) => {
     if (ref.kind === 'pool') { mutatePoolItem(ref.id, (it) => ({ ...it, ...patch })); bumpRefresh(); return; }
     if (!ref.wsISO) return;
-    const wk = ref.wsISO === fmtISO(weekStart) ? weekRef.current : weeksRef.current[ref.wsISO];
+    const wk = ref.wsISO === displayedISO() ? weekRef.current : weeksRef.current[ref.wsISO];
     if (!wk) return;
     const next = { ...wk, tasks: (wk.tasks || []).map((tk) => (tk.id === ref.id ? { ...tk, ...patch } : tk)) };
-    weeksRef.current[ref.wsISO] = next;
-    saveKey(`planner:week:${ref.wsISO}`, next);
-    if (ref.wsISO === fmtISO(weekStart)) { weekRef.current = next; setWeek(next); }
+    if (!saveWeekDoc(ref.wsISO, next)) return;
+    if (ref.wsISO === displayedISO()) adoptWeek(ref.wsISO, next);
     bumpRefresh();
   };
 
@@ -613,12 +723,11 @@ export default function Rhythm() {
   const toggleProjectTask = (ref) => {
     if (ref.kind === 'pool') { togglePoolDone(ref.id); return; }
     if (!ref.wsISO) return;
-    const wk = ref.wsISO === fmtISO(weekStart) ? weekRef.current : weeksRef.current[ref.wsISO];
+    const wk = ref.wsISO === displayedISO() ? weekRef.current : weeksRef.current[ref.wsISO];
     if (!wk) return;
     const next = { ...wk, tasks: (wk.tasks || []).map((tk) => tk.id === ref.id ? { ...tk, done: !tk.done } : tk) };
-    weeksRef.current[ref.wsISO] = next;
-    saveKey(`planner:week:${ref.wsISO}`, next);
-    if (ref.wsISO === fmtISO(weekStart)) { weekRef.current = next; setWeek(next); }
+    if (!saveWeekDoc(ref.wsISO, next)) return;
+    if (ref.wsISO === displayedISO()) adoptWeek(ref.wsISO, next);
     bumpRefresh();
   };
   /* Opening a task from a project — the card or its board — used to throw you
@@ -743,7 +852,7 @@ export default function Rhythm() {
       else if (key.startsWith('planner:week:')) {
         const iso = key.slice('planner:week:'.length);
         if (v == null) delete weeksRef.current[iso]; else weeksRef.current[iso] = v;
-        if (iso === fmtISO(weekStart)) { const w = v || { tasks: [] }; weekRef.current = w; setWeek(w); }
+        if (iso === displayedISO()) adoptWeek(iso, v || { tasks: [] });
       }
     }
     bumpRefresh();
@@ -784,10 +893,10 @@ export default function Rhythm() {
       }
     };
     const live = fmtISO(weekStart);
-    addWeek(live, week);
+    addWeek(live, weekShown);
     for (const [wsISO, wk] of Object.entries(weeksRef.current)) if (wsISO !== live) addWeek(wsISO, wk);
     return byISO;
-  }, [week, weekStart, todayData, refresh]);   // eslint-disable-line
+  }, [week, weekShown, weekStart, todayData, refresh]);   // eslint-disable-line
   /* Everything on a date: what is stored there, plus what is borrowed onto it.
      A task already stored on the day is never also borrowed onto it — that can
      only happen if a span was somehow indexed onto its own home day, and one
@@ -799,7 +908,7 @@ export default function Rhythm() {
     const extra = borrowed.filter((x) => !have.has(x.id));
     return extra.length ? [...own, ...extra] : own;
   };
-  const tasksOnDay = (dayIdx) => spansOn(fmtISO(addDays(weekStart, dayIdx)), week.tasks.filter((tk) => tk.day === dayIdx));
+  const tasksOnDay = (dayIdx) => spansOn(fmtISO(addDays(weekStart, dayIdx)), (weekShown.tasks || []).filter((tk) => tk.day === dayIdx));
 
   /* ---- scheduled task ops (operate on the displayed week) ---- */
   // Within a block, order is MANUAL (`order` asc, done last). New tasks get an
@@ -817,7 +926,11 @@ export default function Rhythm() {
 
   const addTask = (dayIdx, blockId, title, extra = {}) => {
     if (!title.trim()) return;
-    const w = weekRef.current;
+    // The week on SCREEN, not whatever document happens to be in weekRef — see
+    // the note by weekShown. Adding a task one frame after changing week used
+    // to append it to the previous week's list and save that under this
+    // week's key.
+    const w = weekShownRef.current.doc;
     const t = {
       id: uid(), title: title.trim(), day: dayIdx, block: blockId,
       projectId: extra.projectId || null, projectRef: extra.projectRef || null,
@@ -825,15 +938,35 @@ export default function Rhythm() {
       subtasks: extra.subtasks ? mkSubs(extra.subtasks.map((s) => (typeof s === 'string' ? s : s.title))) : [],
       notes: extra.notes || [], order: extra.order != null ? extra.order : (timeOrder(extra.time) + Date.now() % 1000),
     };
-    persistWeek({ ...w, tasks: [...w.tasks, t] });
+    persistWeek({ ...w, tasks: [...(w.tasks || []), t] }, weekShownRef.current.iso);
   };
   // Duration between a task's start and end, wrap-safe, or null.
   const spanOf = (t) => {
     const st = tStartMin(t), en = tEndMin(t);
     return st != null && en != null ? ((en - st + 1440) % 1440) || null : null;
   };
+  /* Which loaded week document holds this task. Usually the displayed one —
+     but a multi-day task is borrowed onto days in weeks it is not stored in,
+     and an edit made from one of those days has to reach the real task.
+
+     Before this, mutateTask read the displayed week, found nothing, and mapped
+     over the list changing nothing. Ticking a spanning task off from any day
+     but its first did nothing at all, silently, which is why one could sit at
+     the head of Now refusing to go away. */
+  const weekOwning = (id) => {
+    if ((weekRef.current.tasks || []).some((tk) => tk.id === id)) {
+      return { wsISO: weekDocISORef.current, doc: weekRef.current };
+    }
+    for (const [wsISO, wk] of Object.entries(weeksRef.current)) {
+      if ((wk && wk.tasks || []).some((tk) => tk.id === id)) return { wsISO, doc: wk };
+    }
+    return null;
+  };
+
   const mutateTask = (id, fn) => {
-    const w = weekRef.current;
+    const owner = weekOwning(id);
+    if (!owner) return;
+    const w = owner.doc;
     let learned = null;
     const tasks = w.tasks.map((t) => {
       if (t.id !== id) return t;
@@ -846,7 +979,13 @@ export default function Rhythm() {
       }
       return next;
     });
-    persistWeek({ ...w, tasks });
+    const next = { ...w, tasks };
+    if (owner.wsISO === weekDocISORef.current) persistWeek(next);
+    else {
+      // Somewhere else's week: write it there and let the views re-read.
+      saveWeekDoc(owner.wsISO, next);
+      bumpRefresh();
+    }
     if (learned && learned.min) rememberDuration(learned.title, learned.min, 'manual');
   };
 
@@ -910,9 +1049,18 @@ export default function Rhythm() {
   const removeTask = (id) => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.id !== id) }); setEditing(null); };
   // The task's own calendar date, needed to tell an on-time finish from a late
   // one. Tasks in the displayed week carry a day index off that week's start.
-  const dateOfTask = (t) => addDays(weekStart, Number(t.day) || 0);
+  /* The date a task actually sits on, which is its own week's start plus its
+     day index — not the displayed week's. A borrowed multi-day task read
+     against the wrong week would be dated up to six days out, and lateness
+     (and therefore what it pays) is decided by that date. */
+  const dateOfTask = (t) => {
+    const owner = t && t.id ? weekOwning(t.id) : null;
+    const base = owner ? parseISO(owner.wsISO) : weekStartRef.current;
+    return addDays(base, Number(t.day) || 0);
+  };
+  const taskById = (id) => { const o = weekOwning(id); return o ? (o.doc.tasks || []).find((x) => x.id === id) : null; };
   const toggleDone = (id) => {
-    const t = (weekRef.current.tasks || []).find((x) => x.id === id);
+    const t = taskById(id);
     mutateTask(id, (x) => ({ ...x, done: !x.done }));
     if (!t) return;
     if (!t.done) {
@@ -927,7 +1075,7 @@ export default function Rhythm() {
     } else revokeRef(`task:${id}`);
   };
   const toggleSub = (id, subId) => {
-    const t = (weekRef.current.tasks || []).find((x) => x.id === id);
+    const t = taskById(id);
     mutateTask(id, (x) => ({ ...x, subtasks: x.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) }));
     if (!t) return;
     const sub = (t.subtasks || []).find((s) => s.id === subId);
@@ -987,10 +1135,11 @@ export default function Rhythm() {
     const it = poolRef.current.find((p) => p.id === poolId);
     if (!it) return;
     persistPool(poolRef.current.filter((p) => p.id !== poolId));
-    const w = weekRef.current;
+    // The document for the week on SCREEN — dayIdx is an index into that week,
+    // so the list it is appended to has to be that week's. See weekShown.
+    const { iso: destISO, doc: w } = weekShownRef.current;
     const t = { id: uid(), title: it.title, day: dayIdx, block: blockId, projectId: it.projectId || null, projectRef: it.projectRef || null, time: '', done: false, subtasks: it.subtasks || [], notes: it.notes || [], order: Date.now() };
-    // ensure we schedule on the currently-displayed week (dayIdx is within it)
-    persistWeek({ ...w, tasks: [...w.tasks, t] });
+    persistWeek({ ...w, tasks: [...(w.tasks || []), t] }, destISO);
   };
 
   /* ---- recurring tasks (stored as `templates` for backward compatibility) ---- */
@@ -1676,7 +1825,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
      boundary the strip no longer shows. */
   const weekDocFor = (d) => {
     const wsISO = fmtISO(startOfWeek(d, settings.weekStartDay));
-    if (wsISO === fmtISO(weekStart)) return week;
+    if (wsISO === shownISO) return weekShown;
     if (todayData && wsISO === fmtISO(startOfWeek(logicalDayMid(), settings.weekStartDay))) return todayData;
     return weeksRef.current[wsISO] || { tasks: [] };
   };
@@ -2647,6 +2796,20 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
      prayer for the CURRENT period has not been missed yet and stays in the
      queue where it belongs. */
   const missedPrayers = BLOCKS.filter((b) => PRAYER_BLOCKS.includes(b.id) && blockIdx(b.id) < activeIdx && !prayersToday[b.id]);
+  /* A multi-day task on a day that is neither its first nor its last.
+
+     Now hands you one thing at a time and waits for it to be done. That is
+     exactly wrong for a task whose whole point is that it spans days: it took
+     the head of the queue on Tuesday and would not release it until Thursday's
+     work was finished, so a four-day task hid the rest of every day it ran
+     through.
+
+     It keeps its ordinary place in the queue on the day it starts (when you
+     would begin it) and on the day it is due (when it has to be finished). In
+     between it sits in its own band — visible, tickable if you get there
+     early, and blocking nothing. */
+  const runningNow = nowList.filter((tk) => tk.__spanDay && !tk.done && tk.__spanDay < tk.__spanOf);
+  const runningIds = new Set(runningNow.map((tk) => tk.id));
   /* Anchored habits wait for their anchor instead of merely claiming to follow
      one. See stackGate in habits.js — the stack finally does something. */
   const habitDoneNow = (id) => {
@@ -2675,7 +2838,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     // time — the same tucking rule the Plan timeline uses.
     const ms = pastByBlock[b.id] || [];
     let mi = 0;
-    for (const t of nowList.filter((t) => t.block === b.id && !t.done && !liveIds.has(t.id) && !soonIds.has(t.id))) {
+    for (const t of nowList.filter((t) => t.block === b.id && !t.done && !liveIds.has(t.id) && !soonIds.has(t.id) && !runningIds.has(t.id))) {
       const ts = tStartMin(t) ?? Infinity;
       while (mi < ms.length && mStartMin(ms[mi]) <= ts) queue.push({ kind: 'cal', block: b, m: ms[mi++] });
       queue.push({ kind: 'task', block: b, t });
@@ -2684,7 +2847,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   }
   const startedPrayers = PRAYER_BLOCKS.filter((pid) => blockIdx(pid) <= activeIdx).length;
   const totalN = nowList.length + (settings.habits || []).length + startedPrayers + startedOrDoneMeetings.length;
-  const doneN = totalN - queue.length - liveNow.length - soonNow.length - liveMeetings.length - missedPrayers.length - waitingHabits.length;
+  const doneN = totalN - queue.length - liveNow.length - soonNow.length - runningNow.length - liveMeetings.length - missedPrayers.length - waitingHabits.length;
   const next = queue[0] || null;
   // Everything up to and through the current period is clear when the head of
   // the queue belongs to a LATER block. Then it stops being "do this now" and
@@ -2693,6 +2856,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   /* "Caught up" now has to mean caught up. A missed prayer or a slot about to
      open is not a clear day, and saying so while either is on the screen would
      be the app contradicting itself two inches apart. */
+  // A span still running is not a reason to say the day is unfinished — it has
+  // days left to run. It does not hold back "caught up"; it just is not queued.
   const caughtUp = nextIsLater && liveNow.length === 0 && soonNow.length === 0 && missedPrayers.length === 0;
   const nothingLeft = !next && liveNow.length === 0 && soonNow.length === 0 && missedPrayers.length === 0
     && liveMeetings.length === 0 && waitingHabits.length === 0;
@@ -2782,7 +2947,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     let stop = false;
     (async () => {
       const wsISO = fmtISO(startOfWeek(todayMid, settings.weekStartDay));
-      const doc = wsISO === fmtISO(weekStart) ? weekRef.current : await readWeek(wsISO);
+      const doc = wsISO === displayedISO() ? weekRef.current : await readWeek(wsISO);
       const hit = new Set(shownIds);
       if (!(doc.tasks || []).some((x) => hit.has(x.id) && !x.seenAt)) return;
       if (stop) return;
@@ -3184,6 +3349,28 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               ) : (
                 <div className="now-empty">{tx('Nothing scheduled today.', 'لا شيء مجدول اليوم.')} {bHint(activeBlock)}.</div>
               )}
+            {/* Running across several days: here to be seen and ticked if you
+                finish early, deliberately not in the way of the day. */}
+            {todayInView && runningNow.length > 0 && (
+              <div className="now-running">
+                <div className="now-running-h"><CalendarRange size={12} /> {tx('Running these days', 'ممتدة هذه الأيام')}</div>
+                {runningNow.map((tk) => (
+                  <div key={`run:${tk.id}`} className="now-running-row">
+                    <button className="tcheck" onClick={() => toggleDone(tk.id)} aria-label={tx('Mark done', 'إنجاز')}><Circle size={16} /></button>
+                    <button className="now-running-main" onClick={() => openProjectTask(tk.__spanHome)}>
+                      <span className="now-running-title">{tk.title}</span>
+                      <span className="now-running-meta">
+                        {tx('day', 'يوم')} {tk.__spanDay}/{tk.__spanOf}
+                        {tk.__spanOf - tk.__spanDay === 1
+                          ? ` · ${tx('due tomorrow', 'تستحق غدًا')}`
+                          : ` · ${tx('due in', 'تستحق خلال')} ${tk.__spanOf - tk.__spanDay} ${tx('days', 'أيام')}`}
+                      </span>
+                    </button>
+                    <ProjectTag project={projectById(tk.projectRef)} sm />
+                  </div>
+                ))}
+              </div>
+            )}
             {/* Habits waiting on their anchor. Muted, and stated: "after Fajr"
                 is a promise the app is keeping, and a habit that is merely
                 absent looks exactly like a habit that was deleted. */}
@@ -3349,7 +3536,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           <SkyScene sky={sky} stars={stars} light={heroLight}
             label={tx('Planning', 'التخطيط')} time={String(selectedDate.getDate())}
             blockName={wdFull(selectedDate.getDay())} blockAr=""
-            range={`${mon(selectedDate.getMonth())} · ${week.tasks.filter((t) => t.day === selectedDay).length} ${week.tasks.filter((t) => t.day === selectedDay).length !== 1 ? tr.tasks : tr.task}${usingFallback ? ` · ${tx('prayer times estimated', 'مواقيت تقديرية')}` : ''}`} />
+            range={(() => { const n = (weekShown.tasks || []).filter((t) => t.day === selectedDay).length;
+              return `${mon(selectedDate.getMonth())} · ${n} ${n !== 1 ? tr.tasks : tr.task}${usingFallback ? ` · ${tx('prayer times estimated', 'مواقيت تقديرية')}` : ''}`; })()} />
           <div className="hero-sheet">
         {filterBar(TASK_SORTS)}
         {/* What the numbered projects want out of THIS day, on the day being

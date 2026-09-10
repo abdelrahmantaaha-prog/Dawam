@@ -9,6 +9,60 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+### Fixed
+- **A multi-day task could not be ticked off, and took over Now until it was.**
+  Reported as "multi-day tasks take over Now until I mark them done even on the
+  wrong day". Two bugs wearing one face.
+
+  A spanning task is stored once, in the week that owns its first day, and
+  borrowed onto the later days it covers. `mutateTask` looked for it in the
+  *displayed* week, so a task borrowed from another week was never found — it
+  mapped over the list, changed nothing, and saved. Ticking it did nothing at
+  all, silently, on every day but its first. Edits now find the week that
+  actually holds the task, which also fixes lateness and what it pays: the date
+  was being read against the wrong week's start and could be six days out.
+
+  And it should never have been in the queue on those days anyway. Now hands
+  you one thing and waits for it to be finished, which is exactly wrong for a
+  task whose point is that it spans days: it took the head of the queue on
+  Tuesday and would not release it until Thursday's work was done, hiding the
+  rest of every day it ran through. It keeps its ordinary place on the day it
+  starts and the day it is due, and in between sits in **Running these days** —
+  visible, tickable if you get there early, and blocking nothing.
+
+- **A week could be saved under a neighbouring week's key**, which read as
+  tasks shifting a week and other tasks disappearing.
+
+  Tasks are stored per week with a 0–6 day index, so a document and the key it
+  is filed under only mean something together — and nothing enforced the
+  pairing. The app decided where to save by asking "which week is on screen?",
+  and several places asked at a moment that had already passed: picking a date
+  sets the week synchronously while the document loads in an effect, so for at
+  least one frame the dates said next week while the loaded document was still
+  this week's. Anything written in that frame took the old document and saved
+  it under the new week's key.
+
+  Three changes, smallest first. The displayed week's document is now resolved
+  during render from the session cache, so what is drawn can never be a week
+  out of step with the dates above it, and a write in that frame has the right
+  document to build on. Every "is this the displayed week?" test reads a ref
+  that is current at the moment of the test rather than a value captured by an
+  enclosing render — the async paths (a sync pull, the Now queue's stamp, a
+  prayer toggle) could each outlive the view they started in.
+
+  And the part that makes the whole class impossible: **a week document now
+  carries its own week**. `ws` is stamped on it, and from then on the stamp
+  decides where it is written, not the caller. A write aimed at the wrong week
+  lands on the week it belongs to instead of overwriting a different one, and
+  says so in the console rather than failing silently. `src/weekdoc.js`, with
+  tests.
+
+  Worth being straight about: the exact sequence that triggered this in the
+  wild was never reproduced here, only the mechanism. That is the reason the
+  stamp exists rather than only the three fixes above — it does not depend on
+  having found the right trigger, and if one is still out there it now reports
+  itself instead of quietly costing a week's work.
+
 A batch about the same thing from several angles: making the app harder to
 negotiate with, and telling it more about the work than the work's own title.
 

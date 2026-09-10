@@ -1682,3 +1682,18 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .now-waiting-row{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--faint)}
 .now-waiting-for{font-size:10px;font-weight:800;letter-spacing:.3px;text-transform:uppercase;color:var(--faint);
   background:var(--soft);border-radius:99px;padding:1px 7px}
+
+/* ---- a task running across several days ---- */
+/* Present, tickable, and out of the way. Now hands you one thing at a time and
+   waits for it — which is exactly wrong for a task whose point is that it
+   spans days, so this band sits beside the queue rather than inside it. */
+.now-running{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding-top:10px;border-top:1px solid var(--soft)}
+.now-running-h{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:800;letter-spacing:.6px;
+  text-transform:uppercase;color:var(--faint)}
+.now-running-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px dashed var(--line);border-radius:10px}
+.now-running-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;background:none;border:none;padding:0;
+  cursor:pointer;text-align:start}
+.rhythm[dir="rtl"] .now-running-main{text-align:right}
+.now-running-title{font-size:13.5px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.now-running-meta{font-size:10.5px;font-weight:700;color:var(--muted)}
+.now-running-row .tcheck{color:var(--muted)}
