@@ -920,17 +920,6 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 /* ---- slotting + sleep ---- */
 .plan-actions-row{display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap}
 .plan-actions-row .plan-day-btn{width:auto;flex:1;min-width:150px;margin-bottom:0}
-.sleep-card{margin-top:16px;padding:13px 14px;border:1px solid var(--line);border-radius:12px;background:var(--soft);display:flex;flex-direction:column;gap:9px}
-.sleep-h{display:flex;align-items:center;gap:7px;font-size:12px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:700}
-.sleep-until{margin-inline-start:auto;letter-spacing:0;text-transform:none;font-weight:600;font-size:12.5px}
-.sleep-beds{display:flex;flex-wrap:wrap;gap:6px}
-.sleep-bed{font-size:12.5px;color:var(--muted);border:1px solid var(--line);border-radius:8px;padding:5px 9px;background:var(--panel)}
-.sleep-bed strong{color:var(--ink)}
-.sleep-now-line{margin:0;font-size:13px;color:var(--ink)}
-.sleep-actions{display:flex;flex-wrap:wrap;gap:7px}
-.sleep-cancel{color:#B23A3A}
-.rhythm.dark .sleep-cancel{color:#E07A7A}
-.sleep-note{margin:0;font-size:11px;color:var(--muted);line-height:1.5}
 
 /* ---- Focus suite (desktop shell only) --------------------------------
    Wears the planner's own surfaces so a round does not feel like a second
@@ -1697,3 +1686,25 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .now-running-title{font-size:13.5px;font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .now-running-meta{font-size:10.5px;font-weight:700;color:var(--muted)}
 .now-running-row .tcheck{color:var(--muted)}
+
+/* ---- writing something down while the lock is up ---- */
+/* Quick add sits ABOVE the lock, unlike every other overlay, which the lock is
+   deliberately on top of. Capturing a thought is not escaping: it does not
+   clear the lock, and losing what you just remembered is not a thing the
+   commitment was ever meant to cost. */
+.qa-overlay{z-index:130}
+.nowlock-add{display:inline-flex;align-items:center;gap:6px;margin-top:14px;padding:8px 14px;border-radius:99px;
+  cursor:pointer;border:1px solid var(--line);background:none;color:var(--muted);
+  font-family:inherit;font-size:12.5px;font-weight:600}
+.nowlock-add:hover{border-color:var(--verdigris);color:var(--verdigris)}
+
+/* ---- a pending wake alarm ---- */
+/* The alarm outlived the sleep card it used to live on. The assistant can
+   still set one, so there has to be somewhere to see and cancel it — an alarm
+   you cannot cancel is a trap, not a feature. */
+.now-alarm{display:inline-flex;align-items:center;gap:7px;margin-top:12px;padding:7px 12px;border-radius:99px;
+  cursor:pointer;border:1px solid var(--line);background:none;color:var(--muted);
+  font-family:inherit;font-size:12px;font-weight:700}
+.now-alarm:hover{border-color:#B23A3A;color:#B23A3A}
+.now-alarm-x{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:800;
+  text-transform:uppercase;letter-spacing:.4px;color:var(--faint)}

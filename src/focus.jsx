@@ -63,6 +63,28 @@ export function useFocus() {
   return { api, state, data, reload };
 }
 
+/* Is a round running right now?
+ *
+ * Deliberately thinner than useFocus: the planner does not want the store, the
+ * history or the templates, only the one bit that says work is under way. The
+ * Now lock reads this — locking someone out mid-round would be the app
+ * interrupting the exact behaviour it exists to produce.
+ *
+ * A break counts as running. It is part of the round, and standing up for five
+ * minutes is not the same as having stopped. */
+export function useFocusLive() {
+  const api = desktopFocus();
+  const [live, setLive] = useState(false);
+  useEffect(() => {
+    if (!api) return undefined;
+    let alive = true;
+    api.getState().then((s) => { if (alive) setLive(!!s && s.phase !== 'idle'); }).catch(() => {});
+    const off = api.onState((s) => setLive(!!s && s.phase !== 'idle'));
+    return () => { alive = false; off && off(); };
+  }, [api]);
+  return live;
+}
+
 /* The planner listens for finished rounds wherever it is — that is what lets
    App switch to this view and ask the question at the moment it matters. */
 export function useRoundEnded(handler) {

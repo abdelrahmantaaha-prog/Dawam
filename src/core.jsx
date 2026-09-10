@@ -746,37 +746,6 @@ function structureDay(tasks, timings, curMin, opts = {}) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Sleep — cycle arithmetic anchored on Fajr.                         */
-/* ------------------------------------------------------------------ */
-/* What this is NOT: sleep-phase detection. Knowing which phase you are
-   in takes movement or heart-rate sensing all night, which a WebView
-   cannot do — and the honest version of this feature is arithmetic:
-   sleep runs in ~90-minute cycles, waking at a cycle boundary beats
-   waking mid-cycle, and Rhythm has something most alarm apps don't —
-   a fixed, meaningful wake anchor. Count back from Fajr in whole
-   cycles, plus a fall-asleep allowance, and the alarm fires at a
-   boundary by construction rather than by measurement. */
-const SLEEP = { cycle: 90, latency: 15, maxCycles: 6, minCycles: 3 };
-
-function sleepPlan(curMin, fajrMin, cfg = SLEEP) {
-  if (fajrMin == null || curMin == null) return null;
-  const untilFajr = (((fajrMin - curMin) % 1440) + 1440) % 1440;
-  // Whole cycles that fit between falling asleep now and Fajr.
-  const cyclesIfNow = Math.max(0, Math.floor((untilFajr - cfg.latency) / cfg.cycle));
-  // Sleeping NOW, the last cycle boundary at or before Fajr:
-  const alignedWake = cyclesIfNow > 0 ? (curMin + cfg.latency + cyclesIfNow * cfg.cycle) % 1440 : null;
-  // Bedtimes that make Fajr itself a boundary, most sleep first.
-  const bedtimes = [];
-  for (let n = cfg.maxCycles; n >= cfg.minCycles; n--) {
-    const bed = (((fajrMin - cfg.latency - n * cfg.cycle) % 1440) + 1440) % 1440;
-    const lead = (((bed - curMin) % 1440) + 1440) % 1440;
-    // Only bedtimes still ahead of us on the way to THIS Fajr.
-    if (lead > 0 && lead < untilFajr) bedtimes.push({ cycles: n, at: bed });
-  }
-  return { untilFajr, cyclesIfNow, alignedWake, bedtimes };
-}
-
-/* ------------------------------------------------------------------ */
 /*  Points — what a thing is worth.                                    */
 /* ------------------------------------------------------------------ */
 /* The weight is read off signals the task already carries, because
@@ -883,7 +852,7 @@ function pushToToday(t, { activeBlock, curSinceFajr, sinceFajr }) {
   return next;
 }
 
-export { taskShown,taskLocked,taskUntil,spans,spanLength,spanDayIndex,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,SLEEP,sleepPlan,POINTS,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
+export { taskShown,taskLocked,taskUntil,spans,spanLength,spanDayIndex,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,POINTS,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
 
 /* The shared key pool, if this copy has been pointed at one.
  *

@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import {
   activeBlockAt, projectPace, habitStreak, habitDoneOn, glowLevel,
   fmtISO, addDays, startOfWeek, DEFAULT_TIMINGS, migrateSettings, inWindow,
-  hasVault, vaultWindowed, vaultUnlocked, pushToToday, structureDay, estimateMinutes, taskTextSig, sleepPlan, POINTS, autoWorth, taskWorth,
+  hasVault, vaultWindowed, vaultUnlocked, pushToToday, structureDay, estimateMinutes, taskTextSig, POINTS, autoWorth, taskWorth,
   shares, subtaskWorth, latePay, habitLevel, habitMultiplier, habitWorth,
 } from '../src/core.jsx';
 
@@ -481,37 +481,6 @@ describe('structureDay — strict slots from what is logged', () => {
     const r = structureDay([mk('d', 'morning', { done: true }), mk('a', 'morning')], T, null);
     expect(slotOf(r, 'd')).toBeUndefined();
     expect(slotOf(r, 'a')).toMatchObject({ start: '05:50' });
-  });
-});
-
-describe('sleepPlan — cycles counted back from Fajr', () => {
-  const FAJR = min(4, 15);
-
-  it('at 21:30, only the bedtimes still ahead survive', () => {
-    const p = sleepPlan(min(21, 30), FAJR);
-    expect(p.untilFajr).toBe(min(4, 15) + 1440 - min(21, 30));
-    // 6 cycles means bed by 19:00 and 5 means 20:30 — both already behind at
-    // 21:30, so showing them would be advice about the past.
-    expect(p.bedtimes.map((b) => b.cycles)).toEqual([4, 3]);
-    expect(p.bedtimes[0].at).toBe(min(22, 0)); // 04:15 − 15m − 6h
-    expect(p.bedtimes[1].at).toBe(min(23, 30));
-  });
-
-  it('sleeping now: whole cycles only, wake at the boundary', () => {
-    const p = sleepPlan(min(23, 0), FAJR);
-    // 23:00→04:15 = 315m; minus 15 latency = 300 = 3 cycles + 30m spare.
-    expect(p.cyclesIfNow).toBe(3);
-    expect(p.alignedWake).toBe(min(3, 45)); // 23:00+15m+270m
-  });
-
-  it('pre-dawn: less than a cycle left reads as zero, not a negative', () => {
-    const p = sleepPlan(min(3, 30), FAJR);
-    expect(p.cyclesIfNow).toBe(0);
-    expect(p.alignedWake).toBe(null);
-  });
-
-  it('returns null rather than guessing when Fajr is unknown', () => {
-    expect(sleepPlan(min(23, 0), null)).toBe(null);
   });
 });
 

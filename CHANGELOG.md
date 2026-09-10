@@ -9,6 +9,33 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+### Changed
+- **The Now lock stands down during a focus round.** A round in progress is the
+  strongest evidence the app has that work is happening, so covering the screen
+  in the middle of one was the lock interrupting the exact behaviour it exists
+  to produce — and doing it to the one person who was already doing the right
+  thing. Both kinds of round count: the desktop shell's session and the plain
+  countdown the web and Android builds fall back to. A finished round counts as
+  activity too, so the lock is not sitting on the other side of it waiting,
+  which would read as a punishment for having focused.
+- **Quick add opens over the Now lock.** The lock exists to stop the day being
+  negotiated away; nothing about that is served by losing the thing you just
+  remembered while you were held. Adding does not clear the lock — only
+  finishing something does — so it costs the commitment nothing.
+
+### Removed
+- **The sleep-cycle card.** The 90-minute arithmetic, the bedtimes counted back
+  from Fajr, and the "sleeping now fits N cycles" line are gone, along with
+  `sleepPlan` and its tests. It was a nice piece of reasoning about a thing
+  nobody was using, and an unused feature is not free: it was a card on the Now
+  page every Isha, a branch in the view, and a paragraph in the README.
+
+  The **wake alarm survives**, deliberately. It was never really part of the
+  cycle arithmetic — the assistant has always been able to set one ("wake me at
+  six") and still can. What went with the card was the only place a pending
+  alarm could be seen or cancelled, so Now shows a chip while one is set. An
+  alarm with no way out is a trap rather than a feature.
+
 ### Fixed
 - **A multi-day task could not be ticked off, and took over Now until it was.**
   Reported as "multi-day tasks take over Now until I mark them done even on the

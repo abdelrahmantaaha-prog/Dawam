@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3, Mic, Square, ListChecks, CalendarRange, Gift, Timer, Ban } from 'lucide-react';
-import {brokerFrom, taskShown,taskLocked,taskUntil,spanLength,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, AlarmClock, Rows3, Mic, Square, ListChecks, CalendarRange, Gift, Timer, Ban } from 'lucide-react';
+import {brokerFrom, taskShown,taskLocked,taskUntil,spanLength,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook, onStorageHealth, writesFailing, storageStats, storageHeadroom, recheckWrites } from './storage.js';
 import { isDerived } from '../shared/model.js';
 import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken, inAppShell } from './sync.js';
@@ -11,7 +11,7 @@ import { isNative as nativeShell, ensurePermission, permissionState, pendingCoun
 import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, describeProposal, parseAssistantReply, parseEstimates, callAssistant, seriesDates } from './assistant.js';
 import { useDictation } from './dictation.js';
 import { loadDurations, durationFor, rememberDuration } from './durations.js';
-import { FocusView, isDesktop, useRoundEnded } from './focus.jsx';
+import { FocusView, isDesktop, useFocusLive, useRoundEnded } from './focus.jsx';
 import { loadFeeds, saveFeeds, refreshAll, loadInstances, busyOn, eventsOn } from './calsync.js';
 import { calKey, loadCalDone, toggleCalDone, pruneCalDone } from './caldone.js';
 import { DayEvents } from './calview.jsx';
@@ -1411,7 +1411,11 @@ export default function Rhythm() {
   };
   const dayHasSlots = week.tasks.some((t) => t.day === selectedDay && t.autoSlot);
 
-  /* ---- sleep: cycle-aligned wake alarm (native) ---- */
+  /* ---- wake alarm (native) ----
+     What is left of the sleep feature, and deliberately so: the cycle
+     arithmetic went, the alarm stayed. The assistant can set one ("wake me at
+     six"), and Now shows a chip while one is pending so it can always be
+     cancelled — an alarm with no way out is a trap rather than a feature. */
   const [alarmAt, setAlarmAt] = useState(null);
   useEffect(() => {
     if (!ready) return;
@@ -1592,7 +1596,7 @@ export default function Rhythm() {
   };
   useEffect(() => {
     if (!focus) return;
-    const id = setInterval(() => { setFocusTick((x) => x + 1); if (Date.now() >= focus.endsAt) setFocus(null); }, 1000);
+    const id = setInterval(() => { setFocusTick((x) => x + 1); if (Date.now() >= focus.endsAt) { marked(); setFocus(null); } }, 1000);
     return () => clearInterval(id);
   }, [focus]);
 
@@ -2231,6 +2235,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   };
   const focusLearn = (title, minutes) => { rememberDuration(title, minutes, 'kept'); };
   useRoundEnded((entry) => {
+    // A finished round is activity. Without this the lock would be waiting on
+    // the other side of it, which reads as a punishment for having focused.
+    marked();
     // Bank the measured minutes before anything is asked: the round happened
     // whether or not the question about it gets answered, and a dismissed card
     // should not throw away the one number that was actually measured.
@@ -2895,7 +2902,17 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
      worth being stopped over. See src/nowlock.js for why it is off by
      default and why any completion at all clears it. */
   const pendingNow = queue.length + liveNow.length + soonNow.length + missedPrayers.length;
-  const nowLocked = todayInView && lockDue({ settings, since: lastDoneAt, now: Date.now(), pending: pendingNow });
+  /* A round in progress is the strongest evidence the app has that work is
+     happening, so the lock stands down for it. Covering the screen in the
+     middle of a focus session would interrupt the exact behaviour the lock
+     exists to produce — and it would do it to the one person who was already
+     doing the right thing.
+
+     Both halves count: the desktop shell's own session, and the plain
+     countdown the web and Android builds fall back to. */
+  const roundLive = useFocusLive() || !!focus;
+  const nowLocked = todayInView && !roundLive
+    && lockDue({ settings, since: lastDoneAt, now: Date.now(), pending: pendingNow });
   // Being locked means being on Now. Nothing else is reachable, so leaving the
   // view underneath on Plan would only mean a strange flash on release.
   useEffect(() => { if (nowLocked && view !== 'now') setView('now'); }, [nowLocked]);   // eslint-disable-line
@@ -3415,47 +3432,15 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 {isDesktop() && <p className="hint-text" style={{ margin: '6px 0 0' }}>{tx('Or start a round on one from the Focus page — resting is a thing you can be doing.', 'أو ابدأ جولة على إحداها من صفحة التركيز — الراحة شيء يمكنك فعله.')}</p>}
               </div>
             )}
+            {todayInView && alarmAt && (
+              <button className="now-alarm" onClick={clearWake}>
+                <AlarmClock size={13} />
+                {tx('Alarm set for', 'منبه في')} {fmtTime(mm2(alarmAt.getHours() * 60 + alarmAt.getMinutes()))}
+                <span className="now-alarm-x"><X size={12} /> {tx('cancel', 'إلغاء')}</span>
+              </button>
+            )}
             {!todayInView && <button className="now-jump" onClick={goToday}>{tx('Jump to today', 'انتقل إلى اليوم')}</button>}
 
-            {activeId === 'isha' && (() => {
-              const fajrMin = minutesOf(todayTimings.Fajr);
-              const plan = sleepPlan(curMin, fajrMin);
-              if (!plan) return null;
-              const hm = (mins) => `${Math.floor(mins / 60)}${tx('h', 'س')} ${mins % 60}${tx('m', 'د')}`;
-              return (
-                <div className="sleep-card">
-                  <div className="sleep-h"><Moon size={14} /> {tx('Sleep', 'النوم')}
-                    <span className="sleep-until">{tx('Fajr', 'الفجر')} {fmtTime(todayTimings.Fajr)} · {tx('in', 'بعد')} {hm(plan.untilFajr)}</span>
-                  </div>
-                  {plan.bedtimes.length > 0 && (
-                    <div className="sleep-beds">
-                      {plan.bedtimes.map((b) => (
-                        <span key={b.cycles} className="sleep-bed">
-                          <strong>{b.cycles}</strong> {tx('cycles', 'دورات')} → {tx('sleep by', 'نَم قبل')} <strong>{fmtTime(mm2(b.at))}</strong>
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  <p className="sleep-now-line">
-                    {plan.cyclesIfNow > 0
-                      ? <>{tx('Sleeping now fits', 'النوم الآن يتسع لـ')} <strong>{plan.cyclesIfNow}</strong> {tx('full cycles — boundary wake at', 'دورات كاملة — استيقاظ عند حد الدورة')} <strong>{fmtTime(mm2(plan.alignedWake))}</strong>.</>
-                      : tx('Less than one full cycle until Fajr — a short nap beats a broken cycle.', 'أقل من دورة كاملة حتى الفجر — غفوة قصيرة أفضل من دورة مقطوعة.')}
-                  </p>
-                  {notifyState.supported ? (
-                    <div className="sleep-actions">
-                      <button className="ghost sm" onClick={() => setWake(fajrMin, tx('Fajr — time to wake', 'الفجر — وقت الاستيقاظ'))}><AlarmClock size={13} /> {tx('Alarm at Fajr', 'منبه عند الفجر')}</button>
-                      {plan.cyclesIfNow > 0 && plan.alignedWake !== fajrMin && (
-                        <button className="ghost sm" onClick={() => setWake(plan.alignedWake, tx('Cycle boundary — time to wake', 'حد الدورة — وقت الاستيقاظ'))}><AlarmClock size={13} /> {fmtTime(mm2(plan.alignedWake))} ({plan.cyclesIfNow} {tx('cycles', 'دورات')})</button>
-                      )}
-                      {alarmAt && <button className="ghost sm sleep-cancel" onClick={clearWake}><X size={13} /> {tx('Alarm', 'منبه')} {fmtTime(mm2(alarmAt.getHours() * 60 + alarmAt.getMinutes()))}</button>}
-                    </div>
-                  ) : (
-                    <p className="hint-text" style={{ margin: 0 }}>{tx('The wake alarm needs the Android app — times above still hold.', 'المنبه يحتاج تطبيق أندرويد — المواعيد أعلاه صحيحة على أي حال.')}</p>
-                  )}
-                  <p className="sleep-note">{tx('Arithmetic, not measurement: ~90-minute cycles plus 15 minutes to fall asleep. No phone can feel your sleep phase from the nightstand.', 'حساب لا قياس: دورات ~٩٠ دقيقة + ١٥ دقيقة للنوم. لا يمكن لهاتف أن يستشعر مرحلة نومك من على الطاولة.')}</p>
-                </div>
-              );
-            })()}
           </div>
         </div>
         );
@@ -4148,6 +4133,17 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 })()}
               </div>
             ) : null}
+            {/* Capturing a thought is not escaping.
+
+                The lock exists to stop the day being negotiated away, and
+                nothing about that is served by losing the thing you just
+                remembered while you were held. Adding does not clear the lock
+                — only finishing something does — so this costs the commitment
+                nothing and saves the one thing the commitment would otherwise
+                have destroyed. */}
+            <button className="nowlock-add" onClick={() => setQuickAdd(true)}>
+              <Plus size={14} /> {tx('Write something down', 'دوّن شيئًا')}
+            </button>
             {heldBy && (
               <p className="nowlock-held">
                 {heldBy === 'locked'

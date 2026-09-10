@@ -554,7 +554,7 @@ app. Not a banner behind which the planner keeps working — nothing is
 reachable, including Settings and the switch itself, until one task or a single
 step of one is ticked.
 
-Three rules keep it from being a trap:
+Four rules keep it from being a trap:
 
 - **It never fires on a day with nothing left to do.** Locking someone out of a
   finished day is punishing them for finishing it.
@@ -564,6 +564,17 @@ Three rules keep it from being a trap:
 - **The clock runs from the last thing you finished**, not from the top of the
   hour, so a productive stretch is never interrupted and a lock you just
   satisfied does not come straight back.
+- **It never appears during a focus round.** A round in progress is the
+  strongest evidence the app has that work is happening; covering the screen in
+  the middle of one would interrupt the exact behaviour the lock exists to
+  produce, and do it to the person who was already doing the right thing. A
+  finished round counts as activity, so the lock is not waiting on the other
+  side of it either.
+
+And one thing you can always do while it is up: **write something down.** Quick
+add opens over the lock. It does not clear it — only finishing something does —
+so it costs the commitment nothing, and it saves the one thing the commitment
+would otherwise have destroyed, which is the thought you had while being held.
 
 ### On a phone
 
@@ -655,18 +666,6 @@ Three things it refuses to do, each of which would lose a habit off the screen:
 a missing anchor (deleted, or from an old backup) releases it; a cycle releases
 both; and a chain is walked, so a habit three deep waits for everything above it
 rather than only its parent.
-
-## Sleep
-
-During Isha the Now page shows bedtimes counted back from Fajr in ~90-minute
-sleep cycles (+15 min to fall asleep), what sleeping right now fits, and — in
-the Android app — one-tap wake alarms at Fajr or at the last cycle boundary
-before it. **This is arithmetic, not measurement**: real sleep-phase detection
-needs movement or heart-rate sensing all night, which no phone on a nightstand
-can honestly do. Waking at a computed cycle boundary is the defensible version.
-The alarm is a maximum-importance notification on its own channel (crank its
-sound in system settings); it is not the system alarm-clock app, and it
-respects Do Not Disturb unless you exempt the channel.
 
 ## The day, and the Now page
 
