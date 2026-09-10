@@ -2704,7 +2704,17 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
      not stop being owed because its hour went by. */
   const quotasNow = todayInView
     ? dueProjects(settings.projects || [], todayMid, { blockOrder: blockIdx })
-        .filter((x) => blockIdx(normalizePlan(x.project).block) <= activeIdx && !x.quota.met)
+        .filter((x) => {
+          if (x.quota.met) return false;
+          const pl = normalizePlan(x.project);
+          if (blockIdx(pl.block) > activeIdx) return false;
+          // An optional clock time narrows the period: a project you sit down
+          // to at nine should not be asking at half past six just because both
+          // are "the morning". Once past, it stays — a share you owe does not
+          // stop being owed because its hour went by.
+          const from = pl.start ? minutesOf(pl.start) : null;
+          return from == null || curMin >= from || blockIdx(pl.block) < activeIdx;
+        })
     : [];
   /* What being caught up is worth. Only what the balance actually covers: an
      offer you cannot take is not an offer, and listing it turns a reward into

@@ -433,11 +433,20 @@ function ProjectCard({ p, open, onOpen, onUpd, onDel, onLog, taskInfo, onToggleT
                   </button>
                 ))}
               </div>
+              {/* A period is the app's own unit of time and the right default:
+                  "in the morning" is how a person plans. The clock time is for
+                  when that is too broad — a project you sit down to at nine
+                  should not be asking at half past six. Optional, and it
+                  narrows the period rather than replacing it. */}
               <label className="proj-plan-when">
                 <span>{tx('From', 'اعتبارًا من')}</span>
                 <select value={plan.block} onChange={(e) => onUpd({ plan: { ...plan, block: e.target.value } })}>
                   {BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}
                 </select>
+                <input className="time-input" type="time" value={plan.start || ''} style={{ maxWidth: 120 }}
+                  title={tx('Not before this time (optional)', 'ليس قبل هذا الوقت (اختياري)')}
+                  onChange={(e) => onUpd({ plan: { ...plan, start: e.target.value } })} />
+                {plan.start && <button className="mini-del" onClick={() => onUpd({ plan: { ...plan, start: '' } })} aria-label={tx('Clear', 'مسح')}><X size={12} /></button>}
               </label>
               <p className="hint-text" style={{ margin: '4px 0 0' }}>
                 {!plan.days.length
