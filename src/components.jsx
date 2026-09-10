@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, CalendarRange, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Gift, Timer } from 'lucide-react';
-import { taskUntil,spanLength,focusTargetMin,focusSpent,focusMet,hasVault,vaultWindowed,vaultUnlocked,autoWorth,taskWorth,estimateMinutes,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, CalendarRange, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Gift, Timer, Ban } from 'lucide-react';
+import { taskLocked,taskShown,taskUntil,spanLength,focusTargetMin,focusSpent,focusMet,hasVault,vaultWindowed,vaultUnlocked,autoWorth,taskWorth,estimateMinutes,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 import { durationFor } from './durations.js';
+import { describeRepeat, isScheduled } from './recur.js';
 
 function FlameGlyph({ level = 0, size = 14 }) {
   const l = Math.max(0, Math.min(7, level));
@@ -111,7 +112,7 @@ function QuotaLine({ project, quota, onLog, onOpen, compact = false }) {
   );
 }
 
-function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, projectById = () => null, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over, events = [], cards = [], onAddCard, addedCards, onToggleCalEvent, parseHint, onOpenSpan }) {
+function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, projectById = () => null, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over, events = [], cards = [], onAddCard, addedCards, onToggleCalEvent, parseHint, onOpenSpan, onLockedDrag }) {
   const [folded, setFolded] = useState(() => new Set()); // collapsed subtask lists, per task id (session-local)
   const toggleFold = (id) => setFolded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [quick, setQuick] = useState('');
@@ -184,13 +185,20 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
            task — ticking it here finishes it — but it is not stored on this
            day, so dragging it would move a task that lives somewhere else. */
         const ghost = !!t.__spanDay;
+        /* Already presented by the Now queue: it can be finished or deleted,
+           not shuffled out of the way. See taskLocked in core.jsx. */
+        const locked = taskLocked(t);
         const dBefore = taskDrop && taskDrop.taskId === t.id && !taskDrop.after;
         const dAfter = taskDrop && taskDrop.taskId === t.id && taskDrop.after;
         return (
-        <div key={t.id} data-taskid={ghost ? undefined : t.id} className={`task ${p ? 'has-label' : ''} ${t.done ? 'done' : ''} ${ghost ? 'spanning' : ''} ${draggingId === t.id ? 'dragging' : ''} ${dBefore ? 'drop-before' : ''} ${dAfter ? 'drop-after' : ''}`} style={p ? { '--lcolor': p.color } : undefined}>
+        <div key={t.id} data-taskid={ghost ? undefined : t.id} className={`task ${p ? 'has-label' : ''} ${t.done ? 'done' : ''} ${ghost ? 'spanning' : ''} ${locked ? 'locked' : ''} ${draggingId === t.id ? 'dragging' : ''} ${dBefore ? 'drop-before' : ''} ${dAfter ? 'drop-after' : ''}`} style={p ? { '--lcolor': p.color } : undefined}>
           {ghost
             ? <span className="grip span-grip" title={tx('Runs across several days — it lives on its first one', 'تمتد عبر عدة أيام — مكانها يومها الأول')}><CalendarRange size={14} /></span>
-            : <span className="grip" onPointerDown={(e) => onDragStart(e, 'task', t)} title={tx('Drag to reorder or move to another slot', 'اسحب لإعادة الترتيب أو النقل')}><GripVertical size={15} /></span>}
+            : locked
+              ? <button className="grip locked-grip" onClick={() => onLockedDrag && onLockedDrag(t)}
+                  title={tx('This has already come up in Now. Finish it or delete it — it cannot be moved.', 'ظهرت هذه بالفعل في «الآن». أنجزها أو احذفها — لا يمكن نقلها.')}
+                  aria-label={tx('Locked in place', 'مثبّتة في مكانها')}><Lock size={13} /></button>
+              : <span className="grip" onPointerDown={(e) => onDragStart(e, 'task', t)} title={tx('Drag to reorder or move to another slot', 'اسحب لإعادة الترتيب أو النقل')}><GripVertical size={15} /></span>}
           <button className="tcheck" onClick={() => onToggle(t.id)} aria-label="Toggle done">{t.done ? <CheckCircle2 size={18} /> : <Circle size={18} />}</button>
           <div className="tcol">
             <button className="tmain" onClick={() => (ghost && onOpenSpan ? onOpenSpan(t) : onOpen(t.id))}>
@@ -312,6 +320,12 @@ function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labe
               <button className="tpl-body tpl-open" onClick={() => onEditTpl(tp.id)} title={tx('Edit recurring task', 'تعديل المهمة المتكررة')}>
                 <span className="tpl-title">{tp.title}{usedTpl[tp.id] ? <span className="tpl-used"><Check size={11} />{usedTpl[tp.id] > 1 ? ` ×${usedTpl[tp.id]}` : ''}</span> : null}</span>
                 <span className="tpl-sub">{p && <span className="pdot" style={{ background: p.color }} />}{bName(b)}{timeLabel(tp) ? ` · ${timeLabel(tp)}` : ''}{nSub ? ` · ${nSub} ${LANG === 'ar' ? 'خطوة' : ('step' + (nSub > 1 ? 's' : ''))}` : ''}</span>
+                {(isScheduled(tp.repeat) || tp.projectRef) && (
+                  <span className="tpl-sub tpl-meta">
+                    {isScheduled(tp.repeat) && <span className="tpl-when"><Repeat size={9} /> {describeRepeat(tp.repeat, { dayName: wd, tx })}</span>}
+                    <ProjectTag project={projectById(tp.projectRef)} sm />
+                  </span>
+                )}
               </button>
               <div className="tpl-actions">
                 <button className="tpl-act" title={tx('Add to the selected day', 'أضف إلى اليوم المحدد')} onClick={() => onTplToDay(tp.id)}><CornerUpRight size={14} /></button>
@@ -507,6 +521,9 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, toda
   // the condition so a secret saved BEFORE any times were set stays editable —
   // otherwise it could never be given a window, and so could never unlock.
   const vaultLocksTime = hasVault(task) && vaultWindowed(task) && !vaultOpen;
+  // A task the queue has already presented does not get rescheduled — see
+  // taskLocked in core.jsx. Ticking it off releases every field again.
+  const shown = taskLocked(task);
   const saveVault = () => { setField('secret', vaultDraft); setVaultDraft(''); setVaultEditing(false); };
   const clearVault = () => { setField('secret', ''); setVaultDraft(''); setVaultEditing(false); };
   const copyVault = async () => {
@@ -522,14 +539,22 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, toda
         </div>
         <div className="modal-body task-edit">
           <div className="edit-card">
-            <div className="edit-card-h"><Clock size={13} /> {tx('When', 'الموعد')}</div>
+            <div className="edit-card-h"><Clock size={13} /> {tx('When', 'الموعد')}
+              {shown && <span className="edit-locked"><Lock size={11} /> {tx('already came up', 'ظهرت بالفعل')}</span>}
+            </div>
+            {shown && (
+              <p className="hint-text" style={{ margin: '0 0 8px' }}>
+                {tx('Now has already handed you this one, so its time is settled: finish it, or delete it. Pushing it somewhere else is the move this is here to prevent.',
+                  'قدّمت لك صفحة «الآن» هذه المهمة بالفعل، فوقتها لم يعد قابلاً للتفاوض: أنجزها أو احذفها. تأجيلها هو ما وُجد هذا القيد لمنعه.')}
+              </p>
+            )}
             <div className="edit-grid">
-              <label><span>{tx('Date', 'التاريخ')}</span><input className="time-input" type="date" value={dateISO} onChange={(e) => e.target.value && onMoveDate(e.target.value)} /></label>
-              <label><span>{tx('Block', 'الفترة')}</span><select value={task.block} onChange={(e) => setField('block', e.target.value)}>{BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}</select></label>
+              <label><span>{tx('Date', 'التاريخ')}</span><input className="time-input" type="date" value={dateISO} disabled={shown} onChange={(e) => e.target.value && onMoveDate(e.target.value)} /></label>
+              <label><span>{tx('Block', 'الفترة')}</span><select value={task.block} disabled={shown} onChange={(e) => setField('block', e.target.value)}>{BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}</select></label>
               {/* A hand-set time is the person's own; dropping autoSlot here keeps
                   "Clear slots" and re-slotting from ever overwriting it. */}
-              <label><span>{tx('Start', 'البداية')}</span><input className="time-input" type="time" value={task.start || ''} disabled={vaultLocksTime} onChange={(e) => onChange((t) => ({ ...t, start: e.target.value, autoSlot: null }))} /></label>
-              <label><span>{tx('End', 'النهاية')}</span><input className="time-input" type="time" value={task.end || ''} disabled={vaultLocksTime} onChange={(e) => onChange((t) => ({ ...t, end: e.target.value, autoSlot: null }))} /></label>
+              <label><span>{tx('Start', 'البداية')}</span><input className="time-input" type="time" value={task.start || ''} disabled={vaultLocksTime || shown} onChange={(e) => onChange((t) => ({ ...t, start: e.target.value, autoSlot: null }))} /></label>
+              <label><span>{tx('End', 'النهاية')}</span><input className="time-input" type="time" value={task.end || ''} disabled={vaultLocksTime || shown} onChange={(e) => onChange((t) => ({ ...t, end: e.target.value, autoSlot: null }))} /></label>
             </div>
             {/* Runs until — the whole multi-day feature, in one date. The task
                 stays a single task; it simply belongs to every day up to this
@@ -696,11 +721,13 @@ function PoolEditor({ item, projects, allProjects = [], onClose, onChange, onDel
 /* The ledger is on screen and not just the balance, on purpose. The
    problem this feature exists to solve is forgetting to reward yourself,
    and a bare number can't show you that you actually did. */
-function PointsPanel({ balance, ledger, rewards, onClose, onAddReward, onUpdReward, onDelReward, onCashIn, onForget, onReset }) {
+function PointsPanel({ balance, ledger, rewards, penalties = [], onClose, onAddReward, onUpdReward, onDelReward, onCashIn, onForget, onReset, onAddPenalty, onUpdPenalty, onDelPenalty, onCharge }) {
   const [editing, setEditing] = useState(null);
+  const [editingPen, setEditingPen] = useState(null);
+  const [confirmPen, setConfirmPen] = useState(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const recent = ledger.slice().reverse().slice(0, 40);
-  const kindLabel = { task: tx('task', 'مهمة'), subtask: tx('step', 'خطوة'), habit: tx('habit', 'عادة'), spend: tx('spent', 'صرف') };
+  const kindLabel = { task: tx('task', 'مهمة'), subtask: tx('step', 'خطوة'), habit: tx('habit', 'عادة'), spend: tx('spent', 'صرف'), penalty: tx('slipped', 'انزلاق'), wipe: tx('wiped', 'مُسحت') };
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal points-modal" onClick={(e) => e.stopPropagation()}>
@@ -744,6 +771,64 @@ function PointsPanel({ balance, ledger, rewards, onClose, onAddReward, onUpdRewa
             })}</ul>
           )}
 
+          {/* The other direction.
+
+              A number that can only ever grow is a number nobody protects, and
+              the habits worth stopping had nowhere to land: they cost you
+              nothing here, which is exactly backwards. These are priced the
+              same way rewards are, by the person they apply to.
+
+              Charging one is a two-tap confirm, because a mis-tap that takes
+              points is worse than a mis-tap that gives them — and a wipe is
+              confirmed with the number it is about to take, so nobody presses
+              it without seeing what it costs. */}
+          <div className="pts-sec-h">
+            <span>{tx('Penalties', 'الغرامات')}</span>
+            <button className="ghost sm" onClick={onAddPenalty}><Plus size={13} /> {tx('Add', 'إضافة')}</button>
+          </div>
+          {!penalties.length ? (
+            <p className="hint-text">{tx('Nothing here yet. These are the habits you are trying to stop — put a price on one, or make it a wipe if it is the kind of slip that should cost you the whole balance.', 'لا شيء هنا بعد. هذه هي العادات التي تحاول التوقف عنها — ضع سعرًا لإحداها، أو اجعلها ماسحة إن كانت زلّة تستحق أن تكلّفك رصيدك كله.')}</p>
+          ) : (
+            <ul className="pts-rewards">{penalties.map((r) => {
+              const cost = Number(r.cost) || 0;
+              return (
+                <li key={r.id} className="pts-reward pts-penalty">
+                  {editingPen === r.id ? (
+                    <div className="pts-reward-edit">
+                      <input value={r.name} onChange={(e) => onUpdPenalty(r.id, { name: e.target.value })} placeholder={tx('What you are trying to stop', 'ما تحاول التوقف عنه')} />
+                      <input type="number" min="1" value={r.wipe ? '' : r.cost} disabled={!!r.wipe}
+                        onChange={(e) => onUpdPenalty(r.id, { cost: e.target.value })} placeholder={tx('Cost', 'الكلفة')} />
+                      <label className="check pen-wipe">
+                        <input type="checkbox" checked={!!r.wipe} onChange={(e) => onUpdPenalty(r.id, { wipe: e.target.checked })} />
+                        <span>{tx('wipe it all', 'امسح الكل')}</span>
+                      </label>
+                      <button className="ghost sm" onClick={() => setEditingPen(null)}><Check size={13} /></button>
+                      <button className="danger sm" onClick={() => { onDelPenalty(r.id); setEditingPen(null); }}><Trash2 size={13} /></button>
+                    </div>
+                  ) : confirmPen === r.id ? (
+                    <div className="pts-pen-confirm">
+                      <span>{r.wipe
+                        ? `${tx('Wipe all', 'امسح كل')} ${balance} ${tx('points?', 'نقطة؟')}`
+                        : `${tx('Charge', 'اخصم')} ${cost}?`}</span>
+                      <span className="pts-reset-btns">
+                        <button className="danger sm" onClick={() => { onCharge(r); setConfirmPen(null); }}>{tx('Yes, I did it', 'نعم، فعلتها')}</button>
+                        <button className="ghost sm" onClick={() => setConfirmPen(null)}>{tx('Cancel', 'إلغاء')}</button>
+                      </span>
+                    </div>
+                  ) : (<>
+                    <button className="pts-reward-main" onClick={() => setEditingPen(r.id)}>
+                      <span className="pts-reward-name">{r.name || tx('Untitled penalty', 'غرامة بلا اسم')}</span>
+                      <span className="pts-reward-cost pen">{r.wipe ? tx('all of it', 'كل الرصيد') : `−${cost}`}</span>
+                    </button>
+                    <button className="danger sm" disabled={!r.wipe && cost <= 0} onClick={() => setConfirmPen(r.id)}>
+                      <Ban size={13} /> {tx('I slipped', 'انزلقت')}
+                    </button>
+                  </>)}
+                </li>
+              );
+            })}</ul>
+          )}
+
           <div className="pts-sec-h"><span>{tx('Ledger', 'السجل')}</span></div>
           {!recent.length ? (
             <p className="hint-text">{tx('Nothing earned yet. Finish something.', 'لم تكسب شيئًا بعد. أنجز شيئًا.')}</p>
@@ -753,9 +838,9 @@ function PointsPanel({ balance, ledger, rewards, onClose, onAddReward, onUpdRewa
                 <span className="pts-entry-amt">{e.amount > 0 ? `+${e.amount}` : e.amount}</span>
                 <span className="pts-entry-title">{e.title}</span>
                 <span className="pts-entry-meta">
-                  {kindLabel[e.kind] || e.kind}{e.meta && e.meta.late ? ` · ${tx('late', 'متأخر')}` : ''} · {e.day}
+                  {kindLabel[e.kind] || e.kind}{e.meta && e.meta.late ? ` · ${tx('late', 'متأخر')}` : ''}{e.kind === 'wipe' && e.meta ? ` · ${e.meta.wiped} ${tx('gone', 'ذهبت')}` : ''} · {e.day}
                 </span>
-                {e.kind === 'spend' && <button className="icon sm" onClick={() => onForget(e.ref)} aria-label={tx('Remove', 'إزالة')} title={tx('Logged by mistake?', 'سُجّل بالخطأ؟')}><X size={13} /></button>}
+                {['spend', 'penalty', 'wipe'].includes(e.kind) && <button className="icon sm" onClick={() => onForget(e.ref)} aria-label={tx('Remove', 'إزالة')} title={tx('Logged by mistake?', 'سُجّل بالخطأ؟')}><X size={13} /></button>}
               </li>
             ))}</ul>
           )}

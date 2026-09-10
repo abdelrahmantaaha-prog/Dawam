@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Rows3, Coins } from 'lucide-react';
 import { boardSummary, columnsOf } from './board.js';
+import { DAILY, WEEKLY, MONTHLY, normalizeRepeat } from './recur.js';
 import { TINY, habitStats, isPrayerAnchor, stackShape, wouldCycle } from './habits.js';
 import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
@@ -607,15 +608,45 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
             </div>
           )}
 
-          {tab === 'recurring' && (
+          {tab === 'recurring' && (<>
+            {/* Two knobs that change what Now does, so they sit together and
+                say plainly what they will do rather than hiding behind a
+                label. The lock in particular is a commitment device: nobody
+                should meet it without having switched it on themselves. */}
+            <div className="sect">
+              <div className="sect-h"><Clock size={13} /> {tx('The Now page', 'صفحة الآن')}</div>
+              <label className="field">
+                <span>{tx('Show a timed task this many minutes early', 'اعرض المهمة الموقوتة قبل موعدها بـ')}</span>
+                <input className="time-input" type="number" min="0" max="180" step="5" style={{ maxWidth: 120 }}
+                  value={local.leadMin == null ? 30 : local.leadMin}
+                  onChange={(e) => patch({ leadMin: Math.max(0, Math.min(180, Number(e.target.value) || 0)) })} />
+                <span className="hint-text">{tx('Time to close what you were doing and be there, rather than to find out it has started. Zero turns it off.', 'وقت لتُنهي ما بين يديك وتكون هناك، بدل أن تكتشف أنها بدأت. الصفر يوقف هذا.')}</span>
+              </label>
+              <div className="sect-h" style={{ marginTop: 16 }}><Lock size={13} /> {tx('The Now lock', 'قفل «الآن»')}</div>
+              <label className="toggle">
+                <input type="checkbox" checked={!!(local.nowLock && local.nowLock.on)}
+                  onChange={(e) => patch({ nowLock: { ...(local.nowLock || {}), on: e.target.checked, everyMin: (local.nowLock && local.nowLock.everyMin) || 15 } })} />
+                <span>{tx('Cover the whole app until I finish something', 'اقفل التطبيق بالكامل حتى أنجز شيئًا')}</span>
+              </label>
+              <label className="field">
+                <span>{tx('After this many minutes with nothing finished', 'بعد هذا العدد من الدقائق دون إنجاز شيء')}</span>
+                <input className="time-input" type="number" min="1" max="240" style={{ maxWidth: 120 }}
+                  disabled={!(local.nowLock && local.nowLock.on)}
+                  value={(local.nowLock && local.nowLock.everyMin) || 15}
+                  onChange={(e) => patch({ nowLock: { ...(local.nowLock || {}), on: !!(local.nowLock && local.nowLock.on), everyMin: Math.max(1, Math.min(240, Number(e.target.value) || 15)) } })} />
+              </label>
+              <div className="security-note"><AlertCircle size={15} /><p>{tx(
+                'This one is not a nudge. Nothing in the app is reachable while it is up — not Plan, not Settings, not this switch — and the only way out is to tick a task or a single step of one. It counts from the last thing you finished, and it never appears on a day with nothing left to do.',
+                'هذا ليس تنبيهًا لطيفًا. لا شيء في التطبيق متاح أثناءه — لا التخطيط ولا الإعدادات ولا هذا المفتاح — والمخرج الوحيد هو إنجاز مهمة أو خطوة واحدة منها. يُحسب من آخر شيء أنجزته، ولا يظهر أبدًا في يوم لم يبقَ فيه شيء.')}</p></div>
+            </div>
             <div className="sect">
               <div className="sect-h"><Repeat size={13} /> {tx('Recurring tasks', 'المهام المتكررة')}</div>
               <p className="hint-text" style={{ marginTop: 0 }}>{tx('Ready-made tasks you drop into a day. Editing one here only changes what you add later — tasks already on your calendar are untouched.', 'مهام جاهزة تضيفها إلى أي يوم. تعديلها هنا يؤثّر فقط على ما تضيفه لاحقًا — المهام الموجودة في تقويمك لا تتغيّر.')}</p>
               {templates.length === 0 && <p className="hint-text">{tx('None yet. Save any task or backlog item as a recurring task, or add one here.', 'لا يوجد بعد. احفظ أي مهمة أو عنصر من قائمة الانتظار كمهمة متكررة، أو أضف واحدة هنا.')}</p>}
-              {templates.map((tp) => (<TemplateEditor key={tp.id} tpl={tp} projects={local.labels} onChange={(patch) => onUpdTemplate(tp.id, patch)} onDelete={() => onDelTemplate(tp.id)} />))}
+              {templates.map((tp) => (<TemplateEditor key={tp.id} tpl={tp} projects={local.labels} allProjects={local.projects || []} onChange={(patch) => onUpdTemplate(tp.id, patch)} onDelete={() => onDelTemplate(tp.id)} />))}
               <button className="ghost sm" onClick={() => onAddTemplate({ title: tx('New recurring task', 'مهمة متكررة جديدة'), block: 'morning', subtasks: [] })}><Plus size={14} /> {tx('Add recurring task', 'إضافة مهمة متكررة')}</button>
             </div>
-          )}
+          </>)}
 
           {tab === 'prayer' && (<>
             <div className="sect">
@@ -856,11 +887,14 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
 /* ------------------------------------------------------------------ */
 /*  Template editor                                                    */
 /* ------------------------------------------------------------------ */
-function TemplateEditor({ tpl, projects, onChange, onDelete }) {
+function TemplateEditor({ tpl, projects, allProjects = [], onChange, onDelete }) {
   const [sub, setSub] = useState('');
   const subs = tpl.subtasks || [];
   const addSub = () => { if (sub.trim()) { onChange({ subtasks: [...subs, sub.trim()] }); setSub(''); } };
   const delSub = (i) => onChange({ subtasks: subs.filter((_, j) => j !== i) });
+  const rep = normalizeRepeat(tpl.repeat);
+  const setRep = (patch) => onChange({ repeat: { ...rep, ...patch } });
+  const toggleIn = (list, n) => (list.includes(n) ? list.filter((x) => x !== n) : [...list, n].sort((a, b) => a - b));
   return (
     <div className="routine-card">
       <div className="routine-top"><input className="projname" value={tpl.title} onChange={(e) => onChange({ title: e.target.value })} /><button className="mini-del" onClick={onDelete} aria-label="Delete recurring task"><Trash2 size={14} /></button></div>
@@ -869,6 +903,50 @@ function TemplateEditor({ tpl, projects, onChange, onDelete }) {
         <input className="time-input" type="time" value={tpl.start || ''} onChange={(e) => onChange({ start: e.target.value, time: '' })} title={tx('Start (optional)', 'البداية (اختياري)')} />
         <input className="time-input" type="time" value={tpl.end || ''} onChange={(e) => onChange({ end: e.target.value, time: '' })} title={tx('End (optional)', 'النهاية (اختياري)')} />
         <select value={tpl.projectId || ''} onChange={(e) => onChange({ projectId: e.target.value || null })}><option value="">{tx('no label', 'بلا وسم')}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        {/* Recurring work belongs to a project as much as anything else does —
+            and more so, since it is the work that repeats. Carried onto every
+            task added from here, so a weekly chore lands under its project
+            without being filed by hand each time. */}
+        <select value={tpl.projectRef || ''} onChange={(e) => onChange({ projectRef: e.target.value || null })}>
+          <option value="">{tx('no project', 'بلا مشروع')}</option>
+          {allProjects.filter((p) => !p.completedAt).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+      </div>
+      {/* When it is actually due. "Plan the day" offers a recurring task only
+          on the days its schedule names — a weekly chore offered seven times a
+          week is how a person learns to press Skip without reading. */}
+      <div className="routine-repeat">
+        <span className="routine-rep-h"><Repeat size={12} /> {tx('Due', 'تتكرر')}</span>
+        <div className="seg">
+          {[[DAILY, tx('Every day', 'كل يوم')], [WEEKLY, tx('Weekly', 'أسبوعيًا')], [MONTHLY, tx('Monthly', 'شهريًا')]].map(([id, label]) => (
+            <button key={id} className={rep.every === id ? 'on' : ''} onClick={() => setRep({ every: id })}>{label}</button>
+          ))}
+        </div>
+        {rep.every === WEEKLY && (
+          <div className="routine-days">
+            {weekdayFullList().map((name, i) => (
+              <button key={i} className={`rday ${rep.days.includes(i) ? 'on' : ''}`} onClick={() => setRep({ days: toggleIn(rep.days, i) })}
+                title={name} aria-pressed={rep.days.includes(i)}>{wd(i)}</button>
+            ))}
+          </div>
+        )}
+        {rep.every === MONTHLY && (
+          <div className="routine-dates">
+            {Array.from({ length: 31 }, (_, i) => i + 1).map((n) => (
+              <button key={n} className={`rdate ${rep.dates.includes(n) ? 'on' : ''}`} onClick={() => setRep({ dates: toggleIn(rep.dates, n) })}
+                aria-pressed={rep.dates.includes(n)}>{n}</button>
+            ))}
+          </div>
+        )}
+        {rep.every !== DAILY && (
+          <p className="hint-text" style={{ margin: '4px 0 0' }}>
+            {(rep.every === WEEKLY ? rep.days.length : rep.dates.length) === 0
+              ? tx('Nothing picked yet — it stays due every day until you choose.', 'لم تختر شيئًا بعد — تبقى مستحقة كل يوم حتى تختار.')
+              : rep.every === MONTHLY && rep.dates.some((n) => n > 28)
+                ? tx('A date past the end of a short month lands on its last day.', 'التاريخ الذي يتجاوز نهاية شهر قصير يقع في آخر يوم منه.')
+                : tx('Offered when you plan one of these days.', 'تُعرض عند تخطيط أحد هذه الأيام.')}
+          </p>
+        )}
       </div>
       {subs.length > 0 && <div className="routine-subs">{subs.map((s, i) => (<span key={i} className="subchip">{s}<button onClick={() => delSub(i)}><X size={11} /></button></span>))}</div>}
       <div className="inline-add"><input value={sub} onChange={(e) => setSub(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addSub()} placeholder={tx('Add a step…', 'أضف خطوة…')} /><button className="ghost sm" onClick={addSub}><Plus size={14} /></button></div>

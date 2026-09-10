@@ -481,6 +481,29 @@ function spanDayIndex(t, taskDate, date) {
 const spanCovers = (t, taskDate, date) => spanDayIndex(t, taskDate, date) > 0;
 
 /* ------------------------------------------------------------------ */
+/*  A task that has already had its turn.                              */
+/*                                                                     */
+/*  The Now page hands you one thing at a time, and the cost of that    */
+/*  design is that it makes rearranging Plan feel free: a task you did  */
+/*  not want to do could simply be dragged below the next one, and the  */
+/*  queue would obligingly hand you something easier. Repeat that four  */
+/*  times and the day has been renegotiated into whatever was most      */
+/*  comfortable, with no moment where you noticed you were doing it.    */
+/*                                                                     */
+/*  So a task the queue has actually PRESENTED — offered as the thing   */
+/*  to do now, not merely listed — stops being movable. It keeps        */
+/*  exactly two answers: do it, or delete it. Deleting stays available  */
+/*  on purpose. The point is not to trap someone with a task that       */
+/*  turned out to be wrong; it is to make dropping it a decision with   */
+/*  a name rather than a drag that leaves it looking planned.           */
+/*                                                                     */
+/*  Finishing it releases the lock, so un-ticking something to correct  */
+/*  a mis-tap does not leave it frozen.                                 */
+/* ------------------------------------------------------------------ */
+const taskShown = (t) => !!(t && t.seenAt);
+const taskLocked = (t) => taskShown(t) && !t.done;
+
+/* ------------------------------------------------------------------ */
 /*  Focus targets — "an hour on this today", and whether you did it.   */
 /*                                                                     */
 /*  Kept per date on the task itself rather than in a separate log,     */
@@ -860,7 +883,7 @@ function pushToToday(t, { activeBlock, curSinceFajr, sinceFajr }) {
   return next;
 }
 
-export { taskUntil,spans,spanLength,spanDayIndex,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,SLEEP,sleepPlan,POINTS,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
+export { taskShown,taskLocked,taskUntil,spans,spanLength,spanDayIndex,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,SLEEP,sleepPlan,POINTS,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
 
 /* The shared key pool, if this copy has been pointed at one.
  *

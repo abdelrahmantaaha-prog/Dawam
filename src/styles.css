@@ -1558,3 +1558,58 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .chill-chip:hover{background:rgba(62,138,108,.14)}
 .chill-cost{font-size:11px;font-weight:800;color:var(--verdigris);font-variant-numeric:tabular-nums}
 .rhythm.dark .chill-chip{background:rgba(62,138,108,.16)}
+
+/* ---- a recurring task's schedule ---- */
+.routine-repeat{display:flex;flex-direction:column;gap:7px;margin-top:9px;padding-top:9px;border-top:1px solid var(--soft)}
+.routine-rep-h{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:var(--faint)}
+.routine-days{display:flex;flex-wrap:wrap;gap:5px}
+.rday{min-width:40px;padding:5px 8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);
+  color:var(--muted);font-family:inherit;font-size:11.5px;font-weight:700;cursor:pointer}
+.rday.on{background:var(--verdigris);border-color:var(--verdigris);color:#fff}
+/* 31 buttons need a grid or they wrap into a ragged block nobody can scan. */
+.routine-dates{display:grid;grid-template-columns:repeat(auto-fill,minmax(30px,1fr));gap:4px}
+.rdate{padding:4px 0;border:1px solid var(--line);border-radius:7px;background:var(--surface);
+  color:var(--muted);font-family:inherit;font-size:11px;font-weight:700;cursor:pointer;font-variant-numeric:tabular-nums}
+.rdate.on{background:var(--verdigris);border-color:var(--verdigris);color:#fff}
+.tpl-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:2px}
+.tpl-when{display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:800;letter-spacing:.03em;
+  color:var(--muted);background:var(--soft);border-radius:99px;padding:1px 6px;white-space:nowrap}
+.rhythm.dark .rday,.rhythm.dark .rdate{background:var(--panel)}
+
+/* ---- a task the Now queue has already presented ---- */
+/* Two answers left: do it, or delete it. The lock in place of the grip says
+   so before a drag is attempted, rather than a drag that silently does
+   nothing — which reads as a broken app rather than a deliberate rule. */
+.task.locked{border-inline-start:3px solid var(--faint);padding-inline-start:7px;border-radius:3px}
+.locked-grip{border:none;background:none;padding:0;cursor:pointer;color:var(--faint);display:inline-flex;align-items:center}
+.locked-grip:hover{color:var(--muted)}
+.edit-locked{display:inline-flex;align-items:center;gap:4px;margin-inline-start:auto;font-size:10px;font-weight:800;
+  letter-spacing:.4px;text-transform:uppercase;color:var(--muted)}
+
+/* ---- the fifteen-minute lock ---- */
+/* Above everything, including the bottom nav — which every other modal
+   deliberately sits under so you can always leave. This one you cannot. */
+.nowlock{position:fixed;inset:0;z-index:120;display:flex;align-items:center;justify-content:center;padding:22px 16px;
+  background:rgba(23,48,39,.72);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.nowlock-card{width:100%;max-width:420px;background:var(--panel);border:1px solid var(--line);border-radius:18px;
+  padding:22px 20px;box-shadow:0 24px 60px rgba(23,48,39,.4);text-align:center}
+.nowlock-h{display:flex;align-items:center;justify-content:center;gap:8px;font-family:'Cormorant',var(--ar),serif;
+  font-size:21px;font-weight:600;color:var(--ink);line-height:1.25}
+.nowlock-sub{margin:8px 0 0;font-size:13.5px;line-height:1.6;color:var(--muted)}
+.nowlock-item{margin-top:16px}
+.nowlock-do{width:100%;display:flex;align-items:center;gap:11px;padding:15px 14px;border-radius:13px;cursor:pointer;
+  border:1px solid var(--verdigris);background:rgba(62,138,108,.08);color:var(--ink);
+  font-family:inherit;font-size:16px;font-weight:600;text-align:start}
+.rhythm[dir="rtl"] .nowlock-do{text-align:right}
+.nowlock-do:hover{background:rgba(62,138,108,.16)}
+.nowlock-do > span:first-of-type{flex:1;min-width:0;overflow-wrap:anywhere}
+.nowlock-ctx{font-size:11px;font-weight:700;color:var(--muted);flex-shrink:0}
+.nowlock-note{margin:16px 0 0;font-size:11.5px;line-height:1.6;color:var(--faint)}
+.rhythm.dark .nowlock{background:rgba(6,10,14,.8)}
+
+/* ---- penalties: the direction the ledger was missing ---- */
+.pts-penalty .pts-reward-cost.pen{color:#B23A3A}
+.pts-pen-confirm{display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%;font-size:12.5px;font-weight:700;color:#B23A3A}
+.pen-wipe{margin:0;white-space:nowrap;font-size:11.5px}
+.pen-wipe span{font-weight:700;color:var(--muted)}
+.pts-entry.spend .pts-entry-amt{color:#B23A3A}

@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3, Mic, Square, ListChecks, CalendarRange, Gift, Timer, Ban } from 'lucide-react';
-import {brokerFrom, taskUntil,spanLength,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import {brokerFrom, taskShown,taskLocked,taskUntil,spanLength,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook, onStorageHealth, writesFailing, storageStats, storageHeadroom, recheckWrites } from './storage.js';
 import { isDerived } from '../shared/model.js';
 import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken, inAppShell } from './sync.js';
-import { readLedger, balanceOf, award, revoke, spend } from './points.js';
+import { readLedger, balanceOf, award, revoke, spend, penalise, wipe } from './points.js';
 import { updateWidget } from './widget.js';
 import { writeNowFile } from './nowfile.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence, scheduleWakeAlarm, cancelWakeAlarm, pendingWakeAlarm } from './notify.js';
@@ -29,7 +29,8 @@ import { loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, 
 import { MeetingSheet } from './meetingsheet.jsx';
 import { nextMark, TINY, stackGate, isPrayerAnchor, anchorLabel } from './habits.js';
 import { dueProjects, normalizePlan, todayQuota, worksOn } from './quota.js';
-import { dueOn as recurDueOn, describeRepeat, isScheduled } from './recur.js';
+import { lockDue, lockEvery, lockOn, minutesToLock } from './nowlock.js';
+import { dueOn as recurDueOn, describeRepeat, isScheduled, normalizeRepeat } from './recur.js';
 import { TrelloCards } from './trelloview.jsx';
 import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
 
@@ -200,6 +201,13 @@ export default function Rhythm() {
   const [sideTab, setSideTab] = useState('recurring');  // 'recurring' | 'backlog' — combined plan sidebar
   const [sideOpen, setSideOpen] = useState(true);       // recurring/backlog sidebar collapsed state
   const [nowLeaving, setNowLeaving] = useState(null);   // key of the Now card playing its exit
+  /* When something was last finished. The Now lock counts from here rather
+     than from the top of the hour, so a productive stretch is never cut into
+     and a lock that was just satisfied does not come straight back. Session
+     state on purpose: it is a measure of THIS sitting, and reopening the app
+     tomorrow should not inherit yesterday's silence. */
+  const [lastDoneAt, setLastDoneAt] = useState(() => Date.now());
+  const marked = () => setLastDoneAt(Date.now());
   const [notifyState, setNotifyState] = useState({ supported: false, state: 'unsupported' });
   const pendingEditRef = useRef(null);                  // open editor after jumping to an overdue task's week
 
@@ -906,6 +914,7 @@ export default function Rhythm() {
     mutateTask(id, (x) => ({ ...x, done: !x.done }));
     if (!t) return;
     if (!t.done) {
+      marked();
       awardTaskDone(t, dateOfTask(t));
       // Finishing a timed task without having touched its slot is acceptance:
       // remember the duration under this title for every future slotting.
@@ -920,7 +929,9 @@ export default function Rhythm() {
     mutateTask(id, (x) => ({ ...x, subtasks: x.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) }));
     if (!t) return;
     const sub = (t.subtasks || []).find((s) => s.id === subId);
-    if (sub && !sub.done) awardSubDone(t, subId, dateOfTask(t)); else revokeRef(`sub:${id}:${subId}`);
+    // A subtask counts. The bar is "you moved", not "you moved enough" — a
+    // lock only a big task can clear is a lock that gets solved by force-quit.
+    if (sub && !sub.done) { marked(); awardSubDone(t, subId, dateOfTask(t)); } else revokeRef(`sub:${id}:${subId}`);
   };
   const moveTaskToBlock = (id, block) => mutateTask(id, (t) => ({ ...t, block }));
   // Drag-to-reorder: drop the task into `blockId` right before/after `targetId`
@@ -984,17 +995,17 @@ export default function Rhythm() {
   // A recurring task is only ever a *definition*. Applying it copies everything
   // by value (fresh subtask ids via mkSubs in addTask/addPoolItem), so editing a
   // recurring task later never reaches back into tasks you've already added.
-  const addTemplate = (tpl) => persistTemplates((prev) => [...prev, { id: uid(), title: tpl.title || tx('New recurring task', 'مهمة متكررة جديدة'), block: vBlock(tpl.block), start: tpl.start || '', end: tpl.end || '', time: '', projectId: tpl.projectId || null, subtasks: (tpl.subtasks || []).map((s) => (typeof s === 'string' ? s : s.title)) }]);
+  const addTemplate = (tpl) => persistTemplates((prev) => [...prev, { id: uid(), title: tpl.title || tx('New recurring task', 'مهمة متكررة جديدة'), block: vBlock(tpl.block), start: tpl.start || '', end: tpl.end || '', time: '', projectId: tpl.projectId || null, projectRef: tpl.projectRef || null, repeat: normalizeRepeat(tpl.repeat), subtasks: (tpl.subtasks || []).map((s) => (typeof s === 'string' ? s : s.title)) }]);
   const updTemplate = (id, patch) => persistTemplates((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
   const delTemplate = (id) => persistTemplates((prev) => prev.filter((t) => t.id !== id));
   const templateToDay = (tplId, dayIdx, blockId) => {
     const tpl = templates.find((t) => t.id === tplId); if (!tpl) return;
     // clone subtasks (strings) so the created task shares nothing with the definition
-    addTask(dayIdx, blockId || tpl.block, tpl.title, { projectId: tpl.projectId, start: tpl.start || '', end: tpl.end || '', time: tpl.time || '', templateId: tpl.id, subtasks: [...(tpl.subtasks || [])] });
+    addTask(dayIdx, blockId || tpl.block, tpl.title, { projectId: tpl.projectId, projectRef: tpl.projectRef || null, start: tpl.start || '', end: tpl.end || '', time: tpl.time || '', templateId: tpl.id, subtasks: [...(tpl.subtasks || [])] });
   };
   const templateToPool = (tplId) => {
     const tpl = templates.find((t) => t.id === tplId); if (!tpl) return;
-    addPoolItem(tpl.title, { projectId: tpl.projectId, subtasks: [...(tpl.subtasks || [])] });
+    addPoolItem(tpl.title, { projectId: tpl.projectId, projectRef: tpl.projectRef || null, subtasks: [...(tpl.subtasks || [])] });
     flash(tx('Added to backlog.', 'أُضيفت إلى قائمة الانتظار.'));
   };
 
@@ -1065,6 +1076,28 @@ export default function Rhythm() {
     for (const k of keys) { await rawDelete(k); markDeleted(k); }
     await refreshLedger();
     flash(tx('Points reset — a clean slate.', 'صُفّرت النقاط — صفحة جديدة.'));
+  };
+
+  /* Penalties. A charge is a real event at a moment — doing the thing twice
+     costs twice — so unlike ticking a task these are deliberately not
+     idempotent, and each writes its own entry. See src/points.js. */
+  const persistPenalties = (fn) => persistSettings({ ...settingsRef.current, penalties: fn(settingsRef.current.penalties || []) });
+  const addPenalty = () => persistPenalties((prev) => [...prev, { id: uid(), name: '', cost: 50, wipe: false }]);
+  const updPenalty = (id, patch) => persistPenalties((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const delPenalty = (id) => persistPenalties((prev) => prev.filter((r) => r.id !== id));
+  const chargePenalty = async (pen) => {
+    const iso = fmtISO(lateCtx().today);
+    if (pen.wipe) {
+      const e = await wipe(ledgerRef.current, iso, { title: pen.name || tx('Slipped', 'انزلاق'), penaltyId: pen.id });
+      await refreshLedger();
+      flash(e ? `${tx('Back to zero.', 'عدت إلى الصفر.')} −${Math.abs(e.amount)}` : tx('Nothing left to take.', 'لا شيء ليُؤخذ.'));
+      return;
+    }
+    const cost = Math.round(Number(pen.cost) || 0);
+    if (cost <= 0) return;
+    await penalise(iso, { title: pen.name || tx('Slipped', 'انزلاق'), cost, penaltyId: pen.id });
+    await refreshLedger();
+    flash(`−${cost}`);
   };
 
   const persistRewards = (fn) => persistSettings({ ...settingsRef.current, rewards: fn(settingsRef.current.rewards || []) });
@@ -1418,8 +1451,13 @@ export default function Rhythm() {
       .filter((t) => t.day === selectedDay)
       .sort((a, b) => (blockOrder(a.block) - blockOrder(b.block)) || ((tStartMin(a) ?? 1e9) - (tStartMin(b) ?? 1e9)))
       .map((t) => ({ kind: 'review', id: t.id }));
-    // 3) Templates, ordered by period of the day
+    /* 3) Recurring tasks that are DUE on the day being planned, ordered by
+          period. A weekly chore offered every day is how a person learns to
+          press Skip without reading, and once that habit forms the wizard has
+          stopped working for everything else too. */
+    const planDate = addDays(weekStart, selectedDay);
     const tplItems = [...templates]
+      .filter((tp) => recurDueOn(tp.repeat, planDate))
       .sort((a, b) => blockOrder(a.block) - blockOrder(b.block))
       .map((t) => ({ kind: 'template', id: t.id }));
     // 4) Backlog
@@ -2639,6 +2677,47 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     .sort((a, b) => Number(b.cost) - Number(a.cost))
     .slice(0, 3);
 
+  /* The fifteen-minute lock. Everything unfinished counts as something the
+     day still wants — including a missed prayer, which is the one item most
+     worth being stopped over. See src/nowlock.js for why it is off by
+     default and why any completion at all clears it. */
+  const pendingNow = queue.length + liveNow.length + soonNow.length + missedPrayers.length;
+  const nowLocked = todayInView && lockDue({ settings, since: lastDoneAt, now: Date.now(), pending: pendingNow });
+  // Being locked means being on Now. Nothing else is reachable, so leaving the
+  // view underneath on Plan would only mean a strange flash on release.
+  useEffect(() => { if (nowLocked && view !== 'now') setView('now'); }, [nowLocked]);   // eslint-disable-line
+
+  /* Mark what the queue has actually put in front of you.
+
+     Only the head of the queue when it is a real turn (not the muted Next
+     look-ahead, which is a preview of a period that has not arrived) and
+     anything inside its own scheduled window. Seeing something under Next is
+     not the same as being asked to do it, and locking it there would freeze
+     the evening's plan at breakfast.
+
+     Written once per task and never again — the guard is the whole reason
+     this can live in an effect that re-runs on every tick without writing to
+     storage on every tick. */
+  const shownIds = [
+    ...(next && next.kind === 'task' && !nextIsLater ? [next.t.id] : []),
+    ...liveNow.map((x) => x.id),
+  ];
+  const shownKey = shownIds.join(',');
+  useEffect(() => {
+    if (!ready || !shownIds.length) return;
+    let stop = false;
+    (async () => {
+      const wsISO = fmtISO(startOfWeek(todayMid, settings.weekStartDay));
+      const doc = wsISO === fmtISO(weekStart) ? weekRef.current : await readWeek(wsISO);
+      const hit = new Set(shownIds);
+      if (!(doc.tasks || []).some((x) => hit.has(x.id) && !x.seenAt)) return;
+      if (stop) return;
+      const at = Date.now();
+      await writeWeek(wsISO, { ...doc, tasks: doc.tasks.map((x) => (hit.has(x.id) && !x.seenAt ? { ...x, seenAt: at } : x)) });
+    })();
+    return () => { stop = true; };
+  }, [ready, shownKey]);   // eslint-disable-line
+
   /* ---- Android notifications (no-ops in the browser) ----
      Reminders are keyed to today's timed tasks; the ongoing card mirrors the
      Now page. Both are described as plain strings first so the effects only
@@ -3222,6 +3301,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 onPrayer={() => togglePrayer(b.id, selectedDate)}
                 onToggle={toggleDone} onToggleSub={toggleSub} onOpen={setEditing}
                 projectById={projectById}
+                onLockedDrag={() => flash(tx('It has already come up in Now — finish it or delete it.', 'ظهرت بالفعل في «الآن» — أنجزها أو احذفها.'))}
                 onOpenSpan={(tk) => openProjectTask(tk.__spanHome)}
                 onAdd={(title) => addParsedTask(title, { blockId: b.id })}
                 parseHint={parseHint}
@@ -3455,9 +3535,10 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       )}
 
       {showPoints && (
-        <PointsPanel balance={balance} ledger={ledger} rewards={settings.rewards || []}
+        <PointsPanel balance={balance} ledger={ledger} rewards={settings.rewards || []} penalties={settings.penalties || []}
           onClose={() => setShowPoints(false)}
           onAddReward={addReward} onUpdReward={updReward} onDelReward={delReward}
+          onAddPenalty={addPenalty} onUpdPenalty={updPenalty} onDelPenalty={delPenalty} onCharge={chargePenalty}
           onCashIn={cashIn} onForget={(ref) => revokeRef(ref)} onReset={resetPoints} />
       )}
 
@@ -3590,7 +3671,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             <div className="modal">
               <div className="modal-head plain"><strong>{tx('Recurring task', 'مهمة متكررة')}</strong><button className="icon" onClick={() => setEditingTpl(null)}><X size={18} /></button></div>
               <div className="modal-body">
-                <TemplateEditor tpl={tp} projects={settings.labels} onChange={(patch) => updTemplate(tp.id, patch)} onDelete={() => { delTemplate(tp.id); setEditingTpl(null); }} />
+                <TemplateEditor tpl={tp} projects={settings.labels} allProjects={settings.projects || []} onChange={(patch) => updTemplate(tp.id, patch)} onDelete={() => { delTemplate(tp.id); setEditingTpl(null); }} />
                 <p className="hint-text" style={{ marginTop: 4 }}>{tx('Edits apply to tasks you add from now on — tasks already on your calendar are untouched.', 'تسري التعديلات على ما تضيفه لاحقًا — المهام الموجودة في تقويمك لا تتغيّر.')}</p>
               </div>
               <div className="modal-foot"><button className="primary" onClick={() => setEditingTpl(null)}>{tx('Done', 'تم')}</button></div>
@@ -3691,6 +3772,58 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
 
       {locked && settings.pin && (
         <PinScreen onVerify={verifyPin} onSuccess={() => setLocked(false)} />
+      )}
+
+      {/* The fifteen-minute lock. Deliberately the last overlay in the tree and
+          the highest one: the bottom nav is rendered after every other modal so
+          it stays tappable, which is right for a notebook and wrong for this.
+          There is exactly one way out and it is on the card. */}
+      {nowLocked && !locked && (
+        <div className="nowlock" role="dialog" aria-modal="true">
+          <div className="nowlock-card">
+            <div className="nowlock-h"><Lock size={17} /> {tx('Nothing has moved for', 'لم يتحرك شيء منذ')} {lockEvery(settings)} {tx('minutes', 'دقيقة')}</div>
+            <p className="nowlock-sub">{tx('Finish one thing — a task, or a single step of one — and the day is yours again.', 'أنجز شيئًا واحدًا — مهمة أو خطوة واحدة منها — ويعود اليوم إليك.')}</p>
+            {next || liveNow.length || missedPrayers.length ? (
+              <div className="nowlock-item">
+                {missedPrayers.length > 0 ? (
+                  <button className="nowlock-do" onClick={() => { marked(); togglePrayer(missedPrayers[0].id, todayMid); }}>
+                    <Circle size={20} />
+                    <span>{tx(`${missedPrayers[0].name} prayer`, `صلاة ${missedPrayers[0].ar}`)}</span>
+                  </button>
+                ) : (() => {
+                  const it = liveNow.length ? { kind: 'task', t: liveNow[0] } : next;
+                  if (!it) return null;
+                  if (it.kind === 'task') {
+                    const s = (it.t.subtasks || []).find((x) => !x.done);
+                    return (
+                      <button className="nowlock-do" onClick={() => { marked(); if (s) toggleSub(it.t.id, s.id); else toggleDone(it.t.id); }}>
+                        <Circle size={20} />
+                        <span>{s ? s.title : it.t.title}</span>
+                        {s ? <span className="nowlock-ctx">{it.t.title}</span> : null}
+                      </button>
+                    );
+                  }
+                  if (it.kind === 'habit') return (
+                    <button className="nowlock-do" onClick={() => { marked(); toggleHabitDay(it.h.id, nowHabitISO); }}>
+                      <Circle size={20} /><span>{it.h.name}</span>
+                    </button>
+                  );
+                  if (it.kind === 'prayer') return (
+                    <button className="nowlock-do" onClick={() => { marked(); togglePrayer(it.block.id, todayMid); }}>
+                      <Circle size={20} /><span>{tx(`${it.block.name} prayer`, `صلاة ${it.block.ar}`)}</span>
+                    </button>
+                  );
+                  return (
+                    <button className="nowlock-do" onClick={() => { marked(); toggleMeeting(fmtISO(todayMid), it.m.key); }}>
+                      <Circle size={20} /><span>{it.m.summary || tx('Meeting', 'اجتماع')}</span>
+                    </button>
+                  );
+                })()}
+              </div>
+            ) : null}
+            <p className="nowlock-note">{tx('You asked for this in Settings → The Now lock. You can turn it off there once one thing is done.', 'طلبت هذا من الإعدادات ← قفل «الآن». يمكنك إيقافه من هناك بعد إنجاز شيء واحد.')}</p>
+          </div>
+        </div>
       )}
 
       {toast && <div className="toast">{toast}</div>}
