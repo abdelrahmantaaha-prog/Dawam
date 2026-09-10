@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Rows3, Coins } from 'lucide-react';
 import { boardSummary, columnsOf } from './board.js';
 import { DAILY, WEEKLY, MONTHLY, normalizeRepeat } from './recur.js';
+import { normalizePlan, todayQuota } from './quota.js';
 import { TINY, habitStats, isPrayerAnchor, stackShape, wouldCycle } from './habits.js';
 import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
@@ -284,6 +285,9 @@ function ProjectCard({ p, open, onOpen, onUpd, onDel, onLog, taskInfo, onToggleT
   const unit = p.unit || tx('units', 'وحدة');
   const completed = !!p.completedAt;
   const hasTarget = Number(p.target) > 0; // numeric targets are optional
+  // The work plan and what it asks for today — see src/quota.js.
+  const plan = normalizePlan(p);
+  const quota = todayQuota(p, new Date());
   const submitLog = () => { const n = Number(amt); if (!n) return; onLog(n, note.trim()); setAmt(''); setNote(''); };
   const tasks = (taskInfo && taskInfo.tasks) || [];
   const lanes = boardSummary(tasks, columnsOf(p));
@@ -398,6 +402,51 @@ function ProjectCard({ p, open, onOpen, onUpd, onDel, onLog, taskInfo, onToggleT
           <div className="proj-grid2">
             <label><span>{tx('Start', 'البداية')}</span><input className="time-input" type="date" value={p.startDate || ''} onChange={(e) => onUpd({ startDate: e.target.value })} /></label>
             <label><span>{tx('Deadline', 'الموعد النهائي')}</span><input className="time-input" type="date" value={p.deadline || ''} onChange={(e) => onUpd({ deadline: e.target.value })} /></label>
+          </div>
+          {/* When this project should ask for its share of the day.
+
+              A deadline is not something a person can act on. "Eleven pages,
+              this morning" is, and that is what turns a project into a habit
+              with an end date — appearing in Plan and Now on its own days, in
+              its own block, going quiet the moment the share is logged.
+
+              The pace divides by the SITTINGS that are left, not the calendar
+              days: someone who writes on Tuesdays and Thursdays has three
+              sittings before a deadline ten days out, not ten, and dividing by
+              ten quietly sets them up to miss by a factor of three. Picking no
+              days means every day. See src/quota.js. */}
+          <div className="proj-plan">
+            <div className="proj-plan-h"><Target size={12} /> {tx('Remind me to work on this', 'ذكّرني بالعمل على هذا')}</div>
+            <label className="toggle">
+              <input type="checkbox" checked={!!plan.on} disabled={!hasTarget}
+                onChange={(e) => onUpd({ plan: { ...plan, on: e.target.checked } })} />
+              <span>{hasTarget
+                ? tx('Show today\u2019s share in Plan and Now', 'أظهر نصيب اليوم في التخطيط و«الآن»')
+                : tx('Needs a target number above', 'يحتاج هدفًا رقميًا أعلاه')}</span>
+            </label>
+            {plan.on && hasTarget && (<>
+              <div className="routine-days">
+                {weekdayFullList().map((name, i) => (
+                  <button key={i} className={`rday ${plan.days.includes(i) ? 'on' : ''}`} title={name} aria-pressed={plan.days.includes(i)}
+                    onClick={() => onUpd({ plan: { ...plan, days: plan.days.includes(i) ? plan.days.filter((x) => x !== i) : [...plan.days, i].sort((a, b) => a - b) } })}>
+                    {wd(i)}
+                  </button>
+                ))}
+              </div>
+              <label className="proj-plan-when">
+                <span>{tx('From', 'اعتبارًا من')}</span>
+                <select value={plan.block} onChange={(e) => onUpd({ plan: { ...plan, block: e.target.value } })}>
+                  {BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}
+                </select>
+              </label>
+              <p className="hint-text" style={{ margin: '4px 0 0' }}>
+                {!plan.days.length
+                  ? tx('No days picked — it will ask every day.', 'لم تختر أيامًا — سيطلب كل يوم.')
+                  : quota.need == null
+                    ? tx('Set a deadline above and it can work out today\u2019s share.', 'حدّد موعدًا نهائيًا أعلاه ليحسب نصيب اليوم.')
+                    : `${tx('Today that is', 'نصيب اليوم')} ${quota.need} ${unit}.`}
+              </p>
+            </>)}
           </div>
           <p className="hint-text" style={{ marginTop: 0 }}>{tx('To add tasks here, set this project on a task from its editor.', 'لإضافة مهام هنا، اختر هذا المشروع من محرّر المهمة.')}</p>
           {(p.entries || []).length > 0 && (

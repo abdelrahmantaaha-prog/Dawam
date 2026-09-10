@@ -1613,3 +1613,12 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .pen-wipe{margin:0;white-space:nowrap;font-size:11.5px}
 .pen-wipe span{font-weight:700;color:var(--muted)}
 .pts-entry.spend .pts-entry-amt{color:#B23A3A}
+
+/* ---- a project's work plan ---- */
+.proj-plan{margin:12px 0 10px;padding:11px 12px;border:1px solid var(--soft);border-radius:11px;background:var(--soft)}
+.proj-plan-h{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:800;letter-spacing:.5px;
+  text-transform:uppercase;color:var(--faint);margin-bottom:7px}
+.proj-plan .toggle{margin:0 0 8px}
+.proj-plan-when{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:12px;font-weight:700;color:var(--muted)}
+.proj-plan-when select{flex:1;max-width:200px}
+.rhythm.dark .proj-plan{background:rgba(22,28,37,.6)}

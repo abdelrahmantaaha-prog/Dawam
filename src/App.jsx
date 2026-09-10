@@ -24,7 +24,7 @@ import { loadCalPrep, setCalPrep, prepFor as prepForEvent, meetingsForProject, i
 import { parseTaskText, describeParse } from './parse.js';
 import { NotesView, NoteEditor } from './notesview.jsx';
 import { FilterBar } from './filterbar.jsx';
-import { EMPTY as EMPTY_FILTER, arrange, isFiltering, matches as filterMatches } from './filters.js';
+import { EMPTY as EMPTY_FILTER, applyFilter, arrange, isFiltering, matches as filterMatches } from './filters.js';
 import { loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, isEmptyNote, excerpt as noteExcerpt } from './notes.js';
 import { MeetingSheet } from './meetingsheet.jsx';
 import { nextMark, TINY, stackGate, isPrayerAnchor, anchorLabel } from './habits.js';
@@ -3179,23 +3179,32 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             blockName={(overdue.length + overdueHabits.length) === 1 ? tx('item needs attention', 'عنصر يحتاج انتباهك') : tx('items need attention', 'عناصر تحتاج انتباهك')} blockAr=""
             range={overdue.length ? `${tx('oldest', 'الأقدم')} — ${wd(overdue[0].date.getDay())} ${overdue[0].date.getDate()} ${mon(overdue[0].date.getMonth())}` : overdueHabits.length ? `${overdueHabits.length} ${tx('missed habits', 'عادات فائتة')}` : tx("you're all caught up", 'أنجزت كل شيء')} />
           <div className="hero-sheet">
+            {/* Overdue is a list of work like any other, and it is the list
+                most likely to be long enough to need narrowing — "what of this
+                is the Bugs project" is exactly the question a backlog of
+                missed things provokes. */}
+            {overdue.length > 0 && filterBar(TASK_SORTS)}
             {overdue.length === 0 && overdueHabits.length === 0 ? (<div className="overdue-empty"><CheckCircle2 size={26} /><p>{tx("Nothing overdue. You're on top of it.", 'لا متأخرات. أنت متحكّم في الأمور.')}</p></div>) : (<>
             {overdue.length === 0 ? null : (<>
               <div className="od-bar">
-                <span className="od-bar-count">{overdue.length} {tr.overdue}</span>
+                <span className="od-bar-count">{overdue.length} {tr.overdue}{isFiltering(filter) ? ` · ${applyFilter(overdue, filter, { label: (it) => it.t.projectId, project: (it) => it.t.projectRef }).length} ${tx('shown', 'معروضة')}` : ''}</span>
                 <div className="od-bar-actions">
                   <button className="ghost sm" onClick={moveAllOverdueToToday} disabled={odBusy}><CornerUpRight size={14} /> {tx('Move all to today', 'نقل الكل لليوم')}</button>
                   <button className="ghost sm" onClick={completeAllOverdue} disabled={odBusy}><CheckCircle2 size={14} /> {tx('Complete all', 'إنجاز الكل')}</button>
                   {confirmDelete ? (<span className="od-confirm">{tx('Delete all?', 'حذف الكل؟')}<button className="danger sm" onClick={deleteAllOverdue} disabled={odBusy}>{tx('Yes', 'نعم')}</button><button className="ghost sm" onClick={() => setConfirmDelete(false)} disabled={odBusy}>{tx('Cancel', 'إلغاء')}</button></span>) : (<button className="danger sm" onClick={() => setConfirmDelete(true)} disabled={odBusy}><Trash2 size={14} /> {tx('Delete all', 'حذف الكل')}</button>)}
                 </div>
               </div>
-              <ul className="od-list">{overdue.map((it) => { const p = labelById(it.t.projectId); const b = blockById(it.t.block); return (
+              <ul className="od-list">{arrange(overdue, filter, TASK_SORTS, {
+                label: (it) => it.t.projectId, project: (it) => it.t.projectRef,
+                title: (it) => it.t.title, date: (it) => it.date.getTime(),
+                tagName: (it) => labelNameOf(it.t), projectName: (it) => projectNameOf(it.t),
+              }).map((it) => { const p = labelById(it.t.projectId); const prj = projectById(it.t.projectRef); const b = blockById(it.t.block); return (
                 <li key={it.t.id} className="od-item">
                   <button className="tcheck" style={{ color: '#B23A3A' }} onClick={() => completeOverdue(it)} aria-label="Mark done"><Circle size={18} /></button>
                   <div className="od-col">
                     <button className="od-main" onClick={() => editOverdue(it)}>
                       <span className="od-title">{it.t.title}{timeLabel(it.t) ? <span className="ttime">{timeLabel(it.t)}</span> : null}</span>
-                      <span className="od-meta"><span className="od-date">{wd(it.date.getDay())} {it.date.getDate()} {mon(it.date.getMonth())}</span><span className="od-block blk-ink" style={{ '--bi-light': b.accentDeep, '--bi-dark': b.accent }}>{bName(b)}</span>{p && <span className="pdot" style={{ background: p.color }} />}{p && <span className="pname">{p.name}</span>}</span>
+                      <span className="od-meta"><span className="od-date">{wd(it.date.getDay())} {it.date.getDate()} {mon(it.date.getMonth())}</span><span className="od-block blk-ink" style={{ '--bi-light': b.accentDeep, '--bi-dark': b.accent }}>{bName(b)}</span>{p && <span className="pdot" style={{ background: p.color }} />}{p && <span className="pname">{p.name}</span>}<ProjectTag project={prj} sm /></span>
                     </button>
                     {it.t.subtasks && it.t.subtasks.length > 0 && (
                       <button className="subs-fold" onClick={() => toggleFoldTask(it.t.id)} aria-expanded={!foldedTasks.has(it.t.id)}>
@@ -3240,6 +3249,24 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             range={`${mon(selectedDate.getMonth())} · ${week.tasks.filter((t) => t.day === selectedDay).length} ${week.tasks.filter((t) => t.day === selectedDay).length !== 1 ? tr.tasks : tr.task}${usingFallback ? ` · ${tx('prayer times estimated', 'مواقيت تقديرية')}` : ''}`} />
           <div className="hero-sheet">
         {filterBar(TASK_SORTS)}
+        {/* What the numbered projects want out of THIS day, on the day being
+            planned rather than only on today — planning Thursday should show
+            Thursday's share. Met ones stay, greyed, so a day that is done
+            reads as done rather than as a day nothing was asked of. */}
+        {(() => {
+          const due = dueProjects(settings.projects || [], selectedDate, { blockOrder: blockIdx });
+          if (!due.length) return null;
+          return (
+            <div className="plan-quotas">
+              <div className="plan-quotas-h"><Target size={12} /> {tx('Projects want, today', 'ما تطلبه المشاريع اليوم')}</div>
+              {due.map(({ project, quota }) => (
+                <QuotaLine key={project.id} project={project} quota={quota} compact
+                  onLog={(n) => { logProgress(project.id, n); flash(`${project.name} +${n} ${project.unit || ''}`.trim()); }}
+                  onOpen={() => { go('projects'); setBoardProject(null); }} />
+              ))}
+            </div>
+          );
+        })()}
         <div className="wknav plan-nav">
           <button className="icon" onClick={() => shiftStrip(-7)} disabled={!canPrev} aria-label={tx('Earlier days', 'أيام أسبق')}>{isRTL() ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}</button>
           <button className="today-btn" onClick={goToday}>{rangeLabel()}</button>
