@@ -142,6 +142,55 @@ describe('clear', () => {
 
 describe('SORTS', () => {
   it('is the whole vocabulary', () => {
-    expect(SORTS).toEqual(['manual', 'date', 'title', 'recent']);
+    expect(SORTS).toEqual(['manual', 'date', 'title', 'recent', 'tag', 'project']);
+  });
+});
+
+/* Sorting by tag or project has to order by the NAME a person reads. Ordering
+   by id would look deliberate and be arbitrary — and untagged work has to land
+   at the bottom rather than under a blank heading at the top. */
+describe('applySort — tag and project', () => {
+  const named = (id, tag, project) => ({ id, labelName: tag || '', projectName: project || '' });
+  const ids = (list) => list.map((i) => i.id);
+
+  it('orders by tag name', () => {
+    const list = [named('a', 'Reporting'), named('b', 'Admin'), named('c', 'Newsroom')];
+    expect(ids(applySort(list, 'tag'))).toEqual(['b', 'c', 'a']);
+  });
+
+  it('puts untagged work last, not first', () => {
+    const list = [named('a'), named('b', 'Admin'), named('c')];
+    expect(ids(applySort(list, 'tag'))).toEqual(['b', 'a', 'c']);
+  });
+
+  it('orders by project name independently of the tag', () => {
+    const list = [named('a', 'Zeta', 'Beta'), named('b', 'Alpha', 'Alpha')];
+    expect(ids(applySort(list, 'project'))).toEqual(['b', 'a']);
+  });
+
+  it('takes the name from the view\'s resolver', () => {
+    // A task carries an id; only the view knows what that id is called.
+    const list = [{ id: 'a', projectId: 'l2' }, { id: 'b', projectId: 'l1' }];
+    const names = { l1: 'Admin', l2: 'Reporting' };
+    const out = applySort(list, 'tag', { tagName: (i) => names[i.projectId] });
+    expect(ids(out)).toEqual(['b', 'a']);
+  });
+
+  it('ignores case and diacritics the way title does', () => {
+    const list = [named('a', 'beta'), named('b', 'Alpha')];
+    expect(ids(applySort(list, 'tag'))).toEqual(['b', 'a']);
+  });
+
+  it('never mutates the list it was given', () => {
+    const list = [named('a', 'Zeta'), named('b', 'Alpha')];
+    applySort(list, 'tag');
+    expect(ids(list)).toEqual(['a', 'b']);
+  });
+
+  it('falls back when a view cannot express it', () => {
+    // The Plan page has no tag column to sort under; carrying the sort there
+    // must not leave it ordered by something it cannot show.
+    expect(sortFor('tag', ['manual', 'title'])).toBe('manual');
+    expect(sortFor('tag', ['manual', 'title', 'tag'])).toBe('tag');
   });
 });

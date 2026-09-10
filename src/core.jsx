@@ -280,6 +280,18 @@ const DEFAULT_SETTINGS = {
   autoDark: true,      // legacy flag, kept for old backups; 'theme' is the setting now
   theme: 'auto',       // 'auto' (dark at night, Maghrib→Sunrise) | 'light' | 'dark'
   rewards: [],         // what points buy — you set the prices, which is what makes them mean anything
+  /* The other direction. A reward system that can only ever add is a system
+     that drifts upward forever; these are the habits you are trying to STOP,
+     priced the same way rewards are. `wipe` is the nuclear one — it zeroes the
+     balance instead of subtracting a number. */
+  penalties: [],       // [{ id, name, cost, wipe }]
+  /* Every `everyMin` minutes with nothing finished, the app stops being usable
+     until one task or subtask is ticked. Off unless you ask for it: this is a
+     commitment device, and one nobody consented to is just a broken app. */
+  nowLock: { on: false, everyMin: 15 },
+  /* How long before a timed task's start it appears in Now, so there is time
+     to get ready rather than to discover it has begun. */
+  leadMin: 30,
   weekStartDay: 6,
   prayerGate: true,
   time24: false,
@@ -304,6 +316,10 @@ const DEFAULT_SETTINGS = {
 const newProject = () => ({
   id: uid(), name: tx('New project', 'مشروع جديد'), color: LABEL_SWATCHES[Math.floor(Math.random() * LABEL_SWATCHES.length)],
   goal: '', unit: tx('pages', 'صفحة'), target: 100, deadline: '', startDate: fmtISO(new Date()), entries: [],
+  /* When this project should ask for its share of the day. Off by default: a
+     project is a place to put work, and turning every one of them into a daily
+     summons is how a person stops reading them. See src/quota.js. */
+  plan: { on: false, days: [], block: 'morning', start: '' },
 });
 const projectProgress = (p) => (p.entries || []).reduce((s, e) => s + (Number(e.amount) || 0), 0);
 // Pace math: honours the start date. "Expected today" is measured from start,
@@ -397,6 +413,13 @@ function migrateSettings(s) {
   // "always light"; anything else keeps the automatic behaviour.
   base.theme = ['auto', 'light', 'dark'].includes(s.theme) ? s.theme : (s.autoDark === false ? 'light' : 'auto');
   base.rewards = Array.isArray(s.rewards) ? s.rewards : [];
+  base.penalties = Array.isArray(s.penalties) ? s.penalties : [];
+  base.nowLock = { ...DEFAULT_SETTINGS.nowLock, ...(s.nowLock && typeof s.nowLock === 'object' ? s.nowLock : {}) };
+  base.nowLock.everyMin = Math.max(1, Math.min(240, Number(base.nowLock.everyMin) || 15));
+  base.leadMin = Math.max(0, Math.min(180, Number(s.leadMin) >= 0 ? Number(s.leadMin) : DEFAULT_SETTINGS.leadMin));
+  // Projects predate their work plan; give every one of them the off switch
+  // rather than leaving `plan` undefined for the views to guess at.
+  base.projects = (base.projects || []).map((p) => ({ ...p, plan: { on: false, days: [], block: 'morning', start: '', ...(p.plan || {}) } }));
   return base;
 }
 // SHA-256 hex of pin+salt. This is a soft lock (deters casual access); it is not
@@ -419,6 +442,64 @@ const mm2 = (m) => `${pad(Math.floor((m % 1440) / 60))}:${pad(m % 60)}`;
 const tStartMin = (t) => { if (t.start) return minutesOf(t.start); const r = parseRange(t.time); return r ? r.start : null; };
 const tEndMin = (t) => { if (t.end) return minutesOf(t.end); if (t.start) return null; const r = parseRange(t.time); return r && r.end != null ? r.end : null; };
 const timeLabel = (t) => { if (t.start) return t.end ? `${fmtTime(t.start)}–${fmtTime(t.end)}` : fmtTime(t.start); return t.time || ''; };
+
+/* ------------------------------------------------------------------ */
+/*  Multi-day tasks — one task, several days.                          */
+/*                                                                     */
+/*  A task carries an `until` date and then belongs to every day from   */
+/*  its own through that one. There is still exactly ONE task: it is    */
+/*  stored once, in the week that owns its first day, and ticking it    */
+/*  anywhere finishes it everywhere. The later days show a reference to  */
+/*  it, not a copy — which is why "day 2 of 4" can be true rather than   */
+/*  four separate tasks that happen to share a name.                    */
+/*                                                                     */
+/*  The consequence that matters: a spanning task is NOT overdue while   */
+/*  its span is still running. That is the whole reason to have the      */
+/*  feature — "read the report by Thursday" should sit on Tuesday        */
+/*  without shouting, and start shouting on Friday.                      */
+/* ------------------------------------------------------------------ */
+const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
+const taskUntil = (t) => (t && typeof t.until === 'string' && ISO_RE.test(t.until) ? t.until : null);
+const spans = (t) => !!taskUntil(t);
+/* Days the span runs for, counting its own day. A backwards `until` (the date
+   picker allows one) reads as a single day rather than a negative span. */
+function spanLength(t, taskDate) {
+  const u = taskUntil(t);
+  if (!u || !(taskDate instanceof Date)) return 1;
+  const a = new Date(taskDate); a.setHours(0, 0, 0, 0);
+  const b = parseISO(u);
+  return Math.max(1, Math.round((b - a) / 86400000) + 1);
+}
+/* Where `date` falls inside the span: 1-based, or 0 when it is outside. */
+function spanDayIndex(t, taskDate, date) {
+  if (!(taskDate instanceof Date) || !(date instanceof Date)) return 0;
+  const a = new Date(taskDate); a.setHours(0, 0, 0, 0);
+  const d = new Date(date); d.setHours(0, 0, 0, 0);
+  const n = Math.round((d - a) / 86400000) + 1;
+  return n >= 1 && n <= spanLength(t, taskDate) ? n : 0;
+}
+const spanCovers = (t, taskDate, date) => spanDayIndex(t, taskDate, date) > 0;
+
+/* ------------------------------------------------------------------ */
+/*  Focus targets — "an hour on this today", and whether you did it.   */
+/*                                                                     */
+/*  Kept per date on the task itself rather than in a separate log,     */
+/*  because a target is a property of the work and sync already merges  */
+/*  a week document per key. A task deleted takes its focus history      */
+/*  with it, which is right: nobody wants the minutes without the task.  */
+/* ------------------------------------------------------------------ */
+const focusTargetMin = (t) => { const n = Number(t && t.focusTarget); return n > 0 ? Math.round(n) : null; };
+const focusSpent = (t, iso) => Math.round(Number((t && t.focusLog && t.focusLog[iso]) || 0));
+const focusMet = (t, iso) => { const g = focusTargetMin(t); return g != null && focusSpent(t, iso) >= g; };
+/* Adding measured minutes. Returns a NEW task — callers hand this to the same
+   mutate path every other edit goes through, so it syncs like anything else. */
+function addFocusMinutes(t, iso, minutes) {
+  const n = Math.round(Number(minutes) || 0);
+  if (!t || !iso || n <= 0) return t;
+  const log = { ...(t.focusLog || {}) };
+  log[iso] = Math.round((Number(log[iso]) || 0) + n);
+  return { ...t, focusLog: log };
+}
 
 /* ------------------------------------------------------------------ */
 /*  Time vault — a task can carry a `secret` that is only legible      */
@@ -462,6 +543,16 @@ const vaultUnlocked = (t, curMin) => vaultWindowed(t) && inWindow(tStartMin(t), 
    they ever answered differently you would see a task listed as overdue
    and still paid in full. One function, one answer. */
 function slotPassed(t, taskDate, today, { timings, sinceFajr, curSinceFajr }) {
+  /* A multi-day task is judged on the LAST day of its span, not the first.
+     Anything else makes the feature self-defeating: a task told to run
+     Tuesday through Thursday would be overdue on Wednesday morning. */
+  const until = taskUntil(t);
+  if (until) {
+    const last = parseISO(until);
+    if (last > today) return false;
+    if (fmtISO(last) !== fmtISO(today)) return true;
+    taskDate = last;
+  }
   if (taskDate < today) return true;
   if (fmtISO(taskDate) !== fmtISO(today)) return false;
   const st = tStartMin(t), en = tEndMin(t);
@@ -769,7 +860,7 @@ function pushToToday(t, { activeBlock, curSinceFajr, sinceFajr }) {
   return next;
 }
 
-export { hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,SLEEP,sleepPlan,POINTS,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
+export { taskUntil,spans,spanLength,spanDayIndex,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,SLEEP,sleepPlan,POINTS,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
 
 /* The shared key pool, if this copy has been pointed at one.
  *

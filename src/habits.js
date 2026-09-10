@@ -193,6 +193,79 @@ export function stackShape(habits) {
   }));
 }
 
+/* ------------------------------------------------------------------ */
+/*  Making the anchor real.                                            */
+/*                                                                     */
+/*  "After I pray Fajr, I will read ten pages" was, until now, a        */
+/*  sentence printed on a card. Both habits sat in the queue at the     */
+/*  same time, in whatever order their blocks ran, and the stack was a  */
+/*  label on something the app was not actually doing.                  */
+/*                                                                     */
+/*  So a stacked habit now WAITS. It stays out of the Now queue until   */
+/*  its anchor is done that day, and the moment the anchor is ticked it  */
+/*  is the very next thing you see. That is the entire mechanism the    */
+/*  book describes — the anchor is the cue, and a cue that fires at the  */
+/*  wrong time is not a cue.                                            */
+/*                                                                     */
+/*  Three things it refuses to do, each of which would lose a habit:    */
+/*                                                                     */
+/*    a missing anchor    (deleted, or from an old backup) means ready. */
+/*    a cycle             means ready — two habits set to follow each   */
+/*                        other must not both vanish.                   */
+/*    a chain             is walked, so a habit three deep waits for     */
+/*                        everything above it, not just its parent.      */
+/*                                                                     */
+/*  `isDone` is supplied by the caller, because only the app knows       */
+/*  whether Fajr was prayed today or what a habit's log says.           */
+/* ------------------------------------------------------------------ */
+
+/* Is this habit's anchor satisfied?
+ *
+ * The chain is collected FIRST and judged afterwards, rather than answering
+ * "no" the moment one link is undone. Deciding as it walks looks equivalent
+ * and is not: a pair of habits pointing at each other would both come back
+ * unsatisfied and both disappear off the screen, because the loop is only
+ * visible once you have been all the way round it. */
+export function anchorReady(h, habits, isDone) {
+  if (!h || !h.after) return true;
+  const byId = new Map((habits || []).map((x) => [x.id, x]));
+  const seen = new Set([h.id]);
+  const chain = [];
+  let cur = h;
+  while (cur && cur.after) {
+    if (isPrayerAnchor(cur.after)) { chain.push(cur.after); break; }
+    const next = byId.get(cur.after);
+    if (!next) break;                       // the anchor is gone; wait for nothing
+    if (seen.has(next.id)) return true;     // a cycle; see the note above
+    seen.add(next.id);
+    chain.push(next.id);
+    cur = next;
+  }
+  return chain.every((id) => !!isDone(id));
+}
+
+/* The habits that are actually available now, in stack order, and the ones
+   still waiting — the queue takes the first list and a card can explain the
+   second instead of it simply not being there. */
+export function stackGate(habits, isDone) {
+  const ordered = stackOrder(habits);
+  const ready = [];
+  const waiting = [];
+  for (const h of ordered) (anchorReady(h, ordered, isDone) ? ready : waiting).push(h);
+  return { ready, waiting };
+}
+
+/* What a waiting habit is waiting FOR, as something a card can print. */
+export function anchorLabel(h, habits, { prayerName } = {}) {
+  if (!h || !h.after) return '';
+  if (isPrayerAnchor(h.after)) {
+    const id = h.after.slice('prayer:'.length);
+    return prayerName ? prayerName(id) : id;
+  }
+  const anchor = (habits || []).find((x) => x.id === h.after);
+  return anchor ? anchor.name : '';
+}
+
 /* The next mark for a day, cycling through the three states a day can be in.
    Returns undefined for "clear it", which is what the caller deletes on. */
 export function nextMark(current, { hasTiny }) {

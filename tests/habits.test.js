@@ -3,7 +3,7 @@
    tell someone deciding whether to bother today. These pin the numbers that
    survive a slip, and the one state worth shouting about. */
 import { describe, it, expect } from 'vitest';
-import { FULL, TINY, consistency, bestStreak, riskState, habitStats, nextMark, doneOn, wasTiny, stackOrder, wouldCycle, stackShape, MAX_STACK_DEPTH } from '../src/habits.js';
+import { FULL, TINY, consistency, bestStreak, riskState, habitStats, nextMark, doneOn, wasTiny, stackOrder, wouldCycle, stackShape, MAX_STACK_DEPTH, anchorReady, stackGate, anchorLabel } from '../src/habits.js';
 import { fmtISO } from '../src/core.jsx';
 
 const TODAY = '2026-08-29';
@@ -217,5 +217,81 @@ describe('stackShape', () => {
     const out = stackShape([h('a', 'b'), h('b', 'a')]);
     expect(out).toHaveLength(2);
     expect(out.every((x) => Number.isFinite(x.depth))).toBe(true);
+  });
+});
+
+/* Stacking used to be a sentence printed on a card while both habits sat in
+   the queue at once. These pin the behaviour that makes the sentence true —
+   and, just as importantly, the three ways it refuses to lose a habit. */
+describe('anchorReady', () => {
+  const done = (...ids) => (id) => ids.includes(id);
+
+  it('lets an unstacked habit straight through', () => {
+    expect(anchorReady({ id: 'a' }, [], done())).toBe(true);
+  });
+
+  it('holds a habit until its anchor is done', () => {
+    const anchor = { id: 'a', name: 'Pray' };
+    const stacked = { id: 'b', name: 'Read', after: 'a' };
+    const list = [anchor, stacked];
+    expect(anchorReady(stacked, list, done())).toBe(false);
+    expect(anchorReady(stacked, list, done('a'))).toBe(true);
+  });
+
+  it('waits on a prayer anchor the same way', () => {
+    const h = { id: 'b', after: 'prayer:fajr' };
+    expect(anchorReady(h, [h], done())).toBe(false);
+    expect(anchorReady(h, [h], done('prayer:fajr'))).toBe(true);
+  });
+
+  it('walks the whole chain, not just the parent', () => {
+    const a = { id: 'a' };
+    const b = { id: 'b', after: 'a' };
+    const c = { id: 'c', after: 'b' };
+    const list = [a, b, c];
+    expect(anchorReady(c, list, done('b'))).toBe(false);   // b done, a not
+    expect(anchorReady(c, list, done('a', 'b'))).toBe(true);
+  });
+
+  it('releases a habit whose anchor no longer exists', () => {
+    // Deleting the anchor must not silently retire everything hanging off it.
+    const orphan = { id: 'b', after: 'gone' };
+    expect(anchorReady(orphan, [orphan], done())).toBe(true);
+  });
+
+  it('releases both habits caught in a cycle rather than hiding both forever', () => {
+    const a = { id: 'a', after: 'b' };
+    const b = { id: 'b', after: 'a' };
+    expect(anchorReady(a, [a, b], done())).toBe(true);
+    expect(anchorReady(b, [a, b], done())).toBe(true);
+  });
+});
+
+describe('stackGate', () => {
+  it('splits the list and keeps stack order', () => {
+    const a = { id: 'a', name: 'Pray' };
+    const b = { id: 'b', name: 'Read', after: 'a' };
+    const c = { id: 'c', name: 'Walk' };
+    const { ready, waiting } = stackGate([b, c, a], (id) => id === 'a');
+    expect(ready.map((h) => h.id)).toEqual(['a', 'b', 'c']);
+    expect(waiting).toEqual([]);
+    const shut = stackGate([b, c, a], () => false);
+    expect(shut.ready.map((h) => h.id)).toEqual(['a', 'c']);
+    expect(shut.waiting.map((h) => h.id)).toEqual(['b']);
+  });
+});
+
+describe('anchorLabel', () => {
+  it('names the habit it follows', () => {
+    const a = { id: 'a', name: 'Pray Fajr' };
+    const b = { id: 'b', after: 'a' };
+    expect(anchorLabel(b, [a, b])).toBe('Pray Fajr');
+  });
+  it('names the prayer it follows through the caller\'s translator', () => {
+    const b = { id: 'b', after: 'prayer:maghrib' };
+    expect(anchorLabel(b, [b], { prayerName: (id) => id.toUpperCase() })).toBe('MAGHRIB');
+  });
+  it('says nothing for an unstacked habit', () => {
+    expect(anchorLabel({ id: 'a' }, [])).toBe('');
   });
 });

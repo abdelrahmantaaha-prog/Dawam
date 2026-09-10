@@ -132,3 +132,90 @@ describe('spend', () => {
     expect(await readLedger()).toHaveLength(0);
   });
 });
+
+/* Penalties are the direction the ledger was missing: a number that can only
+   grow is a number nobody protects. The two rules worth pinning are that a
+   penalty is an EVENT (doing the thing twice costs twice) and that a wipe is
+   an entry rather than a delete — zero with no history is zero with no
+   meaning. */
+describe('penalise', () => {
+  it('subtracts, and shows in the balance', async () => {
+    const { award, penalise, readLedger, balanceOf } = await load();
+    await award([], { iso: DAY, ref: 'task:a', kind: 'task', amount: 100 });
+    await penalise(DAY, { title: 'Doomscrolled', cost: 30, penaltyId: 'x1' });
+    const l = await readLedger();
+    expect(balanceOf(l)).toBe(70);
+    expect(l[1]).toMatchObject({ kind: 'penalty', amount: -30, title: 'Doomscrolled' });
+    expect(l[1].meta).toMatchObject({ penaltyId: 'x1' });
+  });
+
+  it('is NOT idempotent — the same slip twice costs twice', async () => {
+    const { penalise, readLedger } = await load();
+    await penalise(DAY, { title: 'Slip', cost: 10, penaltyId: 'x1' });
+    await penalise(DAY, { title: 'Slip', cost: 10, penaltyId: 'x1' });
+    const l = await readLedger();
+    expect(l).toHaveLength(2);
+    expect(l[0].ref).not.toBe(l[1].ref);
+  });
+
+  it('takes the balance negative rather than clamping at zero', async () => {
+    // The debt is real; hiding it would let a bad week look like a fresh start.
+    const { penalise, readLedger, balanceOf } = await load();
+    await penalise(DAY, { title: 'Slip', cost: 40 });
+    expect(balanceOf(await readLedger())).toBe(-40);
+  });
+
+  it('ignores a nonsense cost', async () => {
+    const { penalise, readLedger } = await load();
+    expect(await penalise(DAY, { title: 'x', cost: 0 })).toBe(null);
+    expect(await penalise(DAY, { title: 'x', cost: -5 })).toBe(null);
+    expect(await readLedger()).toHaveLength(0);
+  });
+});
+
+describe('wipe', () => {
+  it('takes the balance to exactly zero', async () => {
+    const { award, wipe, readLedger, balanceOf } = await load();
+    await award([], { iso: DAY, ref: 'task:a', kind: 'task', amount: 30 });
+    await award(await readLedger(), { iso: DAY, ref: 'task:b', kind: 'task', amount: 45 });
+    const before = await readLedger();
+    expect(balanceOf(before)).toBe(75);
+    await wipe(before, DAY, { title: 'Smoked' });
+    expect(balanceOf(await readLedger())).toBe(0);
+  });
+
+  it('writes an entry rather than deleting the history', async () => {
+    const { award, wipe, readLedger } = await load();
+    await award([], { iso: DAY, ref: 'task:a', kind: 'task', amount: 30 });
+    await wipe(await readLedger(), DAY, { title: 'Smoked', penaltyId: 'p9' });
+    const l = await readLedger();
+    expect(l).toHaveLength(2);                       // the earning is still there
+    expect(l[0]).toMatchObject({ ref: 'task:a', amount: 30 });
+    expect(l[1]).toMatchObject({ kind: 'wipe', amount: -30 });
+    expect(l[1].meta).toMatchObject({ wiped: 30, penaltyId: 'p9' });
+  });
+
+  it('writes nothing when there is nothing to take', async () => {
+    const { wipe, readLedger } = await load();
+    expect(await wipe([], DAY, { title: 'Smoked' })).toBe(null);
+    expect(await readLedger()).toHaveLength(0);
+  });
+
+  it('will not deepen an existing debt', async () => {
+    // Already negative: a wipe should not double it. There is no balance left
+    // to take, and "wipe" has never meant "charge again".
+    const { penalise, wipe, readLedger, balanceOf } = await load();
+    await penalise(DAY, { title: 'Slip', cost: 20 });
+    const l = await readLedger();
+    expect(await wipe(l, DAY, { title: 'Smoked' })).toBe(null);
+    expect(balanceOf(await readLedger())).toBe(-20);
+  });
+
+  it('can be undone like any other entry', async () => {
+    const { award, wipe, forget, readLedger, balanceOf } = await load();
+    await award([], { iso: DAY, ref: 'task:a', kind: 'task', amount: 30 });
+    const entry = await wipe(await readLedger(), DAY, { title: 'Mis-tapped' });
+    await forget(await readLedger(), entry.ref);
+    expect(balanceOf(await readLedger())).toBe(30);
+  });
+});

@@ -18,7 +18,7 @@ export const EMPTY = { labels: [], projects: [], sort: 'manual' };
 
 /* Sorts, and which views admit them. `manual` means "leave the order alone" —
    the caller has already put them in the order it wants. */
-export const SORTS = ['manual', 'date', 'title', 'recent'];
+export const SORTS = ['manual', 'date', 'title', 'recent', 'tag', 'project'];
 
 export const isFiltering = (f) => !!(f && ((f.labels || []).length || (f.projects || []).length));
 
@@ -74,6 +74,25 @@ export function applySort(items, sort, get = {}) {
   if (sort === 'recent') {
     const r = get.recent || ((i) => i.updatedAt || 0);
     out.sort((a, b) => (Number(r(b)) || 0) - (Number(r(a)) || 0));
+    return out;
+  }
+  /* Tag and project sort by the NAME a person reads, not the id — ids are
+     random, so ordering by them looks deliberate and is not. The view supplies
+     the resolver, because only it knows the label and project lists. Items
+     carrying neither go last rather than clumping under a blank heading at the
+     top, which is the same rule `date` already uses for undated work. */
+  if (sort === 'tag' || sort === 'project') {
+    const name = (sort === 'tag'
+      ? (get.tagName || ((i) => i.labelName || ''))
+      : (get.projectName || ((i) => i.projectName || '')));
+    const key = (i) => String(name(i) || '').trim();
+    out.sort((a, b) => {
+      const x = key(a), y = key(b);
+      if (!x && !y) return 0;
+      if (!x) return 1;
+      if (!y) return -1;
+      return x.localeCompare(y, undefined, { sensitivity: 'base' });
+    });
     return out;
   }
   // date: earliest first, and anything undated goes last rather than to 1970.

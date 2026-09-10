@@ -1,0 +1,146 @@
+/* The number this file computes is the one a person acts on, so the thing most
+   worth pinning down is that it divides by the SITTINGS that are left, not the
+   calendar days. Getting that wrong understates every quota by exactly the
+   factor between them, and does it invisibly. */
+import { describe, it, expect } from 'vitest';
+import { normalizePlan, worksOn, workDaysBetween, loggedOn, todayQuota, dueProjects } from '../src/quota.js';
+
+const d = (iso) => new Date(`${iso}T00:00:00`);
+const proj = (over = {}) => ({
+  id: 'p1', name: 'The book', target: 100, unit: 'pages',
+  startDate: '2026-09-01', deadline: '2026-09-30', entries: [],
+  plan: { on: true, days: [], block: 'morning', start: '' },
+  ...over,
+});
+
+describe('normalizePlan', () => {
+  it('fills in the shape from nothing', () => {
+    expect(normalizePlan({})).toEqual({ on: false, days: [], block: 'morning', start: '', perDay: null });
+  });
+  it('drops weekdays outside 0..6 and sorts what is left', () => {
+    expect(normalizePlan({ plan: { days: [6, 9, 1, -2, 1] } }).days).toEqual([1, 6]);
+  });
+});
+
+describe('worksOn', () => {
+  it('says no while the reminder is off', () => {
+    expect(worksOn(proj({ plan: { on: false, days: [] } }), d('2026-09-10'))).toBe(false);
+  });
+  it('says no without a number to reach', () => {
+    expect(worksOn(proj({ target: 0 }), d('2026-09-10'))).toBe(false);
+  });
+  it('honours the chosen weekdays', () => {
+    const p = proj({ plan: { on: true, days: [2, 4] } });   // Tue, Thu
+    expect(worksOn(p, d('2026-09-15'))).toBe(true);          // Tuesday
+    expect(worksOn(p, d('2026-09-16'))).toBe(false);         // Wednesday
+  });
+  it('stays quiet outside the project window', () => {
+    const p = proj();
+    expect(worksOn(p, d('2026-08-31'))).toBe(false);         // before the start
+    expect(worksOn(p, d('2026-10-01'))).toBe(false);         // after the deadline
+    expect(worksOn(p, d('2026-09-30'))).toBe(true);          // the deadline itself counts
+  });
+});
+
+describe('workDaysBetween', () => {
+  it('counts inclusively', () => {
+    expect(workDaysBetween(d('2026-09-14'), d('2026-09-14'), [])).toBe(1);
+    expect(workDaysBetween(d('2026-09-14'), d('2026-09-20'), [])).toBe(7);
+  });
+  it('counts only the chosen weekdays', () => {
+    // Mon 14th → Sun 20th, working Tue and Thu: two sittings.
+    expect(workDaysBetween(d('2026-09-14'), d('2026-09-20'), [2, 4])).toBe(2);
+  });
+  it('is zero when the range runs backwards', () => {
+    expect(workDaysBetween(d('2026-09-20'), d('2026-09-14'), [])).toBe(0);
+  });
+  it('estimates rather than looping forever on an absurd deadline', () => {
+    const n = workDaysBetween(d('2026-09-14'), d('2126-09-14'), [1]);
+    expect(n).toBeGreaterThan(5000);
+    expect(Number.isFinite(n)).toBe(true);
+  });
+});
+
+describe('todayQuota', () => {
+  it('divides the remainder by the sittings that are left, not the days', () => {
+    // Tue 15th, working Tue and Thu only, deadline Wed 30th.
+    // Sittings from the 15th: 15,17,22,24,29 → 5. 100 pages ÷ 5 = 20.
+    const p = proj({ plan: { on: true, days: [2, 4] } });
+    expect(todayQuota(p, d('2026-09-15')).need).toBe(20);
+    // The same project judged on calendar days would have said 100/16 = 7 —
+    // which is the bug this whole module exists to avoid.
+  });
+  it('counts today as a sitting', () => {
+    const p = proj({ deadline: '2026-09-15', plan: { on: true, days: [] } });
+    expect(todayQuota(p, d('2026-09-15')).need).toBe(100);   // one day left: all of it
+  });
+  it('subtracts what is already logged from the total, and reports today separately', () => {
+    const p = proj({
+      plan: { on: true, days: [] },
+      entries: [
+        { id: 'e1', date: '2026-09-14', amount: 40 },
+        { id: 'e2', date: '2026-09-15', amount: 6 },
+      ],
+    });
+    const q = todayQuota(p, d('2026-09-15'));
+    expect(q.total).toBe(46);
+    expect(q.remaining).toBe(54);
+    expect(q.done).toBe(6);
+  });
+  it('rounds up, because a third of a page is still a page to open', () => {
+    const p = proj({ target: 10, deadline: '2026-09-18', plan: { on: true, days: [] } });
+    // 15th→18th is 4 days, 10 ÷ 4 = 2.5
+    expect(todayQuota(p, d('2026-09-15')).need).toBe(3);
+  });
+  it('is met once the day\'s share is logged', () => {
+    const p = proj({
+      target: 10, deadline: '2026-09-18', plan: { on: true, days: [] },
+      entries: [{ id: 'e1', date: '2026-09-15', amount: 3 }],
+    });
+    expect(todayQuota(p, d('2026-09-15')).met).toBe(true);
+  });
+  it('asks for nothing once the target is reached', () => {
+    const p = proj({ entries: [{ id: 'e1', date: '2026-09-02', amount: 100 }] });
+    expect(todayQuota(p, d('2026-09-15')).need).toBe(0);
+  });
+  it('falls back to a stated daily rate when there is no deadline', () => {
+    const p = proj({ deadline: '', plan: { on: true, days: [], perDay: 5 } });
+    expect(todayQuota(p, d('2026-09-15')).need).toBe(5);
+  });
+  it('has no opinion with neither a deadline nor a rate', () => {
+    const p = proj({ deadline: '', plan: { on: true, days: [] } });
+    expect(todayQuota(p, d('2026-09-15')).need).toBe(null);
+  });
+});
+
+describe('loggedOn', () => {
+  it('sums only that date', () => {
+    const p = proj({ entries: [
+      { date: '2026-09-15', amount: 3 },
+      { date: '2026-09-15', amount: 4 },
+      { date: '2026-09-16', amount: 9 },
+    ] });
+    expect(loggedOn(p, '2026-09-15')).toBe(7);
+  });
+});
+
+describe('dueProjects', () => {
+  it('drops the ones that have nothing to say today', () => {
+    const asking = proj({ id: 'a', plan: { on: true, days: [] } });
+    const off = proj({ id: 'b', plan: { on: false, days: [] } });
+    const finished = proj({ id: 'c', plan: { on: true, days: [] }, entries: [{ date: '2026-09-02', amount: 100 }] });
+    const list = dueProjects([asking, off, finished], d('2026-09-15'));
+    expect(list.map((x) => x.project.id)).toEqual(['a']);
+  });
+  it('skips a completed project even when its plan is on', () => {
+    const p = proj({ completedAt: Date.now(), plan: { on: true, days: [] } });
+    expect(dueProjects([p], d('2026-09-15'))).toEqual([]);
+  });
+  it('orders by the block the work is meant to happen in', () => {
+    const evening = proj({ id: 'e', plan: { on: true, days: [], block: 'isha' } });
+    const morning = proj({ id: 'm', plan: { on: true, days: [], block: 'fajr' } });
+    const order = (b) => ['fajr', 'morning', 'dhuhr', 'asr', 'maghrib', 'isha'].indexOf(b);
+    const list = dueProjects([evening, morning], d('2026-09-15'), { blockOrder: order });
+    expect(list.map((x) => x.project.id)).toEqual(['m', 'e']);
+  });
+});

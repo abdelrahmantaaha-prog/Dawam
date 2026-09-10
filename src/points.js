@@ -86,5 +86,55 @@ export async function spend(iso, { title, cost, rewardId }) {
   return { ...entry, day: iso };
 }
 
-/* Remove any single entry by ref — used to correct a mis-logged spend. */
+/* ------------------------------------------------------------------ */
+/*  Penalties — the direction the ledger was missing.                  */
+/*                                                                     */
+/*  Rewards make the number worth having. Penalties are what make it    */
+/*  worth PROTECTING, and they are for the habits you are trying to     */
+/*  stop rather than the ones you are trying to keep. Two shapes:       */
+/*                                                                     */
+/*    a cost   subtracts a fixed number, priced like a reward.          */
+/*    a wipe   takes the balance to zero.                              */
+/*                                                                     */
+/*  A wipe is still an ENTRY, not a delete. It writes minus whatever    */
+/*  the balance was, so the ledger sums to nothing and the history is   */
+/*  all still there to read — the same rule the rest of this file       */
+/*  lives by. Erasing the pages instead would leave you at zero with    */
+/*  no idea why, which is the one outcome that makes a wipe feel        */
+/*  arbitrary rather than earned.                                       */
+/*                                                                     */
+/*  Every entry gets a unique ref like a spend does. A penalty is a     */
+/*  real event that happened at a moment, not the state of a checkbox:  */
+/*  doing the thing twice should cost twice, so it must NOT be          */
+/*  idempotent the way ticking a task is.                               */
+/* ------------------------------------------------------------------ */
+const eventRef = (kind) => `${kind}:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+
+/* Charge a fixed penalty. Returns the entry, or null when the price is zero —
+   a penalty that costs nothing is a note, and the ledger is not for notes. */
+export async function penalise(iso, { title, cost, penaltyId }) {
+  const n = Math.round(Number(cost) || 0);
+  if (n <= 0) return null;
+  const entry = { ref: eventRef('penalty'), kind: 'penalty', amount: -n, title: title || '', ts: Date.now(), ...(penaltyId ? { meta: { penaltyId } } : {}) };
+  const key = dayKey(iso);
+  const doc = (await loadKey(key)) || { entries: [] };
+  await saveKey(key, { ...doc, entries: [...(doc.entries || []), entry] });
+  return { ...entry, day: iso };
+}
+
+/* Take the balance to zero. Needs the ledger, because the amount IS the
+   balance. A balance already at or below zero writes nothing: there is nothing
+   to take, and a zero-amount entry would only clutter the history. */
+export async function wipe(ledger, iso, { title, penaltyId } = {}) {
+  const bal = balanceOf(ledger);
+  if (bal <= 0) return null;
+  const entry = { ref: eventRef('wipe'), kind: 'wipe', amount: -bal, title: title || '', ts: Date.now(), meta: { wiped: bal, ...(penaltyId ? { penaltyId } : {}) } };
+  const key = dayKey(iso);
+  const doc = (await loadKey(key)) || { entries: [] };
+  await saveKey(key, { ...doc, entries: [...(doc.entries || []), entry] });
+  return { ...entry, day: iso };
+}
+
+/* Remove any single entry by ref — used to correct a mis-logged spend, or a
+   penalty logged for the wrong day. */
 export const forget = (ledger, ref) => revoke(ledger, ref);
