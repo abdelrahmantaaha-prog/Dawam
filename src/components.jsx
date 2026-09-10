@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Gift } from 'lucide-react';
-import { hasVault,vaultWindowed,vaultUnlocked,autoWorth,taskWorth,estimateMinutes,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, CalendarRange, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Gift, Timer } from 'lucide-react';
+import { taskUntil,spanLength,focusTargetMin,focusSpent,focusMet,hasVault,vaultWindowed,vaultUnlocked,autoWorth,taskWorth,estimateMinutes,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 import { durationFor } from './durations.js';
 
@@ -44,7 +44,74 @@ function ParseChip({ text, hint }) {
   return <div className="parse-chip">{s}</div>;
 }
 
-function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over, events = [], cards = [], onAddCard, addedCards, onToggleCalEvent, parseHint }) {
+/* ------------------------------------------------------------------ */
+/*  The project a piece of work belongs to.                            */
+/*                                                                     */
+/*  Tags say what KIND of work this is; a project says what it is FOR,  */
+/*  and that is the thing a title usually leaves out. It lived only in  */
+/*  the task editor, which meant the one place you could see it was the */
+/*  one place you already knew. Now every list that shows work shows it: */
+/*  Plan, Now, Overdue, the backlog.                                    */
+/*                                                                     */
+/*  Drawn as an outline against the tag's filled chip so two of them    */
+/*  side by side read as two different things rather than two tags.     */
+/* ------------------------------------------------------------------ */
+function ProjectTag({ project, sm = false }) {
+  if (!project) return null;
+  return (
+    <span className={`prj-tag${sm ? ' sm' : ''}`} style={{ '--pcolour': project.color }} title={project.name}>
+      <Target size={sm ? 9 : 10} /> {project.name}
+    </span>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  A project's share of today, as one line you can settle from.       */
+/*                                                                     */
+/*  "Finish the book by March" is not a thing anyone can do today.     */
+/*  "Eleven pages" is. A project that carries a number, a deadline and  */
+/*  the days it is actually worked on can say the second sentence, and  */
+/*  this is where it says it — in Plan and in Now, on its own days, at  */
+/*  its own hour, going quiet the moment the share is logged.          */
+/*                                                                     */
+/*  The input logs progress against the project itself, so the number   */
+/*  the card is arguing about is the number that moves. Anything else   */
+/*  would make it a reminder to go somewhere else and log it, which is  */
+/*  the step people skip.                                              */
+/* ------------------------------------------------------------------ */
+function QuotaLine({ project, quota, onLog, onOpen, compact = false }) {
+  const [n, setN] = useState('');
+  const submit = () => { const v = Number(n); if (v > 0) { onLog(v); setN(''); } };
+  const unit = project.unit || '';
+  const pct = quota.need ? Math.min(1, quota.done / quota.need) : (quota.met ? 1 : 0);
+  return (
+    <div className={`quota-line${quota.met ? ' met' : ''}${compact ? ' compact' : ''}`} style={{ '--qcolour': project.color }}>
+      <button className="quota-main" onClick={onOpen}>
+        <span className="quota-name"><span className="quota-dot" />{project.name}</span>
+        <span className="quota-ask">
+          {quota.need == null
+            ? `${quota.total}/${quota.target} ${unit}`.trim()
+            : quota.met
+              ? `${tx('done', 'تم')} · ${quota.done} ${unit}`.trim()
+              : `${quota.done}/${quota.need} ${unit} ${tx('today', 'اليوم')}`.trim()}
+        </span>
+        <span className="quota-bar"><span style={{ width: `${pct * 100}%` }} /></span>
+      </button>
+      {!quota.met && (
+        <span className="quota-log">
+          <input type="number" min="0" inputMode="numeric" value={n} onChange={(e) => setN(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+            placeholder={quota.need != null ? String(Math.max(0, quota.need - quota.done)) : '0'}
+            aria-label={`${tx('Log progress on', 'سجّل تقدمًا في')} ${project.name}`} />
+          <button className="ghost sm" onClick={submit} disabled={!(Number(n) > 0)}><Plus size={13} /></button>
+        </span>
+      )}
+      {quota.met && <span className="quota-tick"><Check size={14} /></span>}
+    </div>
+  );
+}
+
+function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, projectById = () => null, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over, events = [], cards = [], onAddCard, addedCards, onToggleCalEvent, parseHint, onOpenSpan }) {
   const [folded, setFolded] = useState(() => new Set()); // collapsed subtask lists, per task id (session-local)
   const toggleFold = (id) => setFolded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [quick, setQuick] = useState('');
@@ -112,16 +179,23 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
               ? <span className="cal-inline-tag ok"><Check size={12} /> {tx('added', 'أُضيفت')}</span>
               : <button className="ghost sm" onClick={() => onAddCard && onAddCard(c)}><Plus size={13} /> {tx('Add', 'أضف')}</button>}
           </div>); }
-        const t = row.t; const p = labelById(t.projectId); const subs = t.subtasks || [];
+        const t = row.t; const p = labelById(t.projectId); const prj = projectById(t.projectRef); const subs = t.subtasks || [];
+        /* A task borrowed from an earlier day by its own span. It is the same
+           task — ticking it here finishes it — but it is not stored on this
+           day, so dragging it would move a task that lives somewhere else. */
+        const ghost = !!t.__spanDay;
         const dBefore = taskDrop && taskDrop.taskId === t.id && !taskDrop.after;
         const dAfter = taskDrop && taskDrop.taskId === t.id && taskDrop.after;
         return (
-        <div key={t.id} data-taskid={t.id} className={`task ${p ? 'has-label' : ''} ${t.done ? 'done' : ''} ${draggingId === t.id ? 'dragging' : ''} ${dBefore ? 'drop-before' : ''} ${dAfter ? 'drop-after' : ''}`} style={p ? { '--lcolor': p.color } : undefined}>
-          <span className="grip" onPointerDown={(e) => onDragStart(e, 'task', t)} title={tx('Drag to reorder or move to another slot', 'اسحب لإعادة الترتيب أو النقل')}><GripVertical size={15} /></span>
+        <div key={t.id} data-taskid={ghost ? undefined : t.id} className={`task ${p ? 'has-label' : ''} ${t.done ? 'done' : ''} ${ghost ? 'spanning' : ''} ${draggingId === t.id ? 'dragging' : ''} ${dBefore ? 'drop-before' : ''} ${dAfter ? 'drop-after' : ''}`} style={p ? { '--lcolor': p.color } : undefined}>
+          {ghost
+            ? <span className="grip span-grip" title={tx('Runs across several days — it lives on its first one', 'تمتد عبر عدة أيام — مكانها يومها الأول')}><CalendarRange size={14} /></span>
+            : <span className="grip" onPointerDown={(e) => onDragStart(e, 'task', t)} title={tx('Drag to reorder or move to another slot', 'اسحب لإعادة الترتيب أو النقل')}><GripVertical size={15} /></span>}
           <button className="tcheck" onClick={() => onToggle(t.id)} aria-label="Toggle done">{t.done ? <CheckCircle2 size={18} /> : <Circle size={18} />}</button>
           <div className="tcol">
-            <button className="tmain" onClick={() => onOpen(t.id)}>
-              <span className="ttitle">{p && <span className="lchip" style={{ '--lcolor': p.color }}>{p.name}</span>}{t.title}{timeLabel(t) ? <span className="ttime">{timeLabel(t)}</span> : null}</span>
+            <button className="tmain" onClick={() => (ghost && onOpenSpan ? onOpenSpan(t) : onOpen(t.id))}>
+              <span className="ttitle">{p && <span className="lchip" style={{ '--lcolor': p.color }}>{p.name}</span>}{t.title}{timeLabel(t) ? <span className="ttime">{timeLabel(t)}</span> : null}{t.__spanDay ? <span className="span-count">{tx('day', 'يوم')} {t.__spanDay}/{t.__spanOf}</span> : null}</span>
+              {prj && <span className="tmeta"><ProjectTag project={prj} /></span>}
               {(t.notes?.length > 0 || hasVault(t)) && <span className="tmeta">{t.notes && t.notes.length > 0 && <span className="badge"><StickyNote size={11} /> {t.notes.length}</span>}{hasVault(t) && <span className="badge vault-badge" title={tx('Time vault', 'خزنة موقّتة')}><Lock size={11} /></span>}</span>}
             </button>
             {subs.length > 0 && (
@@ -214,7 +288,7 @@ function SkyScene({ sky, stars, light, label, time, blockName, blockAr, range })
 /* ------------------------------------------------------------------ */
 /*  Plan sidebar — Recurring + Backlog in one box, switchable          */
 /* ------------------------------------------------------------------ */
-function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labelById, usedTpl = {}, onDragStart, onTplToPool, onTplToDay, onAddTpl, onManage, onEditTpl, onAddPool, onOpenPool, onTogglePoolDone, onPoolToDay, poolDropActive, poolDropOver, parseHint, onClearDonePool }) {
+function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labelById, projectById = () => null, usedTpl = {}, onDragStart, onTplToPool, onTplToDay, onAddTpl, onManage, onEditTpl, onAddPool, onOpenPool, onTogglePoolDone, onPoolToDay, poolDropActive, poolDropOver, parseHint, onClearDonePool }) {
   const [val, setVal] = useState('');
   const [doneOpen, setDoneOpen] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -264,7 +338,7 @@ function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labe
                 <button className="tcheck" onClick={() => onTogglePoolDone(it.id)} aria-label={tx('Mark done', 'وضع كمنجز')}>{it.done ? <CheckCircle2 size={17} /> : <Circle size={17} />}</button>
                 <button className="pool-main" onClick={() => onOpenPool(it.id)}>
                   <span className="pool-title">{it.title}</span>
-                  <span className="tmeta">{p && <span className="lchip" style={{ '--lcolor': p.color }}>{p.name}</span>}{it.subtasks && it.subtasks.length > 0 && <span className="badge"><CheckCircle2 size={11} /> {doneN}/{it.subtasks.length}</span>}</span>
+                  <span className="tmeta">{p && <span className="lchip" style={{ '--lcolor': p.color }}>{p.name}</span>}<ProjectTag project={projectById(it.projectRef)} sm />{it.subtasks && it.subtasks.length > 0 && <span className="badge"><CheckCircle2 size={11} /> {doneN}/{it.subtasks.length}</span>}</span>
                 </button>
                 <button className="tpl-act" title={tx('Schedule on the selected day', 'جدولة في اليوم المحدد')} onClick={() => onPoolToDay(it.id)}><CornerUpRight size={15} /></button>
               </li>); };
@@ -418,7 +492,7 @@ function NotesEditor({ notes, onAdd, onUpdate, onDel }) {
 /* ------------------------------------------------------------------ */
 /*  Task editor                                                        */
 /* ------------------------------------------------------------------ */
-function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaultOpen = false, onMoveDate, onClose, onChange, onDelete, onToPool, onSaveTemplate, onFocus, notebooks = [], onOpenNotebook, onNewNotebook }) {
+function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, todayISO, vaultOpen = false, onMoveDate, onClose, onChange, onDelete, onToPool, onSaveTemplate, onFocus, notebooks = [], onOpenNotebook, onNewNotebook }) {
   const setField = (k, v) => onChange((t) => ({ ...t, [k]: v }));
   // Vault editing is write-anytime / read-only-in-window: the stored value is
   // never rendered while the window is shut, only replaced wholesale.
@@ -457,6 +531,25 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaul
               <label><span>{tx('Start', 'البداية')}</span><input className="time-input" type="time" value={task.start || ''} disabled={vaultLocksTime} onChange={(e) => onChange((t) => ({ ...t, start: e.target.value, autoSlot: null }))} /></label>
               <label><span>{tx('End', 'النهاية')}</span><input className="time-input" type="time" value={task.end || ''} disabled={vaultLocksTime} onChange={(e) => onChange((t) => ({ ...t, end: e.target.value, autoSlot: null }))} /></label>
             </div>
+            {/* Runs until — the whole multi-day feature, in one date. The task
+                stays a single task; it simply belongs to every day up to this
+                one, and stops being overdue in the meantime. */}
+            <label className="edit-span">
+              <span><CalendarRange size={12} /> {tx('Runs until', 'تمتد حتى')}</span>
+              <span className="edit-span-in">
+                <input className="time-input" type="date" min={dateISO} value={taskUntil(task) || ''}
+                  onChange={(e) => setField('until', e.target.value || null)} />
+                {taskUntil(task) && (
+                  <>
+                    <span className="edit-span-n">{spanLength(task, parseISO(dateISO))} {tx('days', 'أيام')}</span>
+                    <button className="mini-del" onClick={() => setField('until', null)} aria-label={tx('Single day', 'يوم واحد')}><X size={13} /></button>
+                  </>
+                )}
+              </span>
+              <span className="hint-text">{taskUntil(task)
+                ? tx('Shows on every day in the range, and is only late after the last one.', 'تظهر في كل يوم ضمن المدة، ولا تتأخر إلا بعد آخر يوم.')
+                : tx('Leave empty for a single day.', 'اتركه فارغًا ليوم واحد.')}</span>
+            </label>
           </div>
           <div className="edit-card">
             <div className="edit-card-h"><Tag size={13} /> {tx('Belongs to', 'تنتمي إلى')}</div>
@@ -494,6 +587,28 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, vaul
             <span className="edit-focus-label"><Clock size={13} /> {tx('Focus for', 'ركّز لمدة')}</span>
             {[10, 20, 30, 45].map((mn) => (<button key={mn} className="ghost sm" onClick={() => onFocus(mn)}>{mn}{tx('m', 'د')}</button>))}
             {tEndMin(task) != null && <button className="ghost sm focus-whole" onClick={() => onFocus(null, true)}>{tx('Until end', 'حتى النهاية')}</button>}
+          </div>
+          {/* A target for the day, and the minutes actually measured against it.
+              Ticking a task says you finished it; this says you gave it the
+              time you said you would — which is the honest question for work
+              that is never really "done". Counted per day, so a target on a
+              task you return to all week means something on each of them. */}
+          <div className="worth-row focus-target-row">
+            <Timer size={13} />
+            <span className="worth-label">{tx('Focus target', 'هدف التركيز')}</span>
+            <input className="worth-input" type="number" min="0" step="5" placeholder={tx('none', 'بلا')}
+              value={task.focusTarget == null || task.focusTarget === '' ? '' : task.focusTarget}
+              onChange={(e) => setField('focusTarget', e.target.value === '' ? null : Math.max(0, Number(e.target.value) || 0))} />
+            <span className="worth-auto">
+              {focusTargetMin(task) == null
+                ? tx('minutes a day — measured rounds count towards it', 'دقائق يوميًا — تُحسب الجولات المقيسة ضمنها')
+                : (<>
+                    {focusSpent(task, todayISO)}/{focusTargetMin(task)}{tx('m', 'د')} {tx('today', 'اليوم')}
+                    {focusMet(task, todayISO)
+                      ? <span className="focus-met"><Check size={11} /> {tx('met', 'تحقّق')}</span>
+                      : <span className="focus-left">{tx('left', 'متبقٍ')} {Math.max(0, focusTargetMin(task) - focusSpent(task, todayISO))}{tx('m', 'د')}</span>}
+                  </>)}
+            </span>
           </div>
           {/* The vault folds shut: most tasks have no secret, and a closed fold
               is how a rarely-used lockbox should read. Open when it holds one. */}
@@ -670,4 +785,4 @@ function PointsPanel({ balance, ledger, rewards, onClose, onAddReward, onUpdRewa
 /* ------------------------------------------------------------------ */
 /*  Habits — daily commitments; streaks glow brighter up to seven days */
 /* ------------------------------------------------------------------ */
-export { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };
+export { AppIcon,BlockRow,ProjectTag,QuotaLine,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };

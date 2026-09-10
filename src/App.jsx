@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3, Mic, Square, ListChecks, CalendarRange } from 'lucide-react';
-import {brokerFrom, hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Moon, AlarmClock, Rows3, Mic, Square, ListChecks, CalendarRange, Gift, Timer, Ban } from 'lucide-react';
+import {brokerFrom, taskUntil,spanLength,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,sleepPlan,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook, onStorageHealth, writesFailing, storageStats, storageHeadroom, recheckWrites } from './storage.js';
 import { isDerived } from '../shared/model.js';
 import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken, inAppShell } from './sync.js';
@@ -27,11 +27,13 @@ import { FilterBar } from './filterbar.jsx';
 import { EMPTY as EMPTY_FILTER, arrange, isFiltering, matches as filterMatches } from './filters.js';
 import { loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, isEmptyNote, excerpt as noteExcerpt } from './notes.js';
 import { MeetingSheet } from './meetingsheet.jsx';
-import { nextMark, TINY } from './habits.js';
+import { nextMark, TINY, stackGate, isPrayerAnchor, anchorLabel } from './habits.js';
+import { dueProjects, normalizePlan, todayQuota, worksOn } from './quota.js';
+import { dueOn as recurDueOn, describeRepeat, isScheduled } from './recur.js';
 import { TrelloCards } from './trelloview.jsx';
 import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
 
-import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
+import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,ProjectTag,QuotaLine,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
 
 /* The pool rejected this app's token. Said plainly, and pointing at the field
@@ -527,6 +529,17 @@ export default function Rhythm() {
 
   /* ---- label helpers (labels are the colored task tags) ---- */
   const labelById = (id) => settings.labels.find((p) => p.id === id) || null;
+  /* The long-term project a task belongs to (task.projectRef), as against the
+     coloured tag (task.projectId). Every list that shows work shows this now:
+     a task's project is the most useful thing about it that its own title does
+     not already say, and it was only ever visible inside the editor. */
+  const projectById = (id) => (settings.projects || []).find((x) => x.id === id) || null;
+  const labelNameOf = (tk) => { const l = labelById(tk && tk.projectId); return l ? l.name : ''; };
+  const projectNameOf = (tk) => { const x = projectById(tk && tk.projectRef); return x ? x.name : ''; };
+  /* The resolvers every sorted list hands to filters.js. Only the app knows
+     what an id is called, and sorting by the id itself would look deliberate
+     while being arbitrary. */
+  const sortNames = { tagName: labelNameOf, projectName: projectNameOf };
   const ensureLabel = (name, labels) => {
     if (!name) return { id: null, labels };
     const found = labels.find((p) => p.name.toLowerCase() === name.toLowerCase());
@@ -728,18 +741,68 @@ export default function Rhythm() {
 
   const sync = useSync({ localVersion, onApplied: adoptKeys, loaded: ready });
 
+  /* ---- multi-day tasks ----
+     A task with an `until` date is stored ONCE, in the week that owns its
+     first day, and borrowed onto every later day it covers. One task, one
+     done state, one place it can be edited — which is what lets a card say
+     "day 2 of 4" truthfully instead of four tasks that share a name.
+
+     Built as an index by date rather than searched per day: Plan asks six
+     times per render (once per block), the date strip asks for every day on
+     screen, and Now asks again. Walking every loaded week for each of those
+     would be the same scan twenty times over.
+
+     Weeks come from the session cache, which holds every stored week (see the
+     preload in init). The displayed week is taken from live state instead of
+     its cached copy, so a span typed a moment ago appears on the other days
+     immediately rather than after the next reload. */
+  const SPAN_CAP = 400;   // a date picker will accept the year 2140; the index will not
+  const spanIndex = useMemo(() => {
+    const byISO = new Map();
+    const addWeek = (wsISO, wk) => {
+      const ws = parseISO(wsISO);
+      for (const tk of (wk && wk.tasks) || []) {
+        if (!taskUntil(tk)) continue;
+        const own = addDays(ws, tk.day);
+        const n = Math.min(SPAN_CAP, spanLength(tk, own));
+        for (let i = 1; i < n; i++) {
+          const iso = fmtISO(addDays(own, i));
+          const list = byISO.get(iso) || [];
+          list.push({ ...tk, __spanDay: i + 1, __spanOf: n, __spanHome: { kind: 'task', wsISO, day: tk.day, id: tk.id } });
+          byISO.set(iso, list);
+        }
+      }
+    };
+    const live = fmtISO(weekStart);
+    addWeek(live, week);
+    for (const [wsISO, wk] of Object.entries(weeksRef.current)) if (wsISO !== live) addWeek(wsISO, wk);
+    return byISO;
+  }, [week, weekStart, todayData, refresh]);   // eslint-disable-line
+  /* Everything on a date: what is stored there, plus what is borrowed onto it.
+     A task already stored on the day is never also borrowed onto it — that can
+     only happen if a span was somehow indexed onto its own home day, and one
+     task appearing twice is worse than a span not showing. */
+  const spansOn = (dateISO, own) => {
+    const borrowed = spanIndex.get(dateISO) || [];
+    if (!borrowed.length) return own;
+    const have = new Set(own.map((x) => x.id));
+    const extra = borrowed.filter((x) => !have.has(x.id));
+    return extra.length ? [...own, ...extra] : own;
+  };
+  const tasksOnDay = (dayIdx) => spansOn(fmtISO(addDays(weekStart, dayIdx)), week.tasks.filter((tk) => tk.day === dayIdx));
+
   /* ---- scheduled task ops (operate on the displayed week) ---- */
   // Within a block, order is MANUAL (`order` asc, done last). New tasks get an
   // order seeded from their start time, so timed tasks still land in a sane
   // spot — but the arrows on the Plan page are the source of truth, because
   // this exact order drives the one-at-a-time Now queue.
   const tasksFor = (dayIdx, blockId) => arrange(
-    week.tasks.filter((t) => t.day === dayIdx && t.block === blockId).sort((a, b) => (a.done - b.done) || (a.order - b.order)),
+    tasksOnDay(dayIdx).filter((t) => t.block === blockId).sort((a, b) => (a.done - b.done) || (a.order - b.order)),
     filter,
     // No 'date' here: everything in one block is already the same day, and the
     // manual order within it is what the drag handles are for.
-    ['manual', 'title'],
-    { date: (t) => (t.start ? t.start : null) },
+    ['manual', 'title', 'tag', 'project'],
+    { date: (t) => (t.start ? t.start : null), ...sortNames },
   );
 
   const addTask = (dayIdx, blockId, title, extra = {}) => {
@@ -1054,6 +1117,10 @@ export default function Rhythm() {
     <FilterBar filter={filter} onChange={setFilter} labels={settings.labels || []}
       projects={settings.projects || []} sorts={sorts} compact={compact} />
   );
+  /* Every surface that lists work offers the same vocabulary, so "sort by tag"
+     means one thing in this app rather than four. Notes are the exception and
+     stay as they are: a notebook has no tag to sort by. */
+  const TASK_SORTS = ['manual', 'title', 'tag', 'project'];
 
   const [slotBusy, setSlotBusy] = useState(false);
   // dayIdx is 0-6 within the week on screen; omitted means the selected day.
@@ -1573,7 +1640,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const dateMeta = (d) => {
     const ws = startOfWeek(d, settings.weekStartDay);
     const idx = Math.round((d - ws) / 86400000);
-    const dt = (weekDocFor(d).tasks || []).filter((t) => t.day === idx);
+    const dt = spansOn(fmtISO(d), (weekDocFor(d).tasks || []).filter((t) => t.day === idx));
     return { date: d, iso: fmtISO(d), label: wd(d.getDay()), num: d.getDate(), total: dt.length, done: dt.filter((t) => t.done).length, isToday: sameDay(d, logicalDayMid()) };
   };
 
@@ -1596,7 +1663,10 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const todayCol = todayInView ? Math.round((todayMid - weekStart) / 86400000) : Math.round((todayMid - startOfWeek(todayMid, settings.weekStartDay)) / 86400000);
   const nowSrc = todayInView ? week.tasks : (todayData?.tasks || []);
   const nowDayCol = todayCol;
-  const todayTasks = nowDayCol >= 0 ? nowSrc.filter((t) => t.day === nowDayCol) : [];
+  // Spans reach Now the same way they reach Plan: a task running Tuesday to
+  // Thursday is something to do on Wednesday, not something Wednesday has
+  // never heard of.
+  const todayTasks = nowDayCol >= 0 ? spansOn(fmtISO(todayMid), nowSrc.filter((t) => t.day === nowDayCol)) : [];
   // The Now queue mirrors the Plan page EXACTLY: every task from the START of the
   // day (all blocks — not just the current prayer period, so nothing left behind
   // earlier in the day gets skipped), ordered by block top-to-bottom then the
@@ -1779,6 +1849,31 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     setOpenNote(null);
     if (n && isEmptyNote(n)) { await deleteNote(n.id); setNotes((prev) => prev.filter((x) => x.id !== n.id)); }
   }, [openNote, notes]);
+
+  /* Changing page closes whatever was open on top of the old one.
+
+     The bottom nav sits at the same stacking level as the modals and is
+     rendered after them, so it stays tappable while a notebook, a task editor
+     or a prep sheet is open. That is the right trade — being able to leave
+     beats being trapped — but it means changing the view has to take the open
+     thing WITH it. Without this, a notebook opened on the Notes wall followed
+     you onto Plan, onto Now, onto everything, covering the page you had just
+     asked for; the only way out was to find the X behind your own thumb.
+
+     The notebook's body pushes on blur, and tapping a nav button blurs it
+     before this runs, so nothing typed is lost on the way out. Deliberately
+     one place: a future overlay is one line here rather than a bug per
+     button. */
+  const go = (next) => {
+    setView(next);
+    if (openNote) closeNote();
+    setOpenMeeting(null);
+    setEditing(null);
+    setEditingPool(null);
+    setEditingTpl(null);
+    setPlacer(null);
+    setShowPoints(false);
+  };
 
   const removeNote = useCallback(async (id) => {
     await deleteNote(id);
@@ -2452,6 +2547,43 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     return st != null && en != null && inWindow(st, en, curMin);
   });
   const liveIds = new Set(liveNow.map((t) => t.id));
+  /* Getting ready is part of the commitment.
+
+     A meeting that surfaces at the minute it starts has already started. The
+     lead window puts a timed task on the screen `leadMin` minutes early so
+     there is time to close what you were doing and walk to it — the difference
+     between being told about a thing and being able to be at it. Anything
+     already inside its own window is live, not soon, so the two bands never
+     hold the same task. */
+  const leadMin = Math.max(0, Number(settings.leadMin) >= 0 ? Number(settings.leadMin) : 30);
+  const minsUntil = (st) => (st == null ? null : (((st - curMin) % 1440) + 1440) % 1440);
+  const soonNow = leadMin === 0 ? [] : nowList.filter((t) => {
+    if (t.done || liveIds.has(t.id)) return false;
+    const st = tStartMin(t);
+    if (st == null) return false;
+    const d = minsUntil(st);
+    return d > 0 && d <= leadMin;
+  }).sort((a, b) => minsUntil(tStartMin(a)) - minsUntil(tStartMin(b)));
+  const soonIds = new Set(soonNow.map((t) => t.id));
+  /* Prayers whose period has PASSED and were never marked.
+
+     These leave the queue entirely. The queue is a one-thing-at-a-time device
+     and it works by hiding what is not next — which is exactly the wrong
+     treatment for a missed prayer, because it puts the prayer behind however
+     many tasks happen to sit above it. A missed prayer is not a queue position;
+     it is the thing to deal with first, whatever else the day holds. The
+     prayer for the CURRENT period has not been missed yet and stays in the
+     queue where it belongs. */
+  const missedPrayers = BLOCKS.filter((b) => PRAYER_BLOCKS.includes(b.id) && blockIdx(b.id) < activeIdx && !prayersToday[b.id]);
+  /* Anchored habits wait for their anchor instead of merely claiming to follow
+     one. See stackGate in habits.js — the stack finally does something. */
+  const habitDoneNow = (id) => {
+    if (isPrayerAnchor(id)) return !!prayersToday[id.slice('prayer:'.length)];
+    const h = (settings.habits || []).find((x) => x.id === id);
+    return !!(h && habitDoneOn(h, nowHabitISO));
+  };
+  const habitGate = stackGate(settings.habits || [], habitDoneNow);
+  const waitingHabitIds = new Set(habitGate.waiting.map((h) => h.id));
   const todayStartMsQ = new Date(todayMid.getFullYear(), todayMid.getMonth(), todayMid.getDate()).getTime();
   const mStartMin = (m) => Math.max(0, Math.min(1439, Math.round((m.startMs - todayStartMsQ) / 60000)));
   const pastByBlock = {};
@@ -2462,13 +2594,13 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   for (const bid of Object.keys(pastByBlock)) pastByBlock[bid].sort((a, b) => a.startMs - b.startMs);
   const queue = [];
   for (const b of BLOCKS) {
-    if (PRAYER_BLOCKS.includes(b.id) && blockIdx(b.id) <= activeIdx && !prayersToday[b.id]) queue.push({ kind: 'prayer', block: b });
-    for (const h of habitsOf(b.id)) if (!habitDoneOn(h, nowHabitISO)) queue.push({ kind: 'habit', block: b, h });
+    if (PRAYER_BLOCKS.includes(b.id) && blockIdx(b.id) === activeIdx && !prayersToday[b.id]) queue.push({ kind: 'prayer', block: b });
+    for (const h of habitsOf(b.id)) if (!habitDoneOn(h, nowHabitISO) && !waitingHabitIds.has(h.id)) queue.push({ kind: 'habit', block: b, h });
     // An ended, unchecked meeting takes its place among the tasks by clock
     // time — the same tucking rule the Plan timeline uses.
     const ms = pastByBlock[b.id] || [];
     let mi = 0;
-    for (const t of nowList.filter((t) => t.block === b.id && !t.done && !liveIds.has(t.id))) {
+    for (const t of nowList.filter((t) => t.block === b.id && !t.done && !liveIds.has(t.id) && !soonIds.has(t.id))) {
       const ts = tStartMin(t) ?? Infinity;
       while (mi < ms.length && mStartMin(ms[mi]) <= ts) queue.push({ kind: 'cal', block: b, m: ms[mi++] });
       queue.push({ kind: 'task', block: b, t });
@@ -2477,13 +2609,35 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   }
   const startedPrayers = PRAYER_BLOCKS.filter((pid) => blockIdx(pid) <= activeIdx).length;
   const totalN = nowList.length + (settings.habits || []).length + startedPrayers + startedOrDoneMeetings.length;
-  const doneN = totalN - queue.length - liveNow.length - liveMeetings.length;
+  const doneN = totalN - queue.length - liveNow.length - soonNow.length - liveMeetings.length - missedPrayers.length;
   const next = queue[0] || null;
   // Everything up to and through the current period is clear when the head of
   // the queue belongs to a LATER block. Then it stops being "do this now" and
   // becomes a look-ahead under Next, until its period arrives.
   const nextIsLater = !!next && blockIdx(next.block.id) > activeIdx;
-  const caughtUp = nextIsLater && liveNow.length === 0;
+  /* "Caught up" now has to mean caught up. A missed prayer or a slot about to
+     open is not a clear day, and saying so while either is on the screen would
+     be the app contradicting itself two inches apart. */
+  const caughtUp = nextIsLater && liveNow.length === 0 && soonNow.length === 0 && missedPrayers.length === 0;
+  const nothingLeft = !next && liveNow.length === 0 && soonNow.length === 0 && missedPrayers.length === 0 && liveMeetings.length === 0;
+
+  /* Projects that asked for a share of today, and have not had it yet. The
+     block they chose decides when they appear: a project set to the morning
+     says nothing at Isha, which is the difference between a reminder and a
+     nag. Past its block it stays until the day is over — a share you owe does
+     not stop being owed because its hour went by. */
+  const quotasNow = todayInView
+    ? dueProjects(settings.projects || [], todayMid, { blockOrder: blockIdx })
+        .filter((x) => blockIdx(normalizePlan(x.project).block) <= activeIdx && !x.quota.met)
+    : [];
+  /* What being caught up is worth. Only what the balance actually covers: an
+     offer you cannot take is not an offer, and listing it turns a reward into
+     a reminder of how far off it is. Three at most — this is a suggestion, and
+     the full shelf lives behind the points button. */
+  const chillNow = (settings.rewards || [])
+    .filter((r) => r.name && Number(r.cost) > 0 && Number(r.cost) <= balance)
+    .sort((a, b) => Number(b.cost) - Number(a.cost))
+    .slice(0, 3);
 
   /* ---- Android notifications (no-ops in the browser) ----
      Reminders are keyed to today's timed tasks; the ongoing card mirrors the
@@ -2493,8 +2647,12 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     .filter((t) => !t.done && tStartMin(t) != null && tEndMin(t) != null)
     .map((t) => `${t.id}|${t.title}|${tStartMin(t)}`)
     .join('\n');
-  const ongoingText = liveNow.length > 0
+  const ongoingText = missedPrayers.length > 0
+    ? { title: tx(`${missedPrayers[0].name} prayer`, `صلاة ${missedPrayers[0].ar}`), body: tx('Missed — pray it now', 'فائتة — صلّها الآن') }
+    : liveNow.length > 0
     ? { title: liveNow[0].title, body: `${tx('Happening now', 'يحدث الآن')} · ${timeLabel(liveNow[0])}` }
+    : soonNow.length > 0
+    ? { title: soonNow[0].title, body: `${tx('Starts in', 'يبدأ خلال')} ${minsUntil(tStartMin(soonNow[0]))}${tx('m', 'د')} · ${timeLabel(soonNow[0])}` }
     : caughtUp
       ? { title: tx("You're all caught up.", 'أنجزت كل ما عليك الآن.'), body: next ? `${tx('Next', 'التالي')}: ${next.kind === 'task' ? next.t.title : next.kind === 'habit' ? next.h.name : next.kind === 'cal' ? (next.m.summary || tx('Meeting', 'اجتماع')) : bName(next.block)} · ${bName(next.block)}` : '' }
       : next
@@ -2685,9 +2843,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           const s = (it.t.subtasks || []).find((x) => !x.done);
           return `t:${it.t.id}:${s ? s.id : 'main'}`;
         };
-        const renderCard = (it, { preview = false, live = false } = {}) => {
+        const renderCard = (it, { preview = false, live = false, soon = false } = {}) => {
           const k = itemKeyOf(it);
-          const cls = `${preview ? 'preview' : ''} ${live ? 'live' : ''} ${nowLeaving === k ? 'leaving' : ''}`;
+          const cls = `${preview ? 'preview' : ''} ${live ? 'live' : ''} ${soon ? 'soon' : ''} ${nowLeaving === k ? 'leaving' : ''}`;
           if (it.kind === 'prayer') return (
             <div key={k} className={`now-one-card now-item current ${cls}`}>
               {todayInView
@@ -2737,6 +2895,20 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                     {tSubs.length > 0 ? <span className="now-step-count">{nDone}/{tSubs.length} {tx('steps', 'خطوات')}</span> : null}
                   </button>
                 )}
+                {/* What this is FOR, how far into its run it is, and whether it
+                    has had the time it was promised — the three things a title
+                    leaves out and a card can answer without being opened. */}
+                {(projectById(t.projectRef) || t.__spanDay || focusTargetMin(t) != null) && (
+                  <span className="now-tags">
+                    <ProjectTag project={projectById(t.projectRef)} sm />
+                    {t.__spanDay ? <span className="span-count"><CalendarRange size={10} /> {tx('day', 'يوم')} {t.__spanDay}/{t.__spanOf}</span> : null}
+                    {focusTargetMin(t) != null && (
+                      <span className={`focus-chip ${focusMet(t, nowHabitISO) ? 'met' : ''}`}>
+                        <Timer size={10} /> {focusSpent(t, nowHabitISO)}/{focusTargetMin(t)}{tx('m', 'د')}
+                      </span>
+                    )}
+                  </span>
+                )}
                 {/* The vault's whole point: the window is open, so hand it over. */}
                 {vaultUnlocked(t, curMin) && (
                   <div className="vault-reveal">
@@ -2758,6 +2930,25 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             blockName={bName(activeBlock)} blockAr={bSub(activeBlock)}
             range={`${nowStart ? `${fmtTime(nowStart)}${nowEnd ? `–${fmtTime(nowEnd)}` : '+'}` : ''}${totalN ? ` · ${doneN}/${totalN} ${tr.done}` : ''}`} />
           <div className="hero-sheet">
+            {/* A missed prayer is not a queue position. It sits above everything
+                until it is dealt with, however full the rest of the day is. */}
+            {missedPrayers.length > 0 && todayInView && (
+              <div className="now-one now-missed">
+                <div className="now-one-top">
+                  <span className="now-one-label">{missedPrayers.length === 1 ? tx('A prayer is outstanding', 'صلاة فائتة') : tx('Prayers are outstanding', 'صلوات فائتة')}</span>
+                  <span className="now-one-block missed-tag">{tx('make it up', 'اقضِها')}</span>
+                </div>
+                {missedPrayers.map((b) => (
+                  <div key={`missed:${b.id}`} className={`now-one-card now-item current missed ${nowLeaving === `p:${b.id}` ? 'leaving' : ''}`}>
+                    <button className="tcheck big" onClick={() => advanceNow(`p:${b.id}`, () => togglePrayer(b.id, todayMid))} aria-label={tx('Mark prayer performed', 'تم أداء الصلاة')}><Circle size={22} /></button>
+                    <div className="now-col">
+                      <span className="now-item-title">{tx(`${b.name} prayer`, `صلاة ${b.ar}`)}</span>
+                      <span className="now-cal-meta">{tx('its time has passed', 'مضى وقتها')} · {fmtTime(cleanTime(todayTimings[b.startKey]) || '')}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
             {/* Scheduled slots that own the clock right now — outside the queue. */}
             {liveNow.length > 0 && (
               <div className="now-one now-live">
@@ -2766,6 +2957,17 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                   <span className="now-one-block live-tag">{tx('scheduled', 'مجدولة')}</span>
                 </div>
                 {liveNow.map((t) => renderCard({ kind: 'task', block: blockById(t.block), t }, { live: true }))}
+              </div>
+            )}
+            {/* Early enough to get to it, rather than early enough to know you
+                are late. */}
+            {soonNow.length > 0 && (
+              <div className="now-one now-soon">
+                <div className="now-one-top">
+                  <span className="now-one-label">{tx('Get ready', 'استعد')}</span>
+                  <span className="now-one-block soon-tag">{tx('in', 'خلال')} {minsUntil(tStartMin(soonNow[0]))}{tx('m', 'د')}</span>
+                </div>
+                {soonNow.map((t) => renderCard({ kind: 'task', block: blockById(t.block), t }, { soon: true }))}
               </div>
             )}
             {liveMeetings.length > 0 && (
@@ -2807,12 +3009,43 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 </div>
                 {renderCard(next)}
               </div>
-            ) : liveNow.length > 0 ? null
+            ) : !nothingLeft ? null
               : totalN > 0 ? (
                 <div className="now-empty all-done"><CheckCircle2 size={22} /> {tx('All done for today. Rest easy.', 'أنجزت كل شيء اليوم. ارتَح.')}</div>
               ) : (
                 <div className="now-empty">{tx('Nothing scheduled today.', 'لا شيء مجدول اليوم.')} {bHint(activeBlock)}.</div>
               )}
+            {/* Projects with a number on them, on the days they asked for. A
+                deadline is not something a person can act on; a share of it is. */}
+            {todayInView && quotasNow.length > 0 && (
+              <div className="now-quotas">
+                <div className="now-quotas-h"><Target size={13} /> {tx('Today\u2019s share', 'نصيب اليوم')}</div>
+                {quotasNow.map(({ project, quota }) => (
+                  <QuotaLine key={project.id} project={project} quota={quota}
+                    onLog={(n) => { logProgress(project.id, n); flash(`${project.name} +${n} ${project.unit || ''}`.trim()); }}
+                    onOpen={() => { go('projects'); setBoardProject(null); }} />
+                ))}
+              </div>
+            )}
+            {/* Being caught up is a result, and a result nobody collects stops
+                being one. These are the person's own rewards at their own
+                prices — an offer, priced honestly, not a nag. */}
+            {todayInView && (caughtUp || nothingLeft) && chillNow.length > 0 && (
+              <div className="now-rewards">
+                <div className="now-rewards-h"><Gift size={13} /> {tx('You have earned one of these', 'استحققت واحدة من هذه')}
+                  <span className="now-rewards-bal">{balance} {tx('pts', 'نقطة')}</span>
+                </div>
+                <div className="now-rewards-row">
+                  {chillNow.map((r) => (
+                    <button key={r.id} className="chill-chip" onClick={() => cashIn(r)}>
+                      <span className="chill-name">{r.name}</span>
+                      <span className="chill-cost">{r.cost}</span>
+                    </button>
+                  ))}
+                </div>
+                {isDesktop() && <p className="hint-text" style={{ margin: '6px 0 0' }}>{tx('Or start a round on one from the Focus page — resting is a thing you can be doing.', 'أو ابدأ جولة على إحداها من صفحة التركيز — الراحة شيء يمكنك فعله.')}</p>}
+              </div>
+            )}
             {!todayInView && <button className="now-jump" onClick={goToday}>{tx('Jump to today', 'انتقل إلى اليوم')}</button>}
 
             {activeId === 'isha' && (() => {
@@ -2927,7 +3160,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             blockName={wdFull(selectedDate.getDay())} blockAr=""
             range={`${mon(selectedDate.getMonth())} · ${week.tasks.filter((t) => t.day === selectedDay).length} ${week.tasks.filter((t) => t.day === selectedDay).length !== 1 ? tr.tasks : tr.task}${usingFallback ? ` · ${tx('prayer times estimated', 'مواقيت تقديرية')}` : ''}`} />
           <div className="hero-sheet">
-        {filterBar(['manual', 'title'])}
+        {filterBar(TASK_SORTS)}
         <div className="wknav plan-nav">
           <button className="icon" onClick={() => shiftStrip(-7)} disabled={!canPrev} aria-label={tx('Earlier days', 'أيام أسبق')}>{isRTL() ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}</button>
           <button className="today-btn" onClick={goToday}>{rangeLabel()}</button>
@@ -2988,6 +3221,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 prayer={isSelectedToday && PRAYER_BLOCKS.includes(b.id) ? { done: !!(week.prayers?.[selectedDay]?.[b.id]) } : null}
                 onPrayer={() => togglePrayer(b.id, selectedDate)}
                 onToggle={toggleDone} onToggleSub={toggleSub} onOpen={setEditing}
+                projectById={projectById}
+                onOpenSpan={(tk) => openProjectTask(tk.__spanHome)}
                 onAdd={(title) => addParsedTask(title, { blockId: b.id })}
                 parseHint={parseHint}
                 onDragStart={startDrag}
@@ -3000,7 +3235,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             <PlanSide
               tab={sideTab} onTab={setSideTab}
               open={sideOpen} onToggleOpen={() => setSideOpen((v) => !v)}
-              templates={templates} pool={pool} labelById={labelById} usedTpl={usedTpl}
+              templates={templates} pool={pool} labelById={labelById} projectById={projectById} usedTpl={usedTpl}
               onDragStart={startDrag}
               onTplToPool={templateToPool}
               onTplToDay={(id) => setPlacer({ kind: 'template', id })}
@@ -3077,7 +3312,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           projects={settings.projects || []}
           calProjects={calProjects}
           weekStartDay={settings.weekStartDay}
-          filterBar={filterBar(['manual'], true)}
+          filterBar={filterBar(TASK_SORTS, true)}
           eventFilter={(e) => filterMatches(e, { ...filter, labels: [] }, { project: (x) => calProjects[calSeriesKey(x)] || null })}
           onAssign={assignCalProject}
           picked={calPicked}
@@ -3096,7 +3331,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             project={proj}
             cards={projectTaskList(proj.id).tasks}
             labels={settings.labels || []}
-            filterBar={filterBar(['manual', 'date', 'title'], true)}
+            filterBar={filterBar(['manual', 'date', ...TASK_SORTS.filter((s) => s !== 'manual')], true)}
             meetings={meetingsForProject(calInstances, calProjects, proj.id)}
             calDone={meetingDone}
             prepFor={(ev) => prepForEvent(calPrep, ev)}
@@ -3171,6 +3406,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {editingTask && (
         <TaskEditor task={editingTask} projects={settings.labels} allProjects={settings.projects} weekStart={weekStart}
           dateISO={fmtISO(addDays(weekStart, editingTask.day))}
+          todayISO={fmtISO(todayMid)}
           vaultOpen={vaultUnlocked(editingTask, curMin)}
           onMoveDate={(iso) => moveTaskToDate(editingTask.id, iso)}
           onClose={() => setEditing(null)} onChange={(fn) => mutateTask(editingTask.id, fn)}
@@ -3460,30 +3696,30 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {toast && <div className="toast">{toast}</div>}
 
       <nav className="bottomnav">
-        <button className={`navbtn ${view === 'overdue' ? 'on' : ''}`} onClick={() => setView('overdue')} aria-label={tx('Overdue', 'المتأخرات')}>
+        <button className={`navbtn ${view === 'overdue' ? 'on' : ''}`} onClick={() => go('overdue')} aria-label={tx('Overdue', 'المتأخرات')}>
           <AlertCircle size={20} /><span className="navlabel">{tx('Overdue', 'متأخرات')}</span>
           {overdue.length > 0 && <span className="navbadge">{overdue.length}</span>}
         </button>
-        <button className={`navbtn ${view === 'now' ? 'on' : ''}`} onClick={() => setView('now')} aria-label={tx('Now', 'الآن')}>
+        <button className={`navbtn ${view === 'now' ? 'on' : ''}`} onClick={() => go('now')} aria-label={tx('Now', 'الآن')}>
           <Clock size={20} /><span className="navlabel">{tx('Now', 'الآن')}</span>
         </button>
-        <button className={`navbtn ${view === 'plan' ? 'on' : ''}`} onClick={() => setView('plan')} aria-label={tx('Plan', 'خطّط')}>
+        <button className={`navbtn ${view === 'plan' ? 'on' : ''}`} onClick={() => go('plan')} aria-label={tx('Plan', 'خطّط')}>
           <Calendar size={20} /><span className="navlabel">{tx('Plan', 'خطّط')}</span>
         </button>
-        <button className={`navbtn ${view === 'calendar' ? 'on' : ''}`} onClick={() => setView('calendar')} aria-label={tx('Calendar', 'التقويم')}>
+        <button className={`navbtn ${view === 'calendar' ? 'on' : ''}`} onClick={() => go('calendar')} aria-label={tx('Calendar', 'التقويم')}>
           <CalendarRange size={20} /><span className="navlabel">{tx('Calendar', 'تقويم')}</span>
         </button>
-        <button className={`navbtn ${view === 'notes' ? 'on' : ''}`} onClick={() => setView('notes')} aria-label={tx('Notes', 'الملاحظات')}>
+        <button className={`navbtn ${view === 'notes' ? 'on' : ''}`} onClick={() => go('notes')} aria-label={tx('Notes', 'الملاحظات')}>
           <StickyNote size={20} /><span className="navlabel">{tx('Notes', 'ملاحظات')}</span>
         </button>
-        <button className={`navbtn ${view === 'projects' ? 'on' : ''}`} onClick={() => setView('projects')} aria-label={tx('Projects', 'المشاريع')}>
+        <button className={`navbtn ${view === 'projects' ? 'on' : ''}`} onClick={() => go('projects')} aria-label={tx('Projects', 'المشاريع')}>
           <Target size={20} /><span className="navlabel">{tx('Projects', 'مشاريع')}</span>
         </button>
-        <button className={`navbtn ${view === 'habits' ? 'on' : ''}`} onClick={() => setView('habits')} aria-label={tx('Habits', 'العادات')}>
+        <button className={`navbtn ${view === 'habits' ? 'on' : ''}`} onClick={() => go('habits')} aria-label={tx('Habits', 'العادات')}>
           <Flame size={20} /><span className="navlabel">{tx('Habits', 'عادات')}</span>
         </button>
         {isDesktop() && (
-          <button className={`navbtn ${view === 'focus' ? 'on' : ''}`} onClick={() => setView('focus')} aria-label={tx('Focus', 'تركيز')}>
+          <button className={`navbtn ${view === 'focus' ? 'on' : ''}`} onClick={() => go('focus')} aria-label={tx('Focus', 'تركيز')}>
             <AlarmClock size={20} /><span className="navlabel">{tx('Focus', 'تركيز')}</span>
             {pendingRound && <span className="navbadge">1</span>}
           </button>
