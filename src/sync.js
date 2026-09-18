@@ -291,6 +291,14 @@ export async function disconnect() {
    round trip. */
 const PUSH_DEBOUNCE = 4000;
 
+/* A device left open — the desktop sitting in the tray, a laptop lid closed
+   overnight — never fires a visibility change, so without a poll it holds the
+   same snapshot for hours. Any write it then makes is built on that snapshot
+   but stamped NOW, and per-key last-write-wins hands it the key over the
+   newer edits another device made in the meantime. One cheap GET a minute
+   keeps the snapshot young. */
+const POLL_MS = 60000;
+
 /* Never sync out from under someone who is mid-edit. Adopting the server's copy
    while a task editor is open makes the app feel like it is fighting you.
    Rhythm's editors and dialogs all sit inside `.overlay`.
@@ -313,6 +321,11 @@ export function useSync({ localVersion, onApplied, loaded }) {
   const [status, setStatus] = useState('unavailable');
   const [lastSync, setLastSync] = useState(null);
   const [error, setError] = useState(null);
+  /* "Has this device seen the server since it last woke?" Automatic writes —
+     ones nobody tapped for, like the Now queue's seenAt stamp — wait on this.
+     They fire the moment a device boots or wakes, before its first pull, and
+     used to push a stale week over hours of newer edits from the phone. */
+  const [fresh, setFresh] = useState(false);
 
   // Fingerprint of the document as the server last confirmed it. Comparing
   // against this is what stops adopt→push→adopt from looping forever.
@@ -402,9 +415,14 @@ export function useSync({ localVersion, onApplied, loaded }) {
       const touched = await applyDoc(next);
       // Only disturb React when a key genuinely moved. Re-reading state after
       // an unchanged sync re-renders the whole tree for nothing.
-      if (touched.length && onAppliedRef.current) onAppliedRef.current(touched);
+      // Awaited so live state has taken the new keys before `fresh` flips —
+      // otherwise a waiting automatic write could still build on the old doc.
+      if (touched.length && onAppliedRef.current) {
+        try { await onAppliedRef.current(touched); } catch (err) { console.warn('adopt failed', err); }
+      }
 
       setLastSync(Date.now());
+      setFresh(true);
       setStatus('idle');
     } catch (e) {
       const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
@@ -412,7 +430,7 @@ export function useSync({ localVersion, onApplied, loaded }) {
       setError(e.message === 'doc-too-large' ? 'Your data is too large to sync.'
         : e.message === 'storage-full' ? "This device is out of storage, so some of what your other devices sent could not be saved here. Settings → Backup has what's taking the room."
         : "Sync didn't complete — it'll retry.");
-      if (reason !== 'retry') console.warn('sync failed', e);
+      if (reason !== 'retry' && reason !== 'poll') console.warn('sync failed', e);
     } finally {
       busy.current = false;
     }
@@ -456,7 +474,11 @@ export function useSync({ localVersion, onApplied, loaded }) {
      most likely to be waiting */
   useEffect(() => {
     if (!capability.sync || !user) return;
-    const onFocus = () => { if (document.visibilityState === 'visible') reconcile('focus'); };
+    const onFocus = () => {
+      // Hidden means whatever we hold may be overtaken before we are back.
+      if (document.visibilityState !== 'visible') { setFresh(false); return; }
+      reconcile('focus');
+    };
     const onOnline = () => reconcile('retry');
     document.addEventListener('visibilitychange', onFocus);
     window.addEventListener('online', onOnline);
@@ -466,14 +488,35 @@ export function useSync({ localVersion, onApplied, loaded }) {
     };
   }, [capability.sync, user, reconcile]);
 
+  /* The poll, and sleep detection with it: a tick that arrives far later than
+     scheduled means the machine was asleep, and a sleeping laptop does not
+     always report itself hidden. Either way the snapshot is suspect until the
+     pull that follows lands. */
+  useEffect(() => {
+    if (!capability.sync || !user) return;
+    let last = Date.now();
+    const id = setInterval(() => {
+      const now = Date.now();
+      if (now - last > POLL_MS * 2) setFresh(false);
+      last = now;
+      reconcile('poll');
+    }, POLL_MS);
+    return () => clearInterval(id);
+  }, [capability.sync, user, reconcile]);
+
   const stopSync = useCallback(async () => {
     await disconnect();
     settled.current = null;
     await signOut();
   }, []);
 
+  /* Safe for an automatic write to go ahead: sync is off here (nothing to be
+     stale against), or this device has pulled since it last woke. Unknown —
+     the boot probe still out — counts as not safe. */
+  const current = !capability.checked ? false : (!capability.sync || !user) ? true : fresh;
+
   return useMemo(
-    () => ({ capability, user, status, lastSync, error, syncNow: () => reconcile('manual'), signIn, signOut, stopSync }),
-    [capability, user, status, lastSync, error, reconcile, stopSync]
+    () => ({ capability, user, status, lastSync, error, fresh: current, syncNow: () => reconcile('manual'), signIn, signOut, stopSync }),
+    [capability, user, status, lastSync, error, current, reconcile, stopSync]
   );
 }

@@ -9,6 +9,11 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## [3.1] — 2026-09-18
+
+A device that had been asleep could push its stale week over hours of newer
+edits from the phone. It now pulls before it writes anything on its own.
+
 ### Changed
 - **The Now lock stands down during a focus round.** A round in progress is the
   strongest evidence the app has that work is happening, so covering the screen
@@ -37,6 +42,18 @@ and this project uses a simple incrementing version number (0.1 per release).
   alarm with no way out is a trap rather than a feature.
 
 ### Fixed
+- **Sync replaced the phone's newer week with an hours-old copy from another
+  device.** The per-key merge is last-write-wins, and the Now queue's `seenAt`
+  stamp is a write nobody asks for: it rewrites the whole current week the
+  moment a device boots or wakes — before that device has pulled anything. A
+  laptop that had been asleep, or the desktop app sitting in the tray (which
+  never sees a visibility change), built that write on its stale snapshot,
+  stamped it *now*, and won. The stamp now waits until the device has pulled
+  since it last booted, woke, or was hidden; an open device polls every minute
+  so it cannot sit stale for hours; and a tick that arrives far too late is
+  read as sleep. A real edit made in the second or two before the first pull
+  can still win the whole week — merging weeks task by task is the complete
+  fix.
 - **A multi-day task could not be ticked off, and took over Now until it was.**
   Reported as "multi-day tasks take over Now until I mark them done even on the
   wrong day". Two bugs wearing one face.

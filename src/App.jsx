@@ -2961,6 +2961,12 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const shownKey = shownIds.join(',');
   useEffect(() => {
     if (!ready || !shownIds.length) return;
+    /* Nobody asked for this write, and it rewrites the WHOLE week with a fresh
+       timestamp. Made on a device that has not pulled since it booted or woke,
+       it was built on hours-old tasks and still won the sync — wiping the
+       newer week from the phone. It waits for the pull; sync.fresh is in the
+       deps so it runs as soon as that lands. */
+    if (!sync.fresh) return;
     let stop = false;
     (async () => {
       const wsISO = fmtISO(startOfWeek(todayMid, settings.weekStartDay));
@@ -2972,7 +2978,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       await writeWeek(wsISO, { ...doc, tasks: doc.tasks.map((x) => (hit.has(x.id) && !x.seenAt ? { ...x, seenAt: at } : x)) });
     })();
     return () => { stop = true; };
-  }, [ready, shownKey]);   // eslint-disable-line
+  }, [ready, shownKey, sync.fresh]);   // eslint-disable-line
 
   /* ---- Android notifications (no-ops in the browser) ----
      Reminders are keyed to today's timed tasks; the ongoing card mirrors the
