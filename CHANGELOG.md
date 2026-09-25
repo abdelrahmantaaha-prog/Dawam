@@ -9,6 +9,11 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## [3.2] — 2026-09-26
+
+"Slot the day" works again, sort reaches the board and the calendar, the
+calendar fits a phone, and the planner now keeps its own backups.
+
 ### Fixed
 - **"Slot the day" always said "Nothing to slot."** The button was wired as
   `onClick={structureSelectedDay}`, and when the function learned to take a day
