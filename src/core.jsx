@@ -481,27 +481,20 @@ function spanDayIndex(t, taskDate, date) {
 const spanCovers = (t, taskDate, date) => spanDayIndex(t, taskDate, date) > 0;
 
 /* ------------------------------------------------------------------ */
-/*  A task that has already had its turn.                              */
+/*  Which period a timed task belongs to.                              */
 /*                                                                     */
-/*  The Now page hands you one thing at a time, and the cost of that    */
-/*  design is that it makes rearranging Plan feel free: a task you did  */
-/*  not want to do could simply be dragged below the next one, and the  */
-/*  queue would obligingly hand you something easier. Repeat that four  */
-/*  times and the day has been renegotiated into whatever was most      */
-/*  comfortable, with no moment where you noticed you were doing it.    */
-/*                                                                     */
-/*  So a task the queue has actually PRESENTED — offered as the thing   */
-/*  to do now, not merely listed — stops being movable. It keeps        */
-/*  exactly two answers: do it, or delete it. Deleting stays available  */
-/*  on purpose. The point is not to trap someone with a task that       */
-/*  turned out to be wrong; it is to make dropping it a decision with   */
-/*  a name rather than a drag that leaves it looking planned.           */
-/*                                                                     */
-/*  Finishing it releases the lock, so un-ticking something to correct  */
-/*  a mis-tap does not leave it frozen.                                 */
+/*  A start time already says when something happens, so asking for     */
+/*  the period as well is asking the same question twice — and the two  */
+/*  answers drift apart: a 3pm task filed under Morning shows in the    */
+/*  wrong row, goes overdue at Dhuhr, and the slotter cannot place it.  */
+/*  The time decides. Before Fajr belongs to Isha, the same as the      */
+/*  Fajr-anchored day everywhere else. Null when there is no time.      */
 /* ------------------------------------------------------------------ */
-const taskShown = (t) => !!(t && t.seenAt);
-const taskLocked = (t) => taskShown(t) && !t.done;
+const blockForTime = (t, timings) => {
+  if (!t || !timings) return null;
+  const st = tStartMin(t);
+  return st == null ? null : activeBlockAt(timings, st);
+};
 
 /* ------------------------------------------------------------------ */
 /*  Focus targets — "an hour on this today", and whether you did it.   */
@@ -581,7 +574,8 @@ function slotPassed(t, taskDate, today, { timings, sinceFajr, curSinceFajr }) {
   const st = tStartMin(t), en = tEndMin(t);
   let endMin = null;
   if (en != null) endMin = (st != null && en <= st) ? en + 1440 : en;
-  else { const ek = blockById(t.block).endKey; endMin = ek ? minutesOf(timings[ek]) : null; }
+  // No end: the period ends it — the period its time falls in, when it has one.
+  else { const ek = blockById(blockForTime(t, timings) || t.block).endKey; endMin = ek ? minutesOf(timings[ek]) : null; }
   return endMin != null && sinceFajr(endMin) <= curSinceFajr;
 }
 
@@ -664,12 +658,29 @@ function structureDay(tasks, timings, curMin, opts = {}) {
     .filter(Boolean);
   const reserve = Math.max(0, Math.round(Number(opts.prayerReserveMin) || 0));
 
+  /* Where a task lives for slotting. A start time is the stronger statement,
+     so a timed task counts in the period its time falls in whatever its
+     `block` field says — otherwise a 3pm task left under Morning would be
+     read as an 8-hour-long obstacle inside the wrong window. */
+  const home = (t) => (t.start && minutesOf(t.start) != null ? activeBlockAt(timings, minutesOf(t.start)) : vBlock(t.block));
+  const over = new Set(windows.filter((w) => w.end <= cur).map((w) => w.id));
+  const firstLive = windows.find((w) => w.end > cur);
+  /* Untimed work in a period that is already over, today, is not done and
+     not placeable where it is. It used to be skipped without a word — which
+     made the button answer "Nothing to slot" to a day full of tasks, since
+     new tasks default to Morning and the button is most often pressed after
+     it. Slotting is the person asking for a time for everything left, so it
+     rolls forward into the first period that still has time in it. Timed
+     tasks stay where they are: their time was a decision, not a default. */
+  const carried = (t) => !t.start && over.has(home(t));
+  const timed = tasks.filter((t) => !t.done && t.start && t.end).length;
+
   const slots = [], unplaced = [];
   for (const w of windows) {
-    if (w.end <= cur) continue; // the block is over; those tasks belong to Overdue
+    if (w.end <= cur) continue; // the block is over; its untimed tasks roll forward (above)
     const from = Math.max(w.start, cur);
 
-    const inBlock = tasks.filter((t) => !t.done && vBlock(t.block) === w.id);
+    const inBlock = tasks.filter((t) => !t.done && (home(t) === w.id || (w === firstLive && carried(t))));
     // Anything with a fixed position stays exactly where it is and becomes an
     // obstacle: a manually timed task, a vault window (never touched), or a
     // start-only task, which keeps its start and gets an end by estimate.
@@ -682,7 +693,7 @@ function structureDay(tasks, timings, curMin, opts = {}) {
       if (st != null) {
         const s = sf(st);
         const e = Math.min(w.end, s + estimateMinutes(t));
-        if (e > s) { busy.push([s, e]); slots.push({ id: t.id, start: t.start, end: toClock(e), autoSlot: true, pinned: true }); }
+        if (e > s) { busy.push([s, e]); slots.push({ id: t.id, start: t.start, end: toClock(e), block: w.id, autoSlot: true, pinned: true }); }
         continue;
       }
       floating.push(t);
@@ -729,20 +740,22 @@ function structureDay(tasks, timings, curMin, opts = {}) {
       durs.push(Math.max(SLOT.min, d));
     }
 
-    let g = 0, at = gaps.length ? gaps[0][0] : w.end;
+    /* First fit: each task takes the earliest hole it fits in. Walking the
+       holes strictly forward left a 34-minute gap empty behind a 44-minute
+       task that had to jump past it, and then reported the 33-minute task
+       after it as "didn't fit". Order is kept wherever the time allows. */
+    const free = gaps.map(([a, b]) => [a, b]);   // [cursor, end] per hole
     for (let i = 0; i < floating.length; i++) {
-      let need = durs[i], placedAt = null;
-      while (g < gaps.length) {
-        const [, ge] = gaps[g];
-        at = Math.max(at, gaps[g][0]);
-        if (ge - at >= need) { placedAt = at; at += need; break; }
-        g++; if (g < gaps.length) at = gaps[g][0];
+      const need = durs[i];
+      let placedAt = null;
+      for (const hole of free) {
+        if (hole[1] - hole[0] >= need) { placedAt = hole[0]; hole[0] += need; break; }
       }
       if (placedAt == null) { unplaced.push(floating[i].id); continue; }
-      slots.push({ id: floating[i].id, start: toClock(placedAt), end: toClock(placedAt + need), autoSlot: true });
+      slots.push({ id: floating[i].id, start: toClock(placedAt), end: toClock(placedAt + need), block: w.id, autoSlot: true });
     }
   }
-  return { slots, unplaced };
+  return { slots, unplaced, timed };
 }
 
 /* ------------------------------------------------------------------ */
@@ -769,6 +782,37 @@ const POINTS = {
   perPush: 5, pushCap: 20,
   project: 5,
   habit: 10, streakStep: 0.2, streakCap: 2, streakWindow: 30,
+  goal: 200, goalDone: 50, goalUntargeted: 5,
+};
+
+/* Progress logged toward a project's goal ("+12 pages").
+
+   Paid by SHARE OF THE GOAL, not by the raw amount, because units differ
+   wildly — 12 pages, 3 chapters and 4000 words are all a person's evening,
+   and paying per unit would make a word-count project a points mine. The
+   whole goal is worth POINTS.goal (about a busy week of tasks), so a project
+   carried from nothing to done pays roughly what the work behind it did.
+
+   Only progress up to the target counts: logging past the finish line is
+   welcome but is not the same achievement twice. Crossing it pays a bonus
+   once. A project with no numeric target pays a small flat amount per log,
+   since there is no scale to measure a share against. Nothing is paid for a
+   correction (a negative amount). */
+function goalWorth(p, amount, before) {
+  const amt = Number(amount) || 0;
+  if (!p || amt <= 0) return 0;
+  const target = Number(p.target) || 0;
+  if (!(target > 0)) return POINTS.goalUntargeted;
+  const prior = Math.max(0, Number(before) || 0);
+  const credited = Math.max(0, Math.min(amt, target - prior));
+  if (!credited) return 0;
+  return Math.max(1, Math.round((credited / target) * POINTS.goal));
+}
+/* Does this log carry the project over its target? */
+const goalCrossed = (p, amount, before) => {
+  const target = Number(p && p.target) || 0;
+  const prior = Number(before) || 0;
+  return target > 0 && prior < target && prior + (Number(amount) || 0) >= target;
 };
 
 function autoWorth(t) {
@@ -852,7 +896,7 @@ function pushToToday(t, { activeBlock, curSinceFajr, sinceFajr }) {
   return next;
 }
 
-export { taskShown,taskLocked,taskUntil,spans,spanLength,spanDayIndex,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,POINTS,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
+export { blockForTime,taskUntil,spans,spanLength,spanDayIndex,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,POINTS,goalWorth,goalCrossed,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
 
 /* The shared key pool, if this copy has been pointed at one.
  *

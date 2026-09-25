@@ -522,7 +522,7 @@ function PinScreen({ onVerify, onSuccess }) {
 /* ------------------------------------------------------------------ */
 /*  Settings                                                           */
 /* ------------------------------------------------------------------ */
-function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, notify, onEnableNotify, onTestNotify, onRecheck, storageOk, onReadStorage, onFreeSpace, onClose, onClearDay, dayLabel, onLang, calendar, trello }) {
+function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemplate, onDelTemplate, onExport, onImport, onSetPin, sync, notify, onEnableNotify, onTestNotify, onRecheck, storageOk, onReadStorage, onFreeSpace, onClose, onClearDay, dayLabel, onLang, calendar, trello, autoBackups }) {
   const [local, setLocal] = useState(settings);
   const [tab, setTab] = useState('general');
   // Keep the local editing copy in sync when the parent persists settings from
@@ -541,7 +541,20 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
      opened rather than on every render. */
   const [store, setStore] = useState(null);
   const readStore = async () => { if (onReadStorage) { try { setStore(await onReadStorage()); } catch { setStore(null); } } };
-  useEffect(() => { if (tab === 'backup') readStore(); }, [tab]);
+  useEffect(() => { if (tab === 'backup') { readStore(); readAuto(); } }, [tab]);
+  /* The automatic snapshots, newest first, and where they live. */
+  const [auto, setAuto] = useState({ list: null, where: '' });
+  const readAuto = async () => {
+    if (!autoBackups) return;
+    try { setAuto({ list: await autoBackups.list(), where: await autoBackups.where() }); } catch { setAuto({ list: [], where: '' }); }
+  };
+  const whenOf = (b) => {
+    const m = String(b.name).match(/(\d{4}-\d{2}-\d{2})/);
+    const d = b.at ? new Date(b.at) : null;
+    const day = m ? m[1] : (d ? d.toISOString().slice(0, 10) : b.name);
+    const clock = d ? ` ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '';
+    return `${day}${clock}`;
+  };
   const mb = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.round(n / 1024) + ' KB');
   const doExport = async () => { setBusy(true); setStatus(tx('Preparing…', 'جارٍ التحضير…')); try { setExp(await onExport()); setStatus(''); } catch { setStatus(tx('Export failed.', 'فشل التصدير.')); } setBusy(false); };
   const doCopy = async () => { try { await navigator.clipboard.writeText(exp); setStatus(tx('Copied.', 'تم النسخ.')); } catch { setStatus(tx('Copy blocked — select the text manually.', 'تعذّر النسخ — حدّد النص يدويًا.')); } };
@@ -898,7 +911,7 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
               </>) : (
                 <p className="hint-text" style={{ marginTop: 0 }}>{tx('Measuring…', 'جارٍ القياس…')}</p>
               )}
-              <div className="drive-box"><div className="drive-title">{tx('Local-only by design', 'محلي فقط حسب التصميم')}</div><p className="hint-text" style={{ marginTop: 0, marginBottom: 0 }}>{tx('Everything lives in this browser on this device — nothing is sent anywhere. That means backups are on you: export a file now and then, especially before clearing browser data.', 'كل شيء محفوظ في هذا المتصفح على هذا الجهاز — لا يُرسل شيء إلى أي مكان. لذا فالنسخ الاحتياطي مسؤوليتك: صدّر ملفًا بين الحين والآخر، خاصة قبل مسح بيانات المتصفح.')}</p></div>
+              <div className="drive-box"><div className="drive-title">{tx('Local-only by design', 'محلي فقط حسب التصميم')}</div><p className="hint-text" style={{ marginTop: 0, marginBottom: 0 }}>{tx('Everything lives on this device — nothing is sent anywhere unless you turn on sync. Automatic backups (below) keep a daily copy here; a downloaded file is still the copy that survives losing the device.', 'كل شيء محفوظ على هذا الجهاز — لا يُرسل شيء إلى أي مكان ما لم تفعّل المزامنة. يحتفظ النسخ التلقائي (أدناه) بنسخة يومية هنا؛ ويبقى الملف المنزَّل هو النسخة التي تنجو إن فُقد الجهاز.')}</p></div>
               <div className="drive-box" style={{ marginTop: 12 }}><div className="drive-title"><Sparkles size={13} /> {tx('AI features (optional)', 'الميزات الذكية (اختياري)')}</div>
                 <p className="hint-text" style={{ marginTop: 0, marginBottom: 8 }}>{tx('The brain-dump sorter, the planning assistant, dictation and task sizing all run on Google Gemini (free tier), called straight from your browser with your own key. Dictation uses the browser’s own speech recognition where it has one and costs nothing; where it does not — on the phone, and in the desktop app — the clip goes to Gemini to be written down, and is never stored. Keys are stored only on this device; your text goes to Google when you use these features — the one exception to "nothing is sent anywhere". Note: on the free tier Google may use prompts to improve its products.', 'يعمل فارز الأفكار ومساعد التخطيط والإملاء وتقدير المهام عبر Google Gemini (خطة مجانية) مباشرة من متصفحك بمفتاحك الخاص. يستخدم الإملاء التعرّف على الكلام المدمج في المتصفح حين يتوفّر بلا أي تكلفة، وحين لا يتوفّر — على الهاتف وفي تطبيق سطح المكتب — يُرسل المقطع إلى Gemini لتفريغه، ولا يُحفظ أبدًا. تُحفظ المفاتيح على هذا الجهاز فقط، ويُرسل نصك إلى Google عند استخدامها — وهو الاستثناء الوحيد لمبدأ «لا يُرسل شيء». ملاحظة: قد تستخدم Google المدخلات في الخطة المجانية لتحسين منتجاتها.')}</p>
                 <div className="pin-set-grid" style={{ marginBottom: 8 }}>
@@ -909,8 +922,50 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                 </div>
                 <p className="hint-text" style={{ margin: 0 }}>{tx('Gemini keys: aistudio.google.com/apikey. Groq keys: console.groq.com — optional, used automatically only when Gemini is unreachable or rate-limited (different infrastructure, so the two rarely fail together).', 'مفاتيح Gemini: aistudio.google.com/apikey. مفاتيح Groq: console.groq.com — اختياري ويُستخدم تلقائيًا فقط عندما يتعذر الوصول إلى Gemini أو يُقيَّد (بنية تحتية مختلفة فنادرًا ما يتعطلان معًا).')}</p>
               </div>
+              {autoBackups && (<>
+                <div className="sect-h" style={{ marginTop: 16 }}><Shield size={13} /> {tx('Automatic backups', 'النسخ التلقائي')}</div>
+                <label className="toggle">
+                  <input type="checkbox" checked={autoBackups.on} onChange={(e) => patch({ autoBackup: e.target.checked })} />
+                  <span>{tx('Back up this device on its own, every day', 'انسخ هذا الجهاز تلقائيًا كل يوم')}</span>
+                </label>
+                <p className="hint-text" style={{ margin: '6px 0 0', overflowWrap: 'anywhere' }}>
+                  {autoBackups.kind === 'desktop'
+                    ? <>{tx('Saved as files in', 'تُحفظ كملفات في')} <code>{auto.where || 'Documents\\Rhythm backups'}</code>. {tx('They survive a reinstall, and any of them can be restored here or on another computer.', 'تبقى بعد إعادة التثبيت، ويمكن استعادة أي منها هنا أو على جهاز آخر.')}</>
+                    : autoBackups.kind === 'phone'
+                      ? tx("Saved in the app's own storage on this phone. They survive updates and cleared browser data, but not uninstalling the app — download a copy now and then to keep one off the phone.", 'تُحفظ في مساحة التطبيق على هذا الهاتف. تبقى بعد التحديثات ومسح بيانات المتصفح، لكن ليس بعد حذف التطبيق — نزّل نسخة من حين لآخر لتحفظها خارج الهاتف.')
+                      : tx("Saved in this browser's database, separate from the planner itself. They do not survive clearing all site data — download a copy now and then.", 'تُحفظ في قاعدة بيانات هذا المتصفح بمعزل عن المخطط نفسه. لا تبقى بعد مسح كل بيانات الموقع — نزّل نسخة من حين لآخر.')}
+                  {' '}{tx('The last 14 are kept: one a day, refreshed hourly while the app is open, plus one taken automatically before any restore.', 'تُحفظ آخر 14 نسخة: واحدة يوميًا تُحدَّث كل ساعة أثناء فتح التطبيق، وأخرى تلقائيًا قبل أي استعادة.')}
+                </p>
+                {autoBackups.info.error && <p className="hint-text vault-warn" style={{ marginTop: 6 }}><AlertCircle size={12} /> {tx('The last automatic backup failed', 'فشل آخر نسخ تلقائي')}: {autoBackups.info.error}</p>}
+                <div className="io-actions" style={{ marginTop: 8 }}>
+                  <button className="ghost sm" disabled={busy} onClick={async () => {
+                    setBusy(true);
+                    const r = await autoBackups.now();
+                    setStatus(r.ok ? tx('Backed up.', 'تم النسخ.') : `${tx('Backup failed', 'فشل النسخ')}: ${r.error}`);
+                    await readAuto(); setBusy(false);
+                  }}>{tx('Back up now', 'انسخ الآن')}</button>
+                  {autoBackups.kind === 'desktop' && <button className="ghost sm" onClick={() => autoBackups.open()}>{tx('Open the folder', 'افتح المجلد')}</button>}
+                </div>
+                {auto.list && auto.list.length > 0 && (
+                  <ul className="auto-backups">
+                    {auto.list.map((b) => (
+                      <li key={b.name}>
+                        <span className="ab-when">{whenOf(b)}{/before-restore/.test(b.name) ? <em> · {tx('before a restore', 'قبل استعادة')}</em> : null}</span>
+                        <span className="ab-size">{b.bytes ? mb(b.bytes) : ''}</span>
+                        <button className="ghost sm" disabled={busy} onClick={async () => {
+                          if (!window.confirm(tx(`Restore the backup from ${whenOf(b)}? It REPLACES what is on this device (the current state is backed up first).`, `استعادة نسخة ${whenOf(b)}؟ سيستبدل هذا ما على الجهاز (مع نسخ الحالة الحالية أولًا).`))) return;
+                          setBusy(true); setStatus(tx('Restoring…', 'جارٍ الاستعادة…'));
+                          const r = await autoBackups.restore(b.name);
+                          setStatus(r.msg); await readAuto(); setBusy(false);
+                        }}>{tx('Restore', 'استعادة')}</button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {auto.list && auto.list.length === 0 && <p className="hint-text" style={{ marginTop: 6 }}>{tx('No automatic backups yet — the first is taken a few seconds after the app opens.', 'لا نسخ تلقائية بعد — تُؤخذ الأولى بعد ثوانٍ من فتح التطبيق.')}</p>}
+              </>)}
               <div className="sect-h" style={{ marginTop: 16 }}><Copy size={13} /> {tx('Save a backup', 'حفظ نسخة احتياطية')}</div>
-              <p className="hint-text" style={{ marginTop: 0 }}>{tx('Downloads a .json file holding your whole planner. Keep it somewhere safe — it is the only copy.', 'ينزّل ملف .json يحتوي مخططك بالكامل. احفظه في مكان آمن — فهو النسخة الوحيدة.')}</p>
+              <p className="hint-text" style={{ marginTop: 0 }}>{tx('Downloads a .json file holding your whole planner. Keep it somewhere off this device — it is the copy that survives losing it.', 'ينزّل ملف .json يحتوي مخططك بالكامل. احفظه خارج هذا الجهاز — فهو النسخة التي تنجو إن فقدته.')}</p>
               <div className="io-actions">
                 <button className="primary" onClick={doDownload} disabled={busy}><Copy size={14} /> {tx('Download backup (.json)', 'تنزيل النسخة (.json)')}</button>
               </div>
@@ -957,7 +1012,10 @@ function TemplateEditor({ tpl, projects, allProjects = [], onChange, onDelete })
     <div className="routine-card">
       <div className="routine-top"><input className="projname" value={tpl.title} onChange={(e) => onChange({ title: e.target.value })} /><button className="mini-del" onClick={onDelete} aria-label="Delete recurring task"><Trash2 size={14} /></button></div>
       <div className="routine-fields">
-        <select value={tpl.block} onChange={(e) => onChange({ block: e.target.value })}>{BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}</select>
+        {/* A start time decides the period (the app sets it when the time is
+            saved), so the picker only speaks for untimed recurring tasks. */}
+        <select value={tpl.block} disabled={!!tpl.start} title={tpl.start ? tx('Set by the start time', 'تحددها ساعة البداية') : undefined}
+          onChange={(e) => onChange({ block: e.target.value })}>{BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}</select>
         <input className="time-input" type="time" value={tpl.start || ''} onChange={(e) => onChange({ start: e.target.value, time: '' })} title={tx('Start (optional)', 'البداية (اختياري)')} />
         <input className="time-input" type="time" value={tpl.end || ''} onChange={(e) => onChange({ end: e.target.value, time: '' })} title={tx('End (optional)', 'النهاية (اختياري)')} />
         <select value={tpl.projectId || ''} onChange={(e) => onChange({ projectId: e.target.value || null })}><option value="">{tx('no label', 'بلا وسم')}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
@@ -1005,6 +1063,13 @@ function TemplateEditor({ tpl, projects, allProjects = [], onChange, onDelete })
                 : tx('Offered when you plan one of these days.', 'تُعرض عند تخطيط أحد هذه الأيام.')}
           </p>
         )}
+        {/* Off by default: most recurring tasks are a menu to plan from, and a
+            planner that fills your day on its own is one you stop trusting.
+            On, it is added once, on the morning its day comes up. */}
+        <label className="toggle routine-auto">
+          <input type="checkbox" checked={!!tpl.autoAdd} onChange={(e) => onChange({ autoAdd: e.target.checked })} />
+          <span>{tx('Add it to my day automatically when it is due', 'أضفها إلى يومي تلقائيًا في يوم استحقاقها')}</span>
+        </label>
       </div>
       {subs.length > 0 && <div className="routine-subs">{subs.map((s, i) => (<span key={i} className="subchip">{s}<button onClick={() => delSub(i)}><X size={11} /></button></span>))}</div>}
       <div className="inline-add"><input value={sub} onChange={(e) => setSub(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addSub()} placeholder={tx('Add a step…', 'أضف خطوة…')} /><button className="ghost sm" onClick={addSub}><Plus size={14} /></button></div>

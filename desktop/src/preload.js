@@ -37,6 +37,16 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
     signOut: () => ipcRenderer.invoke('sync-signout'),
   },
 
+  /* Automatic backups as files in Documents\Rhythm backups. See main.js. */
+  backup: {
+    write: (name, text) => ipcRenderer.invoke('backup-write', name, text),
+    list: () => ipcRenderer.invoke('backup-list'),
+    read: (name) => ipcRenderer.invoke('backup-read', name),
+    remove: (name) => ipcRenderer.invoke('backup-delete', name),
+    open: () => ipcRenderer.invoke('backup-open'),
+    where: () => ipcRenderer.invoke('backup-where'),
+  },
+
   /* Read-only calendar access. Present only on the desktop, which is exactly
      how the planner decides whether to offer real Google sign-in or fall back
      to a feed URL relayed through the server. */

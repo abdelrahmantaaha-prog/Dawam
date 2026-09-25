@@ -107,20 +107,29 @@ function DayColumn({ date, events, tasks, projects, calProjects, onPick, showNow
   );
 }
 
+/* "2 PM", not "2:00 PM": every label is on the hour, and the long form
+   wrapped onto two lines in a phone-width gutter. */
+const hourLabel = (h) => fmtTime(hhmm(h * 60)).replace(/:00(?=\s*[AaPp][Mm])/, '');
 const HourGutter = () => (
   <div className="calv-gutter" style={{ height: px(1440) }}>
     {Array.from({ length: 24 }, (_, h) => (
-      <div key={h} className="calv-hour" style={{ top: px(h * 60) }}>{fmtTime(hhmm(h * 60))}</div>
+      <div key={h} className="calv-hour" style={{ top: px(h * 60) }}>{hourLabel(h)}</div>
     ))}
   </div>
 );
 
-/* Scroll the working day into view rather than opening on midnight. */
-function useScrollToMorning(ref, mode) {
+/* Scroll the working day into view rather than opening on midnight — and,
+   where the week is wider than the screen, sideways to today. */
+function useScrollToMorning(ref, mode, date) {
   useEffect(() => {
-    if (!ref.current || mode === 'month') return;
-    ref.current.scrollTop = px(7 * 60);
-  }, [mode, ref]);
+    const el = ref.current;
+    if (!el || mode === 'month') return;
+    el.scrollTop = px(7 * 60);
+    if (mode === 'week' && el.scrollWidth > el.clientWidth) {
+      const today = el.querySelector('.calv-adcol.today');
+      if (today) today.scrollIntoView({ block: 'nearest', inline: 'center' });
+    }
+  }, [mode, ref, date]);
 }
 
 /* ---- the view ---- */
@@ -131,7 +140,7 @@ export function CalendarView({
   filterBar, eventFilter, onAssign, picked, onPick,
 }) {
   const scroller = useRef(null);
-  useScrollToMorning(scroller, mode);
+  useScrollToMorning(scroller, mode, date && date.getTime());
   /* Filtered once, at the top: the grid, the all-day row, the month cells and
      the totals underneath all read from this, so they cannot disagree about
      what is being shown. */
@@ -216,7 +225,11 @@ export function CalendarView({
           })}
         </div>
       ) : (
-        <>
+        /* One scroller for both directions: the day headers stick to the top
+           and the hour gutter to the side, so on a phone the week can scroll
+           sideways at a readable column width instead of being squeezed to
+           seven 36px slivers. */
+        <div className={`calv-scroll ${mode}`} ref={scroller}>
           <div className="calv-alldays">
             <div className="calv-gutter-h" />
             {days.map((d, i) => {
@@ -228,11 +241,23 @@ export function CalendarView({
                     <span className="calv-dh-n">{d.getDate()}</span>
                   </button>
                   {ad.map((e, j) => <span key={j} className="calv-adchip">{e.summary || tx('(all day)', '(طوال اليوم)')}</span>)}
+                  {/* Untimed tasks have no hour to sit at, so they were not on
+                      this view at all. They line up here, in the order the
+                      sort picker chose. */}
+                  {(() => {
+                    const loose = ((tasksByISO || {})[fmtISO(d)] || []).filter((t) => tStartMin(t) == null);
+                    const cap = mode === 'day' ? 12 : 3;
+                    return (<>
+                      {loose.slice(0, cap).map((t) => (
+                        <span key={t.id} className={`calv-adchip task${t.done ? ' done' : ''}`} title={t.title}>{t.title}</span>
+                      ))}
+                      {loose.length > cap && <span className="calv-more">+{loose.length - cap}</span>}
+                    </>);
+                  })()}
                 </div>
               );
             })}
           </div>
-          <div className="calv-scroll" ref={scroller}>
             <div className="calv-grid">
               <HourGutter />
               {days.map((d, i) => (
@@ -248,8 +273,7 @@ export function CalendarView({
                 />
               ))}
             </div>
-          </div>
-        </>
+        </div>
       )}
 
       {!!totals.length && (

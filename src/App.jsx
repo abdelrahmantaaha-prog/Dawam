@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, AlarmClock, Rows3, Mic, Square, ListChecks, CalendarRange, Gift, Timer, Ban } from 'lucide-react';
-import {brokerFrom, taskShown,taskLocked,taskUntil,spanLength,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,POINTS,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import {brokerFrom, blockForTime,taskUntil,spanLength,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,POINTS,goalWorth,goalCrossed,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook, onStorageHealth, writesFailing, storageStats, storageHeadroom, recheckWrites } from './storage.js';
 import { isDerived } from '../shared/model.js';
 import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken, inAppShell } from './sync.js';
 import { readLedger, balanceOf, award, revoke, spend, penalise, wipe } from './points.js';
+import { backupKind, backupWhere, dailyName, listBackups, openBackupFolder, preRestoreName, readBackup, writeBackup } from './autobackup.js';
 import { takeWidgetAction, updateWidget } from './widget.js';
 import { writeNowFile } from './nowfile.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence, scheduleWakeAlarm, cancelWakeAlarm, pendingWakeAlarm } from './notify.js';
@@ -24,7 +25,7 @@ import { loadCalPrep, setCalPrep, prepFor as prepForEvent, meetingsForProject, i
 import { parseTaskText, describeParse } from './parse.js';
 import { NotesView, NoteEditor } from './notesview.jsx';
 import { FilterBar } from './filterbar.jsx';
-import { EMPTY as EMPTY_FILTER, applyFilter, arrange, isFiltering, matches as filterMatches } from './filters.js';
+import { EMPTY as EMPTY_FILTER, applyFilter, applySort, arrange, isFiltering, matches as filterMatches, sortFor } from './filters.js';
 import { stampWeek, writeTarget } from './weekdoc.js';
 import { loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, isEmptyNote, excerpt as noteExcerpt } from './notes.js';
 import { MeetingSheet } from './meetingsheet.jsx';
@@ -87,7 +88,9 @@ export default function Rhythm() {
   /* The calendar view keeps its own date and mode. Deliberately not the Plan
      page's selection: paging a month around is browsing, and it should not
      drag the day you are actually working on with it. */
-  const [calMode, setCalMode] = useState('week');
+  // A phone opens on one day: seven columns do not fit a 375px screen, and
+  // Week is one tap away (and scrolls sideways there).
+  const [calMode, setCalMode] = useState(() => (typeof window !== 'undefined' && window.innerWidth < 640 ? 'day' : 'week'));
   const [calDate, setCalDate] = useState(() => new Date());
   const [calProjects, setCalProjects] = useState({});
   const [calPrep, setCalPrepMap] = useState({});
@@ -567,6 +570,10 @@ export default function Rhythm() {
     let parsed;
     try { parsed = JSON.parse(text); } catch { return { ok: false, msg: "That isn't valid JSON." }; }
     if (!parsed || parsed.app !== 'rhythm-planner' || !parsed.data) return { ok: false, msg: "This doesn't look like a Rhythm backup." };
+    /* A restore REPLACES the planner, and restoring the wrong file is an
+       easy mistake with no undo — so the planner as it stands is snapshotted
+       first, and shows up in the list of automatic backups to go back to. */
+    try { await writeBackup(preRestoreName(), await buildExport()); } catch { /* the restore still stands on its own */ }
     const d = parsed.data;
     let n = 0;
     for (const [k, v] of Object.entries(d)) {
@@ -589,6 +596,39 @@ export default function Rhythm() {
     const w = await readWeek(fmtISO(wsNew)); adoptWeek(fmtISO(wsNew), w);
     flash(tx('Backup imported.', 'تم استيراد النسخة الاحتياطية.'));
     return { ok: true, msg: tx(`Imported ${n} item${n !== 1 ? 's' : ''}. Your planner has been refreshed.`, `تم استيراد ${n} عنصرًا. تم تحديث مخططك.`) };
+  };
+
+  /* ---- automatic backups (src/autobackup.js) ----
+     Taken when the app opens and then hourly, into today's one file, so the
+     history holds each day's latest state rather than its first minute. On
+     unless switched off in Settings → Backup. A failure is remembered and
+     shown there, never thrown at the person mid-task. */
+  const [autoBackupInfo, setAutoBackupInfo] = useState({ at: null, error: null });
+  const takeAutoBackup = async () => {
+    const r = await writeBackup(dailyName(), await buildExport());
+    setAutoBackupInfo(r.ok ? { at: Date.now(), error: null } : { at: null, error: r.error || 'failed' });
+    return r;
+  };
+  // The timers call through a ref: buildExport reads this render's settings
+  // and recurring tasks, and an hour-old closure would back up an hour-old app.
+  const takeAutoBackupRef = useRef(takeAutoBackup);
+  takeAutoBackupRef.current = takeAutoBackup;
+  const autoBackupOn = settings.autoBackup !== false;
+  useEffect(() => {
+    if (!ready || !autoBackupOn) return undefined;
+    const first = setTimeout(() => { takeAutoBackupRef.current(); }, 8000);   // after boot has settled
+    const every = setInterval(() => { takeAutoBackupRef.current(); }, 60 * 60000);
+    return () => { clearTimeout(first); clearInterval(every); };
+  }, [ready, autoBackupOn]);   // eslint-disable-line
+  const restoreAutoBackup = async (name) => {
+    const text = await readBackup(name);
+    if (!text) return { ok: false, msg: tx('That backup could not be read.', 'تعذّرت قراءة هذه النسخة.') };
+    return applyImport(text);
+  };
+  const autoBackups = {
+    on: autoBackupOn, kind: backupKind(), info: autoBackupInfo,
+    list: listBackups, where: backupWhere, open: openBackupFolder,
+    now: takeAutoBackup, restore: restoreAutoBackup,
   };
 
   /* ---- storage readout ----
@@ -677,12 +717,35 @@ export default function Rhythm() {
     saveKey('planner:settings', n);
     return n;
   });
-  const updProjectItem = (id, patch) => persistProjects((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  const updProjectItem = (id, patch) => {
+    /* A progress entry deleted from the project card takes its points with
+       it, the same way unticking a task does — the ledger should read as
+       though that progress was never logged. */
+    if (patch && Array.isArray(patch.entries)) {
+      const was = (settings.projects || []).find((p) => p.id === id);
+      const keep = new Set(patch.entries.map((e) => e.id));
+      const gone = ((was && was.entries) || []).filter((e) => !keep.has(e.id));
+      if (gone.length) {
+        (async () => {
+          const refs = gone.map((e) => `goal:${id}:${e.id}`);
+          const target = Number(was.target) || 0;
+          if (target > 0 && projectProgress({ entries: patch.entries }) < target) refs.push(`goaldone:${id}`);
+          let n = 0;
+          for (const ref of refs) n += (await revoke(ledgerRef.current, ref)) || 0;
+          if (n) { await refreshLedger(); flash(`−${n}`); }
+        })();
+      }
+    }
+    persistProjects((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  };
   const addProjectItem = () => { const np = newProject(); persistProjects((prev) => [...prev, np]); return np; };
   const delProjectItem = (id) => persistProjects((prev) => prev.filter((p) => p.id !== id));
   const logProgress = (id, amount, note) => {
     const amt = Number(amount); if (!amt) return;
-    persistProjects((prev) => prev.map((p) => (p.id === id ? { ...p, entries: [...(p.entries || []), { id: uid(), date: fmtISO(new Date()), amount: amt, note: note || '' }] } : p)));
+    const entry = { id: uid(), date: fmtISO(new Date()), amount: amt, note: note || '' };
+    const proj = (settings.projects || []).find((p) => p.id === id);
+    persistProjects((prev) => prev.map((p) => (p.id === id ? { ...p, entries: [...(p.entries || []), entry] } : p)));
+    if (proj) awardGoal(proj, entry, projectProgress(proj));
   };
   // Tasks linked to a project via task.projectRef, gathered across every week
   // held in the session cache plus the backlog. Returns concrete refs so the
@@ -922,10 +985,18 @@ export default function Rhythm() {
     // manual order within it is what the drag handles are for.
     ['manual', 'title', 'tag', 'project'],
     { date: (t) => (t.start ? t.start : null), ...sortNames },
-  );
+  // Finished work still sinks under any sort — a sort by tag used to shuffle
+  // ticked-off tasks back in among the live ones. (sort is stable)
+  ).slice().sort((a, b) => a.done - b.done);
+
+  /* A task with a start time lives in the period that time falls in; the
+     period someone picked (or the row they typed into) only counts for
+     untimed work. See blockForTime in core.jsx. */
+  const periodOf = (t, fallback) => blockForTime(t, timings) || vBlock(fallback || t.block);
 
   const addTask = (dayIdx, blockId, title, extra = {}) => {
     if (!title.trim()) return;
+    blockId = periodOf(extra, blockId);
     // The week on SCREEN, not whatever document happens to be in weekRef — see
     // the note by weekShown. Adding a task one frame after changing week used
     // to append it to the previous week's list and save that under this
@@ -970,7 +1041,20 @@ export default function Rhythm() {
     let learned = null;
     const tasks = w.tasks.map((t) => {
       if (t.id !== id) return t;
-      const next = fn(t);
+      let next = fn(t);
+      /* Time decides the period. A new or changed time moves the task to the
+         period it falls in. A task moved to another period by hand, with a
+         time that says otherwise, drops the time instead — the move was the
+         newer decision, and keeping both would leave a 3pm task in Fajr. A
+         vault's window is the feature, so a vault follows its time. */
+      if (next && !next.done) {
+        const retimed = next.start !== t.start || next.time !== t.time;
+        const found = blockForTime(next, timings);
+        if (found && found !== next.block) {
+          if (retimed || hasVault(next) || next.block === t.block) next = { ...next, block: found };
+          else next = { ...next, start: '', end: '', time: '', autoSlot: null };
+        }
+      }
       // Both times present, set by hand (the editor clears autoSlot on manual
       // edits), and actually changed: that is the person stating a duration.
       // Vault windows are excluded — they are availability, not effort.
@@ -1031,7 +1115,7 @@ export default function Rhythm() {
   const addTaskOnDate = async (dateISO, blockId, title, extra = {}) => {
     if (!title || !title.trim()) return;
     await putTaskOnDate(dateISO, {
-      id: uid(), title: title.trim(), day: 0, block: blockId,
+      id: uid(), title: title.trim(), day: 0, block: periodOf(extra, blockId),
       projectId: extra.projectId || null, projectRef: extra.projectRef || null,
       time: extra.time || '', start: extra.start || '', end: extra.end || '',
       templateId: extra.templateId || null, done: false,
@@ -1095,7 +1179,15 @@ export default function Rhythm() {
     if (targetId) { const ti = dest.findIndex((t) => t.id === targetId); if (ti >= 0) idx = ti + (after ? 1 : 0); }
     const ordered = [...dest.slice(0, idx), dragged, ...dest.slice(idx)];
     const orderOf = new Map(ordered.map((t, i) => [t.id, i + 1]));
-    persistWeek({ ...w, tasks: w.tasks.map((t) => (t.id === id ? { ...t, block: blockId, order: orderOf.get(t.id) } : orderOf.has(t.id) ? { ...t, order: orderOf.get(t.id) } : t)) });
+    // Dragged into a period its time is not in: the drag is the newer decision,
+    // so the time goes (same rule as mutateTask). A vault keeps its window.
+    const timeSays = blockForTime(dragged, timings);
+    const moved = (t) => {
+      if (!timeSays || timeSays === blockId) return { ...t, block: blockId };
+      if (hasVault(t)) return { ...t, block: timeSays };
+      return { ...t, block: blockId, start: '', end: '', time: '', autoSlot: null };
+    };
+    persistWeek({ ...w, tasks: w.tasks.map((t) => (t.id === id ? { ...moved(t), order: orderOf.get(t.id) } : orderOf.has(t.id) ? { ...t, order: orderOf.get(t.id) } : t)) });
   };
 
   /* ---- pool (backlog) ops ---- */
@@ -1147,7 +1239,13 @@ export default function Rhythm() {
   // by value (fresh subtask ids via mkSubs in addTask/addPoolItem), so editing a
   // recurring task later never reaches back into tasks you've already added.
   const addTemplate = (tpl) => persistTemplates((prev) => [...prev, { id: uid(), title: tpl.title || tx('New recurring task', 'مهمة متكررة جديدة'), block: vBlock(tpl.block), start: tpl.start || '', end: tpl.end || '', time: '', projectId: tpl.projectId || null, projectRef: tpl.projectRef || null, repeat: normalizeRepeat(tpl.repeat), subtasks: (tpl.subtasks || []).map((s) => (typeof s === 'string' ? s : s.title)) }]);
-  const updTemplate = (id, patch) => persistTemplates((prev) => prev.map((t) => (t.id === id ? { ...t, ...patch } : t)));
+  const updTemplate = (id, patch) => persistTemplates((prev) => prev.map((t) => {
+    if (t.id !== id) return t;
+    const next = { ...t, ...patch };
+    // Same rule as a task: a start time decides the period.
+    const found = blockForTime(next, timings);
+    return found ? { ...next, block: found } : next;
+  }));
   const delTemplate = (id) => persistTemplates((prev) => prev.filter((t) => t.id !== id));
   const templateToDay = (tplId, dayIdx, blockId) => {
     const tpl = templates.find((t) => t.id === tplId); if (!tpl) return;
@@ -1159,6 +1257,57 @@ export default function Rhythm() {
     addPoolItem(tpl.title, { projectId: tpl.projectId, projectRef: tpl.projectRef || null, subtasks: [...(tpl.subtasks || [])] });
     flash(tx('Added to backlog.', 'أُضيفت إلى قائمة الانتظار.'));
   };
+
+  /* Recurring tasks that add themselves (`autoAdd`, a checkbox on the
+     recurring task). On the first moment the app is open on a day the
+     schedule names, the task is put on that day — once. Three guards keep
+     "once" true:
+
+       autoLast   the template remembers the last day it added itself, so
+                  deleting the task you were given does not summon it back
+                  on the next render. It travels with the templates key, so
+                  a second device sees it too once synced.
+       templateId a task from this recurring task already on today (added by
+                  hand, or by the wizard) counts; no duplicate beside it.
+       the pull   like any write nobody asked for, it waits until a synced
+                  device has pulled, so a laptop waking with yesterday's
+                  week cannot push that stale week over the phone's.
+
+     Only today, never back-filled: a day the app was not opened on is gone,
+     and five missed "Water the plants" arriving at once is noise. */
+  const autoTodayISO = ready ? fmtISO(logicalDayMid()) : '';
+  const syncGate = !!(sync.capability && sync.capability.sync && sync.user) && !sync.fresh;
+  const autoBusy = useRef(false);
+  useEffect(() => {
+    if (!ready || syncGate || autoBusy.current) return;
+    const today = parseISO(autoTodayISO);
+    const due = (templates || []).filter((tp) => tp.autoAdd && tp.autoLast !== autoTodayISO && recurDueOn(tp.repeat, today));
+    if (!due.length) return;
+    autoBusy.current = true;
+    (async () => {
+      try {
+        const wsISO = fmtISO(startOfWeek(today, settings.weekStartDay));
+        const dayIdx = Math.round((today - parseISO(wsISO)) / 86400000);
+        const doc = wsISO === displayedISO() ? weekRef.current : await readWeek(wsISO);
+        const have = new Set((doc.tasks || []).filter((t) => t.day === dayIdx && t.templateId).map((t) => t.templateId));
+        const add = due.filter((tp) => !have.has(tp.id)).map((tp) => ({
+          id: uid(), title: tp.title, day: dayIdx,
+          block: blockForTime(tp, todayTimings) || vBlock(tp.block),
+          projectId: tp.projectId || null, projectRef: tp.projectRef || null,
+          time: tp.time || '', start: tp.start || '', end: tp.end || '', templateId: tp.id, done: false,
+          subtasks: mkSubs(tp.subtasks || []), notes: [], order: timeOrder(tp.start) + Date.now() % 1000,
+        }));
+        if (add.length) {
+          await writeWeek(wsISO, { ...doc, tasks: [...(doc.tasks || []), ...add] });
+          flash(add.length === 1
+            ? `${tx('Added for today:', 'أُضيفت لليوم:')} ${add[0].title}`
+            : `${add.length} ${tx('recurring tasks added for today.', 'مهام متكررة أُضيفت لليوم.')}`);
+        }
+        const ids = new Set(due.map((tp) => tp.id));
+        persistTemplates((prev) => prev.map((tp) => (ids.has(tp.id) ? { ...tp, autoLast: autoTodayISO } : tp)));
+      } finally { autoBusy.current = false; }
+    })();
+  }, [ready, syncGate, autoTodayISO, templates]);   // eslint-disable-line
 
   /* ---- points ---- */
   /* The clock the ledger and the overdue scan share. Rebuilt per call rather
@@ -1215,6 +1364,22 @@ export default function Rhythm() {
     const amount = habitWorth(h, iso);
     const e = await award(ledgerRef.current, { iso, ref: `habit:${h.id}:${iso}`, kind: 'habit', amount, title: h.name });
     if (e) { await refreshLedger(); showEarned(amount, false); }
+  };
+  /* Progress toward a project's goal pays by share of the goal (goalWorth in
+     core.jsx), one ledger entry per logged entry so deleting the log revokes
+     exactly what it paid, and a one-off bonus the moment the target is met. */
+  const awardGoal = async (p, entry, before) => {
+    const iso = fmtISO(logicalDayMid());
+    const amount = goalWorth(p, entry.amount, before);
+    let paid = 0;
+    const e = await award(ledgerRef.current, { iso, ref: `goal:${p.id}:${entry.id}`, kind: 'goal', amount, title: `${p.name} +${entry.amount} ${p.unit || ''}`.trim() });
+    if (e) paid += amount;
+    if (goalCrossed(p, entry.amount, before)) {
+      const b = await award(ledgerRef.current, { iso, ref: `goaldone:${p.id}`, kind: 'goal', amount: POINTS.goalDone, title: `${p.name} — ${tx('goal reached', 'تحقق الهدف')}` });
+      if (b) paid += POINTS.goalDone;
+    }
+    // Replaces the caller's "+12 pages" toast with the same line plus what it paid.
+    if (paid) { await refreshLedger(); flash(`${p.name} +${entry.amount} ${p.unit || ''} · +${paid}`.replace(/  +/g, ' ')); }
   };
   // Unticking means "that didn't happen" — the entry goes, rather than being
   // cancelled out by a negative one.
@@ -1305,6 +1470,8 @@ export default function Rhythm() {
      means one thing in this app rather than four. Notes are the exception and
      stay as they are: a notebook has no tag to sort by. */
   const TASK_SORTS = ['manual', 'title', 'tag', 'project'];
+  // A board is one project, so sorting it by project could only ever be a no-op.
+  const BOARD_SORTS = ['manual', 'date', 'title', 'tag'];
 
   const [slotBusy, setSlotBusy] = useState(false);
   // dayIdx is 0-6 within the week on screen; omitted means the selected day.
@@ -1312,7 +1479,11 @@ export default function Rhythm() {
   // out of the closure and call it the answer.
   const structureSelectedDay = async (dayIdxArg) => {
     if (slotBusy) return;
-    const dayIdx = dayIdxArg == null ? selectedDay : dayIdxArg;
+    /* Only a real 0-6 index names a day. The button used to be wired as
+       onClick={structureSelectedDay}, which handed in the click EVENT as the
+       day: no task is on day [object Event], so every press said there was
+       nothing to slot. */
+    const dayIdx = Number.isInteger(dayIdxArg) && dayIdxArg >= 0 && dayIdxArg <= 6 ? dayIdxArg : selectedDay;
     const isToday = sameDay(addDays(weekStart, dayIdx), logicalDayMid());
     const n = new Date(); const nowMin = n.getHours() * 60 + n.getMinutes();
     // Re-running re-flows: anything the last run placed goes back to floating
@@ -1364,7 +1535,7 @@ export default function Rhythm() {
     // The day is planned around what is already spoken for: calendar events
     // as hard walls, and the opening minutes of each prayer block held for
     // the prayer itself.
-    const { slots, unplaced } = structureDay(dayTasks, timings, isToday ? nowMin : null, {
+    const { slots, unplaced, timed } = structureDay(dayTasks, timings, isToday ? nowMin : null, {
       busy: calBusyFor(addDays(weekStart, dayIdx)),
       prayerReserveMin: (settings.calendar || {}).prayerReserveMin ?? 15,
     });
@@ -1381,13 +1552,19 @@ export default function Rhythm() {
           let nx = t;
           if (estMap && estMap.has(t.id)) nx = { ...nx, est: estMap.get(t.id), estSig: taskTextSig(nx) };
           const s = byId.get(t.id);
-          if (s) nx = { ...nx, start: s.start, end: s.end, time: '', autoSlot: s.pinned ? 'end' : 'both' };
+          // The block comes along: work rolled forward from a finished period
+          // now lives in the one it was placed in.
+          if (s) nx = { ...nx, start: s.start, end: s.end, time: '', block: s.block || nx.block, autoSlot: s.pinned ? 'end' : 'both' };
           return nx;
         }),
       });
     }
     if (!slots.length) {
-      flash(unplaced.length ? tx('No room left today for these tasks.', 'لا وقت متبقيًا اليوم لهذه المهام.') : tx('Nothing to slot.', 'لا شيء لجدولته.'));
+      // Say WHY nothing moved. A bare "Nothing to slot" over a day full of
+      // tasks read as the button being broken.
+      flash(unplaced.length ? tx('No room left today for these tasks.', 'لا وقت متبقيًا اليوم لهذه المهام.')
+        : timed ? tx('Every task left on this day already has its own time.', 'كل مهمة متبقية في هذا اليوم لها وقتها بالفعل.')
+        : tx('No unfinished tasks on this day to slot.', 'لا مهام غير منجزة في هذا اليوم لجدولتها.'));
       return;
     }
     // A quiet AI failure looks identical to AI never having run, which reads
@@ -1400,7 +1577,7 @@ export default function Rhythm() {
       : `${slots.length} ${tx('tasks slotted. Follow the clock.', 'مهمة جُدولت. اتبع الساعة.')}${sizedNote}`);
   };
   const clearSlots = (dayIdxArg) => {
-    const dayIdx = dayIdxArg == null ? selectedDay : dayIdxArg;
+    const dayIdx = Number.isInteger(dayIdxArg) && dayIdxArg >= 0 && dayIdxArg <= 6 ? dayIdxArg : selectedDay;
     persistWeek({
       ...week,
       tasks: week.tasks.map((t) => (t.day !== dayIdx || !t.autoSlot ? t
@@ -1965,6 +2142,15 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     })();
     return () => { cancelled = true; };
   }, [ready, view, calMode, calDate, settings.weekStartDay, refresh, localVersion]);
+  /* The calendar drew the filter bar and then handed every task through
+     untouched: filtering by a project hid its meetings but not its tasks,
+     and the sort picker did nothing at all. Timed tasks still sit at their
+     hour on the grid; the order shows in the untimed lists and month cells. */
+  const calTasksShown = useMemo(() => {
+    const out = {};
+    for (const [iso, list] of Object.entries(calTasks)) out[iso] = arrange(list, filter, TASK_SORTS, sortNames);
+    return out;
+  }, [calTasks, filter, settings.labels, settings.projects]);   // eslint-disable-line
 
   /* projectTaskList only sees weeks already in the session cache, which is
      fine for a summary line and wrong for a board — a card in a week nobody
@@ -2943,43 +3129,6 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   }, [ready, nowLocked]);
   useEffect(() => () => { if (lockSupported()) releaseDevice(); }, []);
 
-  /* Mark what the queue has actually put in front of you.
-
-     Only the head of the queue when it is a real turn (not the muted Next
-     look-ahead, which is a preview of a period that has not arrived) and
-     anything inside its own scheduled window. Seeing something under Next is
-     not the same as being asked to do it, and locking it there would freeze
-     the evening's plan at breakfast.
-
-     Written once per task and never again — the guard is the whole reason
-     this can live in an effect that re-runs on every tick without writing to
-     storage on every tick. */
-  const shownIds = [
-    ...(next && next.kind === 'task' && !nextIsLater ? [next.t.id] : []),
-    ...liveNow.map((x) => x.id),
-  ];
-  const shownKey = shownIds.join(',');
-  useEffect(() => {
-    if (!ready || !shownIds.length) return;
-    /* Nobody asked for this write, and it rewrites the WHOLE week with a fresh
-       timestamp. Made on a device that has not pulled since it booted or woke,
-       it was built on hours-old tasks and still won the sync — wiping the
-       newer week from the phone. It waits for the pull; sync.fresh is in the
-       deps so it runs as soon as that lands. */
-    if (!sync.fresh) return;
-    let stop = false;
-    (async () => {
-      const wsISO = fmtISO(startOfWeek(todayMid, settings.weekStartDay));
-      const doc = wsISO === displayedISO() ? weekRef.current : await readWeek(wsISO);
-      const hit = new Set(shownIds);
-      if (!(doc.tasks || []).some((x) => hit.has(x.id) && !x.seenAt)) return;
-      if (stop) return;
-      const at = Date.now();
-      await writeWeek(wsISO, { ...doc, tasks: doc.tasks.map((x) => (hit.has(x.id) && !x.seenAt ? { ...x, seenAt: at } : x)) });
-    })();
-    return () => { stop = true; };
-  }, [ready, shownKey, sync.fresh]);   // eslint-disable-line
-
   /* ---- Android notifications (no-ops in the browser) ----
      Reminders are keyed to today's timed tasks; the ongoing card mirrors the
      Now page. Both are described as plain strings first so the effects only
@@ -3570,10 +3719,10 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
 
         <div className="plan-actions-row">
           <button className="plan-day-btn" onClick={startWizard}><Sparkles size={15} /> {tx('Plan the day', 'خطّط اليوم')}</button>
-          <button className="plan-day-btn slot-btn" onClick={structureSelectedDay} disabled={slotBusy} title={tx('Give every remaining task a strict time slot', 'امنح كل مهمة متبقية وقتًا محددًا')}>
+          <button className="plan-day-btn slot-btn" onClick={() => structureSelectedDay()} disabled={slotBusy} title={tx('Give every remaining task a strict time slot', 'امنح كل مهمة متبقية وقتًا محددًا')}>
             {slotBusy ? <Loader2 size={15} className="spin" /> : <Rows3 size={15} />} {slotBusy ? tx('Sizing…', 'جارٍ التقدير…') : tx('Slot the day', 'جدول اليوم')}
           </button>
-          {dayHasSlots && <button className="ghost sm" onClick={clearSlots}><X size={13} /> {tx('Clear slots', 'إزالة الجدولة')}</button>}
+          {dayHasSlots && <button className="ghost sm" onClick={() => clearSlots()}><X size={13} /> {tx('Clear slots', 'إزالة الجدولة')}</button>}
         </div>
 
         {/* Timed meetings and due-today cards live INSIDE the timeline now.
@@ -3610,7 +3759,6 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 onPrayer={() => togglePrayer(b.id, selectedDate)}
                 onToggle={toggleDone} onToggleSub={toggleSub} onOpen={setEditing}
                 projectById={projectById}
-                onLockedDrag={() => flash(tx('It has already come up in Now — finish it or delete it.', 'ظهرت بالفعل في «الآن» — أنجزها أو احذفها.'))}
                 onOpenSpan={(tk) => openProjectTask(tk.__spanHome)}
                 onAdd={(title) => addParsedTask(title, { blockId: b.id })}
                 parseHint={parseHint}
@@ -3699,7 +3847,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           onMode={setCalMode}
           onDate={setCalDate}
           events={calInstances}
-          tasksByISO={calTasks}
+          tasksByISO={calTasksShown}
           projects={settings.projects || []}
           calProjects={calProjects}
           weekStartDay={settings.weekStartDay}
@@ -3722,7 +3870,10 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             project={proj}
             cards={projectTaskList(proj.id).tasks}
             labels={settings.labels || []}
-            filterBar={filterBar(['manual', 'date', ...TASK_SORTS.filter((s) => s !== 'manual')], true)}
+            filterBar={filterBar(BOARD_SORTS, true)}
+            /* The sort picker was drawn here and never read — choosing Tag
+               changed nothing. The board orders each column by it now. */
+            sortCards={(list) => applySort(list, sortFor(filter.sort, BOARD_SORTS), { date: (c) => (c.date ? new Date(c.date).getTime() : null), ...sortNames })}
             meetings={meetingsForProject(calInstances, calProjects, proj.id)}
             calDone={meetingDone}
             prepFor={(ev) => prepForEvent(calPrep, ev)}
@@ -3856,7 +4007,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {showSettings && (
         <SettingsPanel settings={settings} onChange={persistSettings} onLang={changeLang}
           templates={templates} onAddTemplate={addTemplate} onUpdTemplate={updTemplate} onDelTemplate={delTemplate}
-          onExport={buildExport} onImport={applyImport} onReadStorage={readStorage} onFreeSpace={freeSpace}
+          onExport={buildExport} onImport={applyImport} onReadStorage={readStorage} onFreeSpace={freeSpace} autoBackups={autoBackups}
           onSetPin={setPin}
           sync={{ ...sync, linkWithToken, mintPhoneCode, isLinkedDevice: !!deviceToken(), inAppShell: inAppShell() }}
           notify={notifyState} onEnableNotify={enableNotify} onTestNotify={testNotify} onRecheck={probeNotify}

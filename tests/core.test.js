@@ -6,6 +6,7 @@ import {
   fmtISO, addDays, startOfWeek, DEFAULT_TIMINGS, migrateSettings, inWindow,
   hasVault, vaultWindowed, vaultUnlocked, pushToToday, structureDay, estimateMinutes, taskTextSig, POINTS, autoWorth, taskWorth,
   shares, subtaskWorth, latePay, habitLevel, habitMultiplier, habitWorth,
+  blockForTime, goalWorth, goalCrossed, slotPassed,
 } from '../src/core.jsx';
 
 const T = DEFAULT_TIMINGS; // Fajr 04:15, Sunrise 05:50, Dhuhr 12:55, Asr 16:30, Maghrib 19:45, Isha 21:15
@@ -407,9 +408,27 @@ describe('structureDay — strict slots from what is logged', () => {
     expect(slotOf(r, 'a')).toMatchObject({ start: '09:00', end: '09:25' });
   });
 
-  it('skips blocks that are already over — those tasks belong to Overdue', () => {
-    const r = structureDay([mk('a', 'fajr')], T, min(9, 0));
+  it('rolls untimed work from a period that is over into the time left', () => {
+    // Reported as "every time I press Slot it says nothing to slot": tasks
+    // default to Morning, and after Dhuhr they used to be skipped in silence.
+    const r = structureDay([mk('a', 'fajr'), mk('b', 'morning')], T, min(14, 0));
+    expect(slotOf(r, 'a')).toMatchObject({ start: '14:00', end: '14:25', block: 'dhuhr' });
+    expect(slotOf(r, 'b')).toMatchObject({ start: '14:25', block: 'dhuhr' });
+    expect(r.unplaced).toEqual([]);
+  });
+
+  it('leaves a timed task in a finished period alone', () => {
+    const r = structureDay([mk('t', 'fajr', { start: '05:00', end: '05:30' })], T, min(14, 0));
     expect(r.slots).toEqual([]);
+    expect(r.unplaced).toEqual([]);
+    expect(r.timed).toBe(1);
+  });
+
+  it('reads a timed task in the period its time falls in, not the one it was filed under', () => {
+    // 15:00 filed under Morning. As a Morning obstacle it lay outside the
+    // window and the start-only pin produced no slot at all.
+    const r = structureDay([mk('pin', 'morning', { start: '15:00' })], T, null);
+    expect(slotOf(r, 'pin')).toMatchObject({ start: '15:00', end: '15:25', block: 'dhuhr', pinned: true });
   });
 
   it('sizes a slot from the subtask count, capped', () => {
@@ -481,6 +500,64 @@ describe('structureDay — strict slots from what is logged', () => {
     const r = structureDay([mk('d', 'morning', { done: true }), mk('a', 'morning')], T, null);
     expect(slotOf(r, 'd')).toBeUndefined();
     expect(slotOf(r, 'a')).toMatchObject({ start: '05:50' });
+  });
+
+  it('fills an earlier hole a big task had to jump past (first fit)', () => {
+    // Asr 16:30–19:45 with a fixed 17:00–18:00. Holes: 30 min, then 105.
+    // 'big' (60) cannot use the first hole; 'small' (25) must, not be pushed
+    // behind 'big' — and nothing is reported as not fitting.
+    const fixed = mk('fixed', 'asr', { start: '17:00', end: '18:00' });
+    const r = structureDay([fixed, mk('big', 'asr', { est: 60 }), mk('small', 'asr')], T, null);
+    expect(slotOf(r, 'big')).toMatchObject({ start: '18:00', end: '19:00' });
+    expect(slotOf(r, 'small')).toMatchObject({ start: '16:30', end: '16:55' });
+    expect(r.unplaced).toEqual([]);
+  });
+});
+
+describe('blockForTime — the time decides the period', () => {
+  it('reads the period off the start time', () => {
+    expect(blockForTime({ start: '15:00' }, T)).toBe('dhuhr');
+    expect(blockForTime({ start: '06:00' }, T)).toBe('morning');
+    expect(blockForTime({ time: '8pm' }, T)).toBe('maghrib');
+  });
+  it('puts the small hours in Isha, like the Fajr-anchored day', () => {
+    expect(blockForTime({ start: '01:30' }, T)).toBe('isha');
+  });
+  it('says nothing for an untimed task', () => {
+    expect(blockForTime({ block: 'asr' }, T)).toBeNull();
+  });
+  it('judges lateness by the period the time is in, not the one it was filed under', () => {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const sinceFajr = (m) => (((m - min(4, 15)) % 1440) + 1440) % 1440;
+    const t = { block: 'morning', start: '15:00' };   // 3pm, filed under Morning
+    // 14:00 — Morning is over, but the task's own period (Dhuhr) is not.
+    expect(slotPassed(t, today, today, { timings: T, sinceFajr, curSinceFajr: sinceFajr(min(14)) })).toBe(false);
+  });
+});
+
+describe('goalWorth — progress toward a project goal pays', () => {
+  const book = { target: 100, unit: 'pages' };
+  it('pays by share of the goal, so units do not matter', () => {
+    expect(goalWorth(book, 10, 0)).toBe(Math.round(POINTS.goal / 10));
+    expect(goalWorth({ target: 10000 }, 1000, 0)).toBe(goalWorth(book, 10, 0));
+  });
+  it('pays at least one point for any real progress', () => {
+    expect(goalWorth({ target: 100000 }, 1, 0)).toBe(1);
+  });
+  it('stops paying past the target', () => {
+    expect(goalWorth(book, 30, 90)).toBe(Math.round(POINTS.goal * 0.1));
+    expect(goalWorth(book, 5, 100)).toBe(0);
+  });
+  it('pays nothing for a correction', () => {
+    expect(goalWorth(book, -5, 50)).toBe(0);
+  });
+  it('pays a flat amount when there is no target to measure against', () => {
+    expect(goalWorth({ target: 0 }, 3, 0)).toBe(POINTS.goalUntargeted);
+  });
+  it('knows the one log that crosses the finish line', () => {
+    expect(goalCrossed(book, 10, 95)).toBe(true);
+    expect(goalCrossed(book, 10, 80)).toBe(false);
+    expect(goalCrossed(book, 10, 100)).toBe(false);
   });
 });
 

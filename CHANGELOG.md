@@ -9,6 +9,55 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+### Fixed
+- **"Slot the day" always said "Nothing to slot."** The button was wired as
+  `onClick={structureSelectedDay}`, and when the function learned to take a day
+  index (so the assistant could slot any day) the click *event* became the
+  day. No task lives on day `[object Event]`, so every press found nothing.
+  "Clear slots" had the same wiring. Both now take only a real 0–6 index.
+  Two quieter causes of the same message went with it: untimed tasks in a
+  period that had already ended today were skipped without a word (and tasks
+  default to Morning), and a start-only task filed under the wrong period was
+  dropped. The message now says *why* when nothing moves.
+- **The slotter left holes empty and called tasks "didn't fit".** It walked the
+  free gaps strictly forward, so a 44-minute task jumping past a 34-minute gap
+  stranded the 33-minute task behind it. Placement is first-fit now.
+- **Sort did nothing on the board and the calendar.** Both drew the sort picker
+  and neither read it; the calendar ignored the filter for tasks as well. The
+  board orders every column by the chosen sort (and no longer offers "Project",
+  which on a one-project board could only be a no-op); the calendar filters and
+  sorts its tasks. Finished tasks stay at the bottom of a period under any sort.
+- **The calendar on a phone.** Seven columns and a 52px gutter in 375px left
+  36px per day — "Write intro" read "Writ", hour labels wrapped onto two lines,
+  and the last column was clipped. Phones open on **Day**; **Week** scrolls
+  sideways at a readable width, lands on today, and keeps the hours pinned; hour
+  labels are "2 PM" rather than "2:00 PM". Untimed tasks, which were not on the
+  day or week grid at all, are listed under each day's header.
+
+### Added
+- **Automatic local backups**, on by default: a daily snapshot, refreshed
+  hourly, 14 kept, restorable from Settings → Backup — as files in
+  `Documents\Rhythm backups` on the desktop, in app storage on the phone, in
+  IndexedDB in a browser. Every restore snapshots the current state first.
+- **The time decides the period.** A task's start time sets its period; the
+  period picker only speaks for untimed tasks. Moving a timed task to another
+  period drops the time. Overdue and slotting read old mismatched tasks by
+  their time, without rewriting them.
+- **Recurring tasks can add themselves** on the days they are due (a checkbox
+  on the recurring task, off by default). Once per day, never back-filled,
+  and a deleted one stays deleted.
+- **Progress toward a project goal earns points**, by share of the goal (the
+  whole goal is 200, crossing the finish line adds 50). Deleting a logged
+  entry takes its points back.
+
+### Removed
+- **Tasks locking once Now had shown them.** A task the queue had presented
+  could no longer be dragged or have its date, period or time edited. It read
+  as the app refusing ordinary edits, not as a commitment device. The
+  `seenAt` stamp that drove it is gone too, and with it the one write the app
+  made on its own every time a device woke. (The fifteen-minute Now lock in
+  Settings is a separate feature and is unchanged.)
+
 ## [3.1] — 2026-09-18
 
 A device that had been asleep could push its stale week over hours of newer

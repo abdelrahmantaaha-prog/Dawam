@@ -97,8 +97,28 @@ The import path accepts every prior backup schema and migrates in place.
 ## Where your data lives — and what that means
 
 - Storage is the browser's `localStorage` for this site, on this device.
-- **Clearing site data / browsing data deletes your planner.** Export a backup
-  file periodically. There is deliberately no cloud copy.
+- **Clearing site data / browsing data deletes your planner.** The app keeps
+  **automatic backups** (below), but a downloaded file is still the only copy
+  that survives losing the device. There is no cloud copy unless you turn on
+  sync.
+
+### Automatic backups
+
+On by default (**Settings → Backup → Automatic backups**). A full snapshot is
+taken a few seconds after the app opens and then hourly, into one file per
+day, so the history holds each day's latest state; the last 14 are kept, and
+any of them can be restored from the same screen. A restore of any kind —
+from this list or from a file — first snapshots the planner as it stands, so
+restoring the wrong one can be undone. `src/autobackup.js`.
+
+Where they go depends on the build, and is never `localStorage` (a copy that
+dies with the original is not a backup):
+
+| Build | Where | Survives |
+|---|---|---|
+| Desktop | `DocumentsRhythm backupshythm-auto-YYYY-MM-DD.json` — plain files, "Open the folder" button | reinstalls, profile resets; copy them anywhere |
+| Android | the app's private files (Capacitor `Directory.Data`) | updates, cleared WebView data — not an uninstall |
+| Browser | IndexedDB `rhythm-backups` | everything but clearing all site data |
 - The PIN is a soft lock (deters casual access). It is not encryption; the data
   in localStorage is readable by anyone with technical access to the device.
 
@@ -322,6 +342,8 @@ src/weekdoc.js      a week document carries its own week (`ws`), and the stamp
                     decides where a write lands — not the caller
 src/nowlock.js      the fifteen-minute lock: is it due, and what clears it
 src/applock.js      lock task mode on Android — the phone half of that lock
+src/autobackup.js   daily snapshots: desktop files, phone app storage, or
+                    IndexedDB — kept 14 deep and restorable from Settings
 src/calendar.js     iCalendar reader: parsing, recurrence, busy intervals
 src/calsync.js      where feed text comes from (shell / direct / relay) and
                     where the expanded events are cached
@@ -462,6 +484,14 @@ one press. Sizing runs in three tiers, best available wins:
 3. **Heuristic** — 25 min + 10 per subtask, capped at 90. The floor the app
    always stands on.
 
+**Untimed work in a period that has already ended today rolls forward** into
+the time that is left, rather than being skipped: tasks default to Morning, and
+the button is most often pressed after it. A timed task is read in the period
+its time falls in (see *The time decides the period*), and holes are filled
+first-fit, so a task that fits in an earlier gap takes it instead of being
+reported as not fitting. When nothing moves, the message says why — every task
+left already has a time, or there is nothing unfinished on that day.
+
 The task editor shows what the next slotting would use (`~40m (remembered)`). Manually timed tasks and vault windows stay put and everything else
 flows around them; on today, packing starts from *now*. A block holding more
 intent than time shrinks every slot in it proportionally (10-minute floor), so
@@ -506,6 +536,26 @@ recurrence that quietly stops appearing is indistinguishable from a deleted one.
 
 Recurring tasks also carry a project now, and hand it to every task they create.
 
+**Add it automatically** (a checkbox on the recurring task, off by default)
+puts the task on the day by itself the first time the app is open on a day its
+schedule names — once. The recurring task remembers the day it last added
+itself (`autoLast`, synced with the rest), so deleting the task you were given
+does not summon it back; a task from the same recurring task already on that
+day counts; and on a synced device it waits for the first pull, like every
+write nobody tapped for. Only today is ever filled — a day the app was not
+opened on is not back-filled.
+
+## The time decides the period
+
+A task with a start time lives in the period that time falls in. Setting or
+changing a time moves it there; the period picker in the editor steps aside
+("Block · from the time") and only speaks for untimed tasks. Moving a timed
+task to another period by hand — dragging it, or through the assistant — drops
+the time instead, since the move was the newer decision; a vault keeps its
+window and so keeps its period. Lateness and slotting read a timed task's
+period from its time too, so older tasks filed under the wrong period behave
+correctly without being rewritten.
+
 ## Projects that ask for their share of the day
 
 A project with a number on it (**Projects → Remind me to work on this**) can
@@ -528,23 +578,6 @@ it get the time I promised it". Measured rounds count towards it, per date, so
 a target on something you return to all week means something on each of those
 days. Minutes are banked when a round ends whether or not the task is ticked
 off — work that is never really "done" is exactly the case a target is for.
-
-## The queue does not negotiate
-
-A task the Now queue has actually presented — offered as the thing to do now,
-not merely listed under **Next** — stops being movable. Its grip becomes a
-lock, and its date, period and times freeze in the editor.
-
-The one-thing-at-a-time design makes rearranging Plan feel free: drag the task
-you do not want below the next one and the queue obligingly hands you something
-easier. Four of those and the day has been renegotiated into whatever was most
-comfortable, with no moment where you noticed you were doing it.
-
-Two answers remain: do it, or **delete** it. Deleting stays available on
-purpose — the point is not to trap you with a task that turned out to be wrong,
-it is to make dropping it a decision with a name rather than a drag that leaves
-it looking planned. Ticking it off releases every field again, so undoing a
-mis-tap does not leave it frozen.
 
 ## The Now lock
 
@@ -615,6 +648,17 @@ unclaimed.
 > on the next release and could not be published. Lock task mode is stronger
 > for this purpose anyway: it does not block one screen of Settings, it blocks
 > leaving Rhythm at all.
+
+## Progress toward a project goal pays
+
+Logging progress on a project with a target ("+12 pages") pays by **share of
+the goal**, not by the unit: the whole goal is worth 200 points, so 12 of 100
+pages pays 24 and 12 of 400 pays 6. Units differ too much to pay per unit —
+pages, chapters and words are all an evening. Only progress up to the target
+counts, crossing it pays a one-off 50, and a project with no numeric target
+pays a flat 5 per log. Deleting a logged entry takes back exactly what it paid
+(and the finish-line bonus, if the total falls back under the target) — the
+same rule as unticking a task. `goalWorth` in `core.jsx`.
 
 ## Points can go down
 

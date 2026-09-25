@@ -322,7 +322,7 @@ export function useSync({ localVersion, onApplied, loaded }) {
   const [lastSync, setLastSync] = useState(null);
   const [error, setError] = useState(null);
   /* "Has this device seen the server since it last woke?" Automatic writes —
-     ones nobody tapped for, like the Now queue's seenAt stamp — wait on this.
+     ones nobody tapped for, like a recurring task adding itself — wait on this.
      They fire the moment a device boots or wakes, before its first pull, and
      used to push a stale week over hours of newer edits from the phone. */
   const [fresh, setFresh] = useState(false);

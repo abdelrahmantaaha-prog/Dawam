@@ -709,6 +709,53 @@ if (!app.requestSingleInstanceLock()) {
        The laptop opens by naming what you are about to do, and resting is one
        of the things you can name — the focus page starts rounds on rewards. */
 
+    /* ---- automatic local backups ----
+       The planner's own storage is a browser profile in AppData, which is
+       exactly what a reinstall, a profile reset or a bad sync takes with it.
+       So the daily snapshots land as ordinary files in Documents, where a
+       person can see them, copy them, and restore one on another machine.
+       Names are checked against one pattern so the renderer can never read or
+       write outside the folder. */
+    const backupDir = () => path.join(app.getPath('documents'), 'Rhythm backups');
+    const backupName = (n) => (/^rhythm-[\w.-]+\.json$/.test(String(n)) ? String(n) : null);
+    ipcMain.handle('backup-write', async (_e, name, text) => {
+      const n = backupName(name);
+      if (!n || typeof text !== 'string') return { ok: false, error: 'bad-name' };
+      try {
+        await fs.promises.mkdir(backupDir(), { recursive: true });
+        const file = path.join(backupDir(), n);
+        await fs.promises.writeFile(file + '.part', text, 'utf8');
+        await fs.promises.rename(file + '.part', file); // never leave a half-written backup
+        return { ok: true, path: file };
+      } catch (err) { return { ok: false, error: String(err && err.message || err) }; }
+    });
+    ipcMain.handle('backup-list', async () => {
+      try {
+        const names = (await fs.promises.readdir(backupDir())).filter(backupName);
+        const out = [];
+        for (const n of names) {
+          const st = await fs.promises.stat(path.join(backupDir(), n));
+          out.push({ name: n, at: st.mtimeMs, bytes: st.size });
+        }
+        return out;
+      } catch { return []; }
+    });
+    ipcMain.handle('backup-read', async (_e, name) => {
+      const n = backupName(name);
+      if (!n) return null;
+      try { return await fs.promises.readFile(path.join(backupDir(), n), 'utf8'); } catch { return null; }
+    });
+    ipcMain.handle('backup-delete', async (_e, name) => {
+      const n = backupName(name);
+      if (!n) return false;
+      try { await fs.promises.unlink(path.join(backupDir(), n)); return true; } catch { return false; }
+    });
+    ipcMain.handle('backup-open', async () => {
+      await fs.promises.mkdir(backupDir(), { recursive: true }).catch(() => {});
+      return shell.openPath(backupDir());
+    });
+    ipcMain.handle('backup-where', () => backupDir());
+
     /* ---- account sync ----
        The planner runs on rhythm://app, which is not the deployment's origin,
        so its own fetch() could never carry the session cookie (SameSite) and

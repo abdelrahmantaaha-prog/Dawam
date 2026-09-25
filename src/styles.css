@@ -327,6 +327,13 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .times-grid input{border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--surface);font-variant-numeric:tabular-nums}
 .hint-text{font-size:11.5px;color:var(--faint);margin:8px 0 0;line-height:1.4}
 .io-actions{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:8px}
+/* Automatic backups, newest first: when, size, restore. */
+.auto-backups{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;max-height:240px;overflow-y:auto}
+.auto-backups li{display:flex;align-items:center;gap:10px;padding:6px 8px 6px 11px;border:1px solid var(--line);border-radius:10px;background:var(--panel)}
+.auto-backups .ab-when{flex:1;min-width:0;font-size:12.5px;font-weight:700;color:var(--ink);font-variant-numeric:tabular-nums}
+.auto-backups .ab-when em{font-style:normal;font-weight:600;color:var(--muted)}
+.auto-backups .ab-size{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.routine-auto{margin-top:4px;font-size:12.5px}
 .drive-box{border:1px solid var(--line);border-radius:11px;padding:11px 12px;background:var(--surface)}
 .drive-title{font-size:13px;font-weight:700;color:var(--ink);margin-bottom:5px}
 .drive-box code{font-family:ui-monospace,Menlo,monospace;font-size:11px;background:var(--soft);padding:1px 5px;border-radius:4px}
@@ -340,6 +347,7 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .routine-card{border:1px solid var(--line);border-radius:11px;padding:11px;margin-bottom:10px;background:var(--surface)}
 .routine-top{display:flex;align-items:center;gap:8px;margin-bottom:9px}
 .routine-fields{display:grid;grid-template-columns:1.1fr .8fr 1fr;gap:7px;margin-bottom:9px}
+.routine-fields > *{min-width:0}
 .routine-subs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
 .subchip{display:inline-flex;align-items:center;gap:5px;font-size:12px;background:var(--soft);padding:3px 5px 3px 9px;border-radius:20px;color:var(--ink)}
 .subchip button{background:none;border:none;cursor:pointer;color:var(--faint);display:grid;place-items:center;padding:0}.subchip button:hover{color:#B23A3A}
@@ -1317,8 +1325,11 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .calv-title{font-size:15px;font-weight:800;color:var(--ink);min-width:150px;text-align:center}
 .calv-modes{flex-shrink:0}
 
-.calv-alldays{display:flex;border-bottom:1px solid var(--line)}
-.calv-gutter-h{width:52px;flex-shrink:0}
+/* The header row and the hour gutter live inside the one scroller and stick
+   to its top and side, so the grid can scroll both ways on a phone. Sticky
+   things need an opaque background or the grid shows through them. */
+.calv-alldays{display:flex;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:6;background:var(--panel)}
+.calv-gutter-h{width:52px;flex-shrink:0;position:sticky;inset-inline-start:0;z-index:7;background:var(--panel)}
 .calv-adcol{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;padding:6px 4px;border-inline-start:1px solid var(--line)}
 .calv-adcol.today{background:var(--soft)}
 .calv-dayhead{display:flex;flex-direction:column;align-items:center;gap:1px;background:none;border:0;cursor:pointer;color:inherit;font-family:inherit}
@@ -1326,11 +1337,13 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .calv-dh-n{font-size:16px;font-weight:800;color:var(--ink)}
 .calv-adcol.today .calv-dh-n{color:var(--verdigris)}
 .calv-adchip{font-size:10.5px;padding:2px 5px;border-radius:6px;background:var(--soft);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.calv-adchip.task{background:var(--panel);color:var(--ink);border:1px dashed var(--line);font-weight:600}
+.calv-adchip.task.done{opacity:.55;text-decoration:line-through}
 
-.calv-scroll{overflow-y:auto;overflow-x:hidden;max-height:62vh;border-radius:0 0 12px 12px}
+.calv-scroll{overflow:auto;max-height:62vh;border-radius:12px;background:var(--panel);overscroll-behavior:contain}
 .calv-grid{display:flex;position:relative}
-.calv-gutter{width:52px;flex-shrink:0;position:relative}
-.calv-hour{position:absolute;inset-inline-end:6px;transform:translateY(-50%);font-size:10px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
+.calv-gutter{width:52px;flex-shrink:0;position:sticky;inset-inline-start:0;z-index:5;background:var(--panel)}
+.calv-hour{position:absolute;inset-inline-end:6px;white-space:nowrap;transform:translateY(-50%);font-size:10px;font-weight:700;color:var(--muted);font-variant-numeric:tabular-nums}
 .calv-col{flex:1;min-width:0;position:relative;border-inline-start:1px solid var(--line)}
 .calv-hourline{position:absolute;inset-inline:0;border-top:1px solid var(--line);opacity:.55}
 .calv-now{position:absolute;inset-inline:0;border-top:2px solid #9C4221;z-index:3}
@@ -1368,7 +1381,14 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .calv-pick.on{border-color:var(--verdigris);background:var(--soft)}
 
 @media (max-width:640px){
-  .calv-scroll{max-height:56vh}
+  .calv-scroll{max-height:calc(100dvh - 330px);min-height:320px}
+  .calv-gutter,.calv-gutter-h{width:40px}
+  .calv-hour{inset-inline-end:4px;font-size:9.5px}
+  /* A week on a phone scrolls sideways at a width a title can be read in,
+     rather than squeezing seven columns into 330px. */
+  .calv-scroll.week .calv-alldays,.calv-scroll.week .calv-grid{min-width:calc(40px + 7 * 92px)}
+  .calv-head{gap:8px}
+  .calv-nav{flex-wrap:wrap}
   .calv-cell{min-height:64px}
   .calv-chip{font-size:9px}
   .calv-title{min-width:110px;font-size:13px}
@@ -1564,16 +1584,6 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .tpl-when{display:inline-flex;align-items:center;gap:3px;font-size:9.5px;font-weight:800;letter-spacing:.03em;
   color:var(--muted);background:var(--soft);border-radius:99px;padding:1px 6px;white-space:nowrap}
 .rhythm.dark .rday,.rhythm.dark .rdate{background:var(--panel)}
-
-/* ---- a task the Now queue has already presented ---- */
-/* Two answers left: do it, or delete it. The lock in place of the grip says
-   so before a drag is attempted, rather than a drag that silently does
-   nothing — which reads as a broken app rather than a deliberate rule. */
-.task.locked{border-inline-start:3px solid var(--faint);padding-inline-start:7px;border-radius:3px}
-.locked-grip{border:none;background:none;padding:0;cursor:pointer;color:var(--faint);display:inline-flex;align-items:center}
-.locked-grip:hover{color:var(--muted)}
-.edit-locked{display:inline-flex;align-items:center;gap:4px;margin-inline-start:auto;font-size:10px;font-weight:800;
-  letter-spacing:.4px;text-transform:uppercase;color:var(--muted)}
 
 /* ---- the fifteen-minute lock ---- */
 /* Above everything, including the bottom nav — which every other modal

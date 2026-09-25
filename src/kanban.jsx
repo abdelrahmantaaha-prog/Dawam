@@ -145,7 +145,7 @@ function ColumnEditor({ columns, onColumns, onClose }) {
 }
 
 export function KanbanBoard({
-  project, cards, labels = [], filterBar, cardFilter,
+  project, cards, labels = [], filterBar, cardFilter, sortCards,
   meetings = [], calDone, prepFor, onOpenMeeting, onToggleMeetingDone,
   onMove, onOpenTask, onBack, onAddTask, onColumns,
 }) {
@@ -158,7 +158,9 @@ export function KanbanBoard({
      the one project, so filtering by project would either change nothing or
      empty the board you deliberately opened. */
   const shown = cardFilter ? (cards || []).filter(cardFilter) : (cards || []);
-  const groups = groupByColumn(shown, columns);
+  // Sorted before grouping: grouping keeps order, so every column comes out
+  // in the chosen order without sorting each one separately.
+  const groups = groupByColumn(sortCards ? sortCards(shown) : shown, columns);
 
   const drop = (col) => {
     setOver(null);
