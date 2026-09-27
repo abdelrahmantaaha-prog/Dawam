@@ -12,7 +12,8 @@ import { isNative as nativeShell, ensurePermission, permissionState, pendingCoun
 import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, describeProposal, parseAssistantReply, parseEstimates, callAssistant, seriesDates } from './assistant.js';
 import { useDictation } from './dictation.js';
 import { loadDurations, durationFor, rememberDuration } from './durations.js';
-import { FocusView, isDesktop, useFocusLive, useRoundEnded } from './focus.jsx';
+import { FocusView, isDesktop, useFocusLive, useFocusModes, useRoundEnded } from './focus.jsx';
+import { focusModeFor, modeKey } from './focusmode.js';
 import { loadFeeds, saveFeeds, refreshAll, loadInstances, busyOn, eventsOn } from './calsync.js';
 import { calKey, loadCalDone, toggleCalDone, pruneCalDone } from './caldone.js';
 import { DayEvents } from './calview.jsx';
@@ -75,6 +76,8 @@ export default function Rhythm() {
   // raises the window when a round linked to a task finishes, so the question
   // lands in front of the person while the answer still means something.
   const [pendingRound, setPendingRound] = useState(null);
+  // The shell's focus modes (desktop only) — a task can start in one.
+  const focusModes = useFocusModes();
   /* Read-only calendars. `calFeeds` is the person's configuration and syncs;
      `calInstances` is the expanded events, rebuilt from the device-local
      cache. `calReport` is per-feed so a calendar that quietly stopped
@@ -1247,7 +1250,7 @@ export default function Rhythm() {
   // A recurring task is only ever a *definition*. Applying it copies everything
   // by value (fresh subtask ids via mkSubs in addTask/addPoolItem), so editing a
   // recurring task later never reaches back into tasks you've already added.
-  const addTemplate = (tpl) => persistTemplates((prev) => [...prev, { id: uid(), title: tpl.title || tx('New recurring task', 'مهمة متكررة جديدة'), block: vBlock(tpl.block), start: tpl.start || '', end: tpl.end || '', time: '', projectId: tpl.projectId || null, projectRef: tpl.projectRef || null, repeat: normalizeRepeat(tpl.repeat), subtasks: (tpl.subtasks || []).map((s) => (typeof s === 'string' ? s : s.title)) }]);
+  const addTemplate = (tpl) => persistTemplates((prev) => [...prev, { id: uid(), title: tpl.title || tx('New recurring task', 'مهمة متكررة جديدة'), block: vBlock(tpl.block), start: tpl.start || '', end: tpl.end || '', time: '', projectId: tpl.projectId || null, projectRef: tpl.projectRef || null, ...(taskDuration(tpl) != null ? { duration: taskDuration(tpl) } : {}), repeat: normalizeRepeat(tpl.repeat), subtasks: (tpl.subtasks || []).map((s) => (typeof s === 'string' ? s : s.title)) }]);
   const updTemplate = (id, patch) => persistTemplates((prev) => prev.map((t) => {
     if (t.id !== id) return t;
     const next = { ...t, ...patch };
@@ -1259,11 +1262,11 @@ export default function Rhythm() {
   const templateToDay = (tplId, dayIdx, blockId) => {
     const tpl = templates.find((t) => t.id === tplId); if (!tpl) return;
     // clone subtasks (strings) so the created task shares nothing with the definition
-    addTask(dayIdx, blockId || tpl.block, tpl.title, { projectId: tpl.projectId, projectRef: tpl.projectRef || null, start: tpl.start || '', end: tpl.end || '', time: tpl.time || '', templateId: tpl.id, subtasks: [...(tpl.subtasks || [])] });
+    addTask(dayIdx, blockId || tpl.block, tpl.title, { projectId: tpl.projectId, projectRef: tpl.projectRef || null, duration: taskDuration(tpl), start: tpl.start || '', end: tpl.end || '', time: tpl.time || '', templateId: tpl.id, subtasks: [...(tpl.subtasks || [])] });
   };
   const templateToPool = (tplId) => {
     const tpl = templates.find((t) => t.id === tplId); if (!tpl) return;
-    addPoolItem(tpl.title, { projectId: tpl.projectId, projectRef: tpl.projectRef || null, subtasks: [...(tpl.subtasks || [])] });
+    addPoolItem(tpl.title, { projectId: tpl.projectId, projectRef: tpl.projectRef || null, duration: taskDuration(tpl), subtasks: [...(tpl.subtasks || [])] });
     flash(tx('Added to backlog.', 'أُضيفت إلى قائمة الانتظار.'));
   };
 
@@ -1304,6 +1307,7 @@ export default function Rhythm() {
           block: blockForTime(tp, todayTimings) || vBlock(tp.block),
           projectId: tp.projectId || null, projectRef: initialProject(tp.projectRef, tp.projectId, settingsRef.current.labels, settingsRef.current.projects),
           time: tp.time || '', start: tp.start || '', end: tp.end || '', templateId: tp.id, done: false,
+          ...(taskDuration(tp) != null ? { duration: taskDuration(tp) } : {}),
           subtasks: mkSubs(tp.subtasks || []), notes: [], order: timeOrder(tp.start) + Date.now() % 1000,
         }));
         if (add.length) {
@@ -1778,8 +1782,12 @@ export default function Rhythm() {
       // Habits come through here too, and a habit id is not a task id — only
       // pass one the planner can actually tick off afterwards.
       const known = (weekRef.current.tasks || []).some((x) => x.id === task.id);
-      window.rhythmFocus.startWork({ task: task.title || 'Focus', workMin: mins, allowed: [], taskId: known ? task.id : null,
-        projectId: known ? projectOfTask(task, settings.labels, settings.projects) : null });
+      // Its remembered focus mode comes along — the allow list and learned
+      // filters, not the length: the length was just chosen here.
+      const mode = known ? focusModeFor(task, settings.labels, settings.projects, focusModes) : null;
+      const tpl = mode ? focusModes.find((m) => modeKey(m.id) === mode.id) : null;
+      window.rhythmFocus.startWork({ task: task.title || 'Focus', workMin: mins, allowed: (tpl && tpl.allowed) || [], taskId: known ? task.id : null,
+        templateId: tpl ? tpl.id : null, projectId: known ? projectOfTask(task, settings.labels, settings.projects) : null });
       setView('focus');
       return;
     }
@@ -2396,7 +2404,17 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const focusTasks = [
     ...nowList
       .filter((t) => !t.done && !hasVault(t))
-      .map((t) => ({ id: t.id, title: t.title, minutes: spanOf(t) || taskDuration(t) || durationFor(t.title) || null, when: timeLabel(t), project: projectOfTask(t, settings.labels, settings.projects) })),
+      .map((t) => {
+        const project = projectOfTask(t, settings.labels, settings.projects);
+        const label = labelById(t.projectId);
+        return {
+          id: t.id, title: t.title, minutes: spanOf(t) || taskDuration(t) || durationFor(t.title) || null, when: timeLabel(t),
+          project, projectName: (projectById(project) || {}).name || '',
+          labelId: label ? label.id : null, labelName: label ? label.name : '',
+          // The focus mode it starts with — its own, its tag's or its project's.
+          mode: focusModeFor(t, settings.labels, settings.projects, focusModes),
+        };
+      }),
     // Meetings still ahead or running: a round sized to what remains of them.
     ...timedToday
       .filter((m) => !m.done && m.endMs > Date.now())
@@ -2434,6 +2452,22 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     }
   };
   const focusLearn = (title, minutes) => { rememberDuration(title, minutes, 'kept'); };
+  /* "Load this mode automatically for…" on the focus page. Remembered where
+     the person pointed: on the task, on its tag, or on its project — a null
+     mode forgets it at that level. See src/focusmode.js. */
+  const rememberFocusMode = ({ kind, task, modeId }) => {
+    const id = modeKey(modeId);
+    if (kind === 'task' && task) {
+      if ((weekRef.current.tasks || []).some((x) => x.id === task.id)) mutateTask(task.id, (x) => ({ ...x, focusMode: id }));
+    } else if (kind === 'tag' && task && task.labelId) {
+      setSettings((prev) => { const n = { ...prev, labels: (prev.labels || []).map((l) => (l.id === task.labelId ? { ...l, focusMode: id } : l)) }; saveKey('planner:settings', n); return n; });
+    } else if (kind === 'project' && task && task.project) {
+      persistProjects((prev) => prev.map((p) => (p.id === task.project ? { ...p, focusMode: id } : p)));
+    } else return;
+    flash(id ? tx('Focus mode remembered.', 'حُفظ نمط التركيز.') : tx('Focus mode forgotten.', 'أُزيل نمط التركيز.'));
+  };
+  // The planner's day, Fajr to Fajr, for anything the focus page files by day.
+  const focusDayISO = (ms) => fmtISO(logicalDayMid(ms));
   /* The same minutes, tallied against a project (src/projectfocus.js). The
      round names its project when it was started — picked on the focus page,
      or carried from the task — and a round from an older shell that does not
@@ -2746,7 +2780,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         // Copied by value, exactly as templateToDay does — a recurring task is
         // a definition, and editing it later must not reach into what it made.
         await addTaskOnDate(p.date, p.block || tpl.block, tpl.title, {
-          projectId: tpl.projectId, start: tpl.start || '', end: tpl.end || '', time: tpl.time || '',
+          projectId: tpl.projectId, projectRef: tpl.projectRef || null, duration: taskDuration(tpl),
+          start: tpl.start || '', end: tpl.end || '', time: tpl.time || '',
           templateId: tpl.id, subtasks: [...(tpl.subtasks || [])],
         });
         return true;
@@ -4016,14 +4051,14 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       )}
 
       {editingTask && (
-        <TaskEditor task={editingTask} projects={settings.labels} allProjects={settings.projects} weekStart={weekStart}
+        <TaskEditor task={editingTask} projects={settings.labels} allProjects={settings.projects} weekStart={weekStart} focusModes={focusModes}
           dateISO={fmtISO(addDays(weekStart, editingTask.day))}
           todayISO={fmtISO(todayMid)}
           vaultOpen={vaultUnlocked(editingTask, curMin)}
           onMoveDate={(iso) => moveTaskToDate(editingTask.id, iso)}
           onClose={() => setEditing(null)} onChange={(fn) => mutateTask(editingTask.id, fn)}
           onDelete={() => removeTask(editingTask.id)} onToPool={() => { taskToPool(editingTask.id); setEditing(null); }}
-          onSaveTemplate={() => { addTemplate({ title: editingTask.title, block: editingTask.block, time: editingTask.time, projectId: editingTask.projectId, subtasks: editingTask.subtasks.map((s) => s.title) }); flash(tx('Saved as a recurring task.', 'حُفظت كمهمة متكررة.')); }}
+          onSaveTemplate={() => { addTemplate({ title: editingTask.title, block: editingTask.block, time: editingTask.time, projectId: editingTask.projectId, projectRef: editingTask.projectRef || null, duration: taskDuration(editingTask), subtasks: editingTask.subtasks.map((s) => s.title) }); flash(tx('Saved as a recurring task.', 'حُفظت كمهمة متكررة.')); }}
           onFocus={(mins, untilEnd) => { startFocus(editingTask, mins, untilEnd); setEditing(null); }}
           notebooks={notebooksFor(editingTask.id)}
           onOpenNotebook={setOpenNote}
@@ -4034,7 +4069,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           onClose={() => setEditingPool(null)} onChange={(fn) => mutatePoolItem(editingPoolItem.id, fn)}
           onDelete={() => removePoolItem(editingPoolItem.id)}
           onToDay={() => { setEditingPool(null); setPlacer({ kind: 'pool', id: editingPoolItem.id }); }}
-          onSaveTemplate={() => { addTemplate({ title: editingPoolItem.title, block: 'morning', projectId: editingPoolItem.projectId, subtasks: editingPoolItem.subtasks.map((s) => s.title) }); flash(tx('Saved as a recurring task.', 'حُفظت كمهمة متكررة.')); }}
+          onSaveTemplate={() => { addTemplate({ title: editingPoolItem.title, block: 'morning', projectId: editingPoolItem.projectId, projectRef: editingPoolItem.projectRef || null, duration: taskDuration(editingPoolItem), subtasks: editingPoolItem.subtasks.map((s) => s.title) }); flash(tx('Saved as a recurring task.', 'حُفظت كمهمة متكررة.')); }}
           notebooks={notebooksFor(editingPoolItem.id)}
           onOpenNotebook={setOpenNote}
           onNewNotebook={() => createNote({ taskId: editingPoolItem.id })} />
@@ -4303,6 +4338,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           onDismissRound={() => setPendingRound(null)}
           onMarkTaskDone={focusMarkDone}
           onLearnDuration={focusLearn}
+          onRememberMode={rememberFocusMode}
+          dayISO={focusDayISO}
+          tallyProjects={settings.projects || []}
         />
       )}
 

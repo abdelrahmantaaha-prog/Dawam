@@ -9,6 +9,40 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## [3.4] — 2026-09-27
+
+Tasks start in their own focus mode, the focus page shows every project's
+time day by day, and recurring and backlog tasks carry a duration.
+
+### Added
+- **Focus modes remembered for a task, a tag or a project.** Picking a task
+  on the focus page loads its mode (allow list and learned filters) — the
+  task's own, else its tag's, else its project's — and says where it came
+  from. Choosing another mode or tapping it off is still one tap, and a
+  loaded mode lifts again when a task without one is picked. "Load this
+  mode automatically for…" remembers the applied mode for this task, every
+  task with its tag, or every task in its project; the task editor has a
+  *Focus mode* picker that shows an inherited one. "Focus this" from
+  anywhere in the planner starts in the task's mode too. `src/focusmode.js`.
+- **The focus Tally.** The focus page's second tab is now a grid of
+  projects by day for the last seven days (and earlier weeks), with week and
+  all-time totals, a row for rounds with no project, day totals, and the
+  rounds of whichever day is picked. The Focus tab keeps today's total in
+  view.
+- **Duration on recurring and backlog tasks.** Both editors have the
+  Duration box, and it is handed to every task made from them — Plan the
+  day, the side panel, self-adding recurring tasks, the assistant, and moves
+  between the backlog and a day. Shown in the side lists.
+
+### Changed
+- **The focus page's days run Fajr to Fajr**, like the rest of the planner:
+  a round finished at 1am counts for the evening before, in the tally, the
+  today total and the per-project minutes.
+
+### Fixed
+- "Make recurring" and the assistant's "add a recurring task to a day" now
+  keep the task's project.
+
 ## [3.3] — 2026-09-27
 
 Focus time counts towards projects, a tag can stand for a project, notes get

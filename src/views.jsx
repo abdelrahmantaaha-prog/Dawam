@@ -8,7 +8,7 @@ import { TINY, habitStats, isPrayerAnchor, stackShape, wouldCycle } from './habi
 import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 
-import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
+import { AppIcon,BlockRow,DurationInput,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
 import { saveJson } from './files.js';
 import { CalendarSettings } from './calview.jsx';
 import { TrelloSettings } from './trelloview.jsx';
@@ -1053,6 +1053,9 @@ function TemplateEditor({ tpl, projects, allProjects = [], onChange, onDelete })
           {allProjects.filter((p) => !p.completedAt).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
       </div>
+      {/* Handed to every task this adds, like the label and project. A start
+          and an end already fix the length, so the box only matters without. */}
+      <DurationInput item={tpl} compact onChange={(v) => onChange({ duration: v })} />
       {/* When it is actually due. "Plan the day" offers a recurring task only
           on the days its schedule names — a weekly chore offered seven times a
           week is how a person learns to press Skip without reading. */}

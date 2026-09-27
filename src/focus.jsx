@@ -15,9 +15,10 @@
 /* ------------------------------------------------------------------ */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Play, Pause, Square, SkipForward, Timer, ShieldCheck, AlertTriangle, Check, X, Trash2, Save, Settings as SettingsIcon, Flame, Eye } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Pause, Square, SkipForward, Timer, ShieldCheck, AlertTriangle, Check, X, Trash2, Save, Settings as SettingsIcon, Flame, Eye } from 'lucide-react';
 import { tx, fmtTime } from './core.jsx';
-import { fmtFocus, roundsByProject } from './projectfocus.js';
+import { fmtFocus } from './projectfocus.js';
+import { modeKey } from './focusmode.js';
 
 export const desktopFocus = () => (typeof window !== 'undefined' && window.rhythmFocus) || null;
 export const isDesktop = () => !!desktopFocus();
@@ -30,7 +31,6 @@ const mmss = (sec) => {
 const asMin = (sec) => Math.round((Number(sec) || 0) / 60);
 const listToText = (a) => (Array.isArray(a) ? a.join('\n') : '');
 const textToList = (s) => String(s || '').split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
-const startOfToday = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
 
 /* Live session state + the store's data, kept in step with the main process.
    Every listener the bridge hands out returns its own unsubscribe, so a
@@ -101,7 +101,7 @@ export function useRoundEnded(handler) {
 /* ------------------------------------------------------------------ */
 /*  The view                                                           */
 /* ------------------------------------------------------------------ */
-export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0, durationFor, pendingRound, onDismissRound, onMarkTaskDone, onLearnDuration }) {
+export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0, durationFor, pendingRound, onDismissRound, onMarkTaskDone, onLearnDuration, onRememberMode, dayISO, tallyProjects }) {
   const { api, state, data, reload } = useFocus();
   const [tab, setTab] = useState('focus'); // focus | history | settings
   const [taskId, setTaskId] = useState('');
@@ -118,11 +118,26 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
      restrictions could only ever belong to one piece of work. */
   const [tplId, setTplId] = useState('');
   const [tplName, setTplName] = useState('');
+  /* Whether the applied mode was loaded from the picked task (remembered for
+     it, its tag or its project) rather than chosen here. A loaded mode goes
+     away again when a task with none is picked; a chosen one stays put. */
+  const [tplAuto, setTplAuto] = useState(false);
+  // Remember the applied mode for this task / its tag / its project on start.
+  const [remember, setRemember] = useState('');
 
   const settings = data?.settings || null;
   const templates = data?.templates || [];
   const history = data?.history || [];
   const live = state && state.phase !== 'idle';
+  // The logical day a round belongs to — Fajr to Fajr, like the rest of the
+  // planner — falling back to the calendar day when the planner did not say.
+  const dayOf = dayISO || ((ms) => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; });
+  const todayISO = dayOf(Date.now());
+  const todayMin = history.filter((h) => dayOf(h.endedAt) === todayISO).reduce((n, h) => n + asMin(h.focusedSec), 0);
+  const picked = tasks.find((t) => t.id === taskId) || null;
+  // Only a planned task can remember a mode — not a meeting, not a rest.
+  const canRemember = !!picked && !String(picked.id).startsWith('cal:');
+  const pickedMode = (picked && picked.mode && picked.mode.id) || '';
 
   // Picking a planned task fills in everything the planner already knows about
   // it: the title, and a duration from its own slot or from what past rounds
@@ -131,13 +146,25 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
     setTaskId(t.id);
     setTitle(t.title);
     setProjectId(t.project || '');
+    setRemember('');
     const known = (t.minutes || null) || (durationFor ? durationFor(t.title) : null);
-    setMinutes(clamp(Number(known) || settings?.workMin || 50, 1, 240));
-    // The allow list is the policy's, not the task's, so picking a task leaves
-    // whatever policy is applied exactly where it is.
+    /* A mode remembered for this task (or its tag, or its project) loads with
+       it. Otherwise the allow list is the policy's, not the task's, so a mode
+       chosen by hand stays exactly where it is — only one this page loaded
+       for the previous task is lifted. */
+    const tpl = t.mode ? templates.find((x) => modeKey(x.id) === t.mode.id) : null;
+    if (tpl) {
+      setTplId(tpl.id); setTplName(tpl.name); setCleared(listToText(tpl.allowed)); setTplAuto(true);
+    } else if (tplAuto) {
+      setTplId(''); setCleared(''); setTplAuto(false);
+    }
+    // The task's own length beats the mode's: a 20-minute task under a
+    // 90-minute mode is still a 20-minute task.
+    setMinutes(clamp(Number(known) || (tpl && Number(tpl.workMin)) || settings?.workMin || 50, 1, 240));
   };
 
   const useTemplate = (tpl) => {
+    setTplAuto(false);
     if (tplId === tpl.id) { setTplId(''); setCleared(''); return; }  // tap again to lift it
     setTplId(tpl.id);
     setTplName(tpl.name);
@@ -167,6 +194,10 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
     const resting = String(taskId || '').startsWith('reward:');
     const pid = !resting && projects.some((p) => p.id === projectId) ? projectId : null;
     await api.startWork({ task, workMin: minutes, allowed, taskId: realTask, templateId: useId, projectId: pid });
+    if (remember && canRemember && onRememberMode) {
+      onRememberMode({ kind: remember, task: picked, modeId: useId == null ? null : modeKey(useId) });
+      setRemember('');
+    }
     reload();
   };
 
@@ -176,7 +207,7 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
     <div className="view focus-view">
       <div className="focus-tabs">
         <button className={tab === 'focus' ? 'on' : ''} onClick={() => setTab('focus')}><Timer size={15} /> {tx('Focus', 'تركيز')}</button>
-        <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}><Flame size={15} /> {tx('Today', 'اليوم')}</button>
+        <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}><Flame size={15} /> {tx('Tally', 'الحصيلة')}</button>
         <button className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}><SettingsIcon size={15} /> {tx('Focus settings', 'إعدادات التركيز')}</button>
       </div>
 
@@ -187,6 +218,14 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
           onMarkDone={onMarkTaskDone}
           onLearn={onLearnDuration}
         />
+      )}
+
+      {/* Today's number, always in view: the tally tab has the rest. */}
+      {tab === 'focus' && (
+        <button className="focus-todaybar" onClick={() => setTab('history')}>
+          <Flame size={13} /> {tx('Today', 'اليوم')} <strong>{fmtFocus(todayMin)}</strong> {tx('focused', 'تركيز')}
+          <span className="focus-todaybar-more">{tx('Every day →', 'كل يوم ←')}</span>
+        </button>
       )}
 
       {tab === 'focus' && (live
@@ -277,6 +316,27 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
                 ? tx('Strict: everything else is off-task and you get returned by force.', 'صارم: كل ما عداها خارج المهمة وستُعاد بالقوة.')
                 : tx('Relaxed: only your distraction list nudges you.', 'متساهل: قائمة الإلهاء وحدها هي التي تنبّهك.')}
             </p>
+            {tplAuto && tplId && picked && picked.mode && (
+              <p className="hint-text focus-modeauto">
+                {tx(`“${tplName}” loaded — remembered for this ${picked.mode.from === 'task' ? 'task' : picked.mode.from === 'tag' ? 'tag' : 'project'}. Pick another mode or tap it to lift it for this round.`,
+                  `حُمّل «${tplName}» — محفوظ لهذه ${picked.mode.from === 'task' ? 'المهمة' : picked.mode.from === 'tag' ? 'الوسم' : 'المشروع'}. اختر نمطًا آخر أو انقر عليه لرفعه في هذه الجولة.`)}
+              </p>
+            )}
+
+            {/* Remember the mode, so this task loads it by itself next time.
+                Shown only when there is something to remember — a mode is
+                applied or about to be saved — or to forget. */}
+            {canRemember && !tplAuto && (tplId || saveTpl || pickedMode) && (
+              <label className="field focus-remember">
+                <span>{tplId || saveTpl ? tx('Load this mode automatically for', 'حمّل هذا النمط تلقائيًا لـ') : tx('Stop loading a mode for', 'أوقف تحميل نمط لـ')}</span>
+                <select value={remember} onChange={(e) => setRemember(e.target.value)}>
+                  <option value="">{tx('— just this round —', '— هذه الجولة فقط —')}</option>
+                  <option value="task">{tx('this task', 'هذه المهمة')} · {picked.title}</option>
+                  {picked.labelId && <option value="tag">{tx('every task tagged', 'كل مهمة بوسم')} #{picked.labelName}</option>}
+                  {picked.project && <option value="project">{tx('every task in', 'كل مهمة في')} {picked.projectName}</option>}
+                </select>
+              </label>
+            )}
 
             <label className="check">
               <input type="checkbox" checked={saveTpl} onChange={(e) => { setSaveTpl(e.target.checked); if (e.target.checked && !tplName) setTplName(title.trim()); }} />
@@ -316,7 +376,7 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
           </div>
         ))}
 
-      {tab === 'history' && <FocusHistory history={history} projects={projects} />}
+      {tab === 'history' && <FocusTally history={history} projects={tallyProjects || projects} dayOf={dayOf} />}
       {tab === 'settings' && settings && <FocusSettings api={api} settings={settings} templates={templates} onSaved={reload} />}
     </div>
   );
@@ -426,47 +486,129 @@ function RoundEndedCard({ entry, onDismiss, onMarkDone, onLearn }) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Today's rounds                                                      */
+/*  The tally — focus by project, day by day                           */
+/*                                                                     */
+/*  Projects down the side, the days of a week across, minutes in each  */
+/*  cell. The numbers come from the projects themselves (project.focus,  */
+/*  written by the planner when a round ends), so they reach back past   */
+/*  the last 500 rounds the shell keeps and agree with the project       */
+/*  cards. Days are the planner's Fajr-to-Fajr days: a round at 1am      */
+/*  belongs to the evening before it, as everything else does.          */
+/*                                                                     */
+/*  Below the grid, the rounds of whichever day is picked — the old      */
+/*  "Today" view, for any day.                                           */
 /* ------------------------------------------------------------------ */
-function FocusHistory({ history, projects = [] }) {
-  const since = startOfToday();
-  const today = history.filter((h) => h.endedAt >= since);
-  const focused = today.reduce((n, h) => n + (h.focusedSec || 0), 0);
-  const distracted = today.reduce((n, h) => n + (h.distractedSec || 0), 0);
+const isoAdd = (iso, n) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  const t = new Date(y, m - 1, d + n);
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+};
+const isoLabel = (iso) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  const t = new Date(y, m - 1, d);
+  return { wd: t.toLocaleDateString(undefined, { weekday: 'short' }), n: d, full: t.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }) };
+};
+
+function FocusTally({ history, projects = [], dayOf }) {
+  const todayISO = dayOf(Date.now());
+  const [back, setBack] = useState(0);         // weeks back from this one
+  const [sel, setSel] = useState(todayISO);    // the day whose rounds are listed
+  const days = Array.from({ length: 7 }, (_, i) => isoAdd(todayISO, i - 6 - back * 7));
+  const from = days[0], to = days[6];
+
+  const cell = (p, iso) => Math.round(Number(((p && p.focus) || {})[iso]) || 0);
+  const sum = (p, a, b) => Object.entries((p && p.focus) || {}).reduce((n, [iso, m]) => (iso >= a && iso <= b ? n + (Number(m) || 0) : n), 0);
+  const all = (p) => Object.values((p && p.focus) || {}).reduce((n, m) => n + (Number(m) || 0), 0);
+  // Every project that has ever had a minute, busiest this week first.
+  const rows = projects.filter((p) => all(p) > 0).map((p) => ({ p, week: sum(p, from, to), total: all(p) }))
+    .sort((a, b) => b.week - a.week || b.total - a.total);
+  // Rounds that named no project still happened; they get their own row.
+  const loose = (iso) => history.filter((h) => !h.projectId && dayOf(h.endedAt) === iso).reduce((n, h) => n + asMin(h.focusedSec), 0);
+  const looseWeek = days.reduce((n, iso) => n + loose(iso), 0);
+  const dayTotal = (iso) => rows.reduce((n, r) => n + cell(r.p, iso), 0) + loose(iso);
+  const max = Math.max(1, ...rows.flatMap((r) => days.map((iso) => cell(r.p, iso))), ...days.map(loose));
+  const heat = (m) => (m > 0 ? 0.12 + 0.55 * Math.min(1, m / max) : 0);
+
+  const rounds = history.filter((h) => dayOf(h.endedAt) === sel);
+  const focused = rounds.reduce((n, h) => n + (h.focusedSec || 0), 0);
+  const distracted = rounds.reduce((n, h) => n + (h.distractedSec || 0), 0);
   const rate = focused + distracted ? Math.round((focused / (focused + distracted)) * 100) : null;
+  const nameOf = (pid) => (projects.find((p) => p.id === pid) || {}).name || '';
 
   return (
-    <div className="focus-card">
+    <div className="focus-card focus-tally">
+      <div className="tally-head">
+        <h3 className="focus-h">{tx('Focus by project', 'التركيز حسب المشروع')}</h3>
+        <span className="tally-nav">
+          <button className="ghost sm" onClick={() => setBack(back + 1)} aria-label={tx('Earlier week', 'أسبوع أسبق')}><ChevronLeft size={14} /></button>
+          <span className="tally-range">{back === 0 ? tx('Last 7 days', 'آخر ٧ أيام') : `${isoLabel(from).n}–${isoLabel(to).n}`}</span>
+          <button className="ghost sm" disabled={back === 0} onClick={() => setBack(Math.max(0, back - 1))} aria-label={tx('Later week', 'أسبوع لاحق')}><ChevronRight size={14} /></button>
+        </span>
+      </div>
+
+      <div className="tally-scroll">
+        <table className="tally-grid">
+          <thead>
+            <tr>
+              <th className="tally-proj" />
+              {days.map((iso) => {
+                const l = isoLabel(iso);
+                return (
+                  <th key={iso} className={`${iso === todayISO ? 'today' : ''} ${iso === sel ? 'sel' : ''}`}>
+                    <button onClick={() => setSel(iso)} title={l.full}><span>{l.wd}</span><strong>{l.n}</strong></button>
+                  </th>
+                );
+              })}
+              <th className="tally-sum">{tx('Week', 'الأسبوع')}</th>
+              <th className="tally-sum">{tx('All', 'الكل')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ p, week, total }) => (
+              <tr key={p.id} style={{ '--pcolor': p.color || 'var(--verdigris)' }}>
+                <th className="tally-proj"><span className="focus-byproj-dot" />{p.name}</th>
+                {days.map((iso) => {
+                  const m = cell(p, iso);
+                  return <td key={iso} className={iso === sel ? 'sel' : ''} style={{ '--heat': heat(m) }}>{m ? fmtFocus(m) : ''}</td>;
+                })}
+                <td className="tally-sum">{week ? fmtFocus(week) : '—'}</td>
+                <td className="tally-sum">{fmtFocus(total)}</td>
+              </tr>
+            ))}
+            {looseWeek > 0 && (
+              <tr className="loose">
+                <th className="tally-proj"><span className="focus-byproj-dot" />{tx('No project', 'بلا مشروع')}</th>
+                {days.map((iso) => { const m = loose(iso); return <td key={iso} className={iso === sel ? 'sel' : ''} style={{ '--heat': heat(m) }}>{m ? fmtFocus(m) : ''}</td>; })}
+                <td className="tally-sum">{fmtFocus(looseWeek)}</td>
+                <td className="tally-sum" />
+              </tr>
+            )}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th className="tally-proj">{tx('Day total', 'مجموع اليوم')}</th>
+              {days.map((iso) => { const m = dayTotal(iso); return <td key={iso} className={iso === sel ? 'sel' : ''}>{m ? fmtFocus(m) : '·'}</td>; })}
+              <td className="tally-sum">{fmtFocus(days.reduce((n, iso) => n + dayTotal(iso), 0))}</td>
+              <td className="tally-sum" />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      {rows.length === 0 && looseWeek === 0 && (
+        <p className="hint-text">{tx('No focus time yet. Rounds on a task count towards its project — or pick one under “Counts towards”.', 'لا وقت تركيز بعد. الجولات على مهمة تُحسب لمشروعها — أو اختر مشروعًا في «تُحسب لصالح».')}</p>
+      )}
+
+      <h4 className="focus-h4 tally-dayh">{sel === todayISO ? tx('Today', 'اليوم') : isoLabel(sel).full}</h4>
       <div className="focus-totals">
-        <div><strong>{today.length}</strong><span>{tx('rounds', 'جولات')}</span></div>
-        <div><strong>{asMin(focused)}m</strong><span>{tx('focused', 'تركيز')}</span></div>
+        <div><strong>{rounds.length}</strong><span>{tx('rounds', 'جولات')}</span></div>
+        <div><strong>{fmtFocus(asMin(focused))}</strong><span>{tx('focused', 'تركيز')}</span></div>
         <div><strong>{rate == null ? '—' : `${rate}%`}</strong><span>{tx('focus rate', 'نسبة التركيز')}</span></div>
       </div>
-      {/* Where today went, by project. Only drawn once some round named one —
-          a list that says "no project: 90m" and nothing else says nothing. */}
-      {(() => {
-        const by = roundsByProject(today);
-        const named = [...by.entries()].filter(([pid, m]) => pid && m > 0);
-        if (!named.length) return null;
-        const nameOf = (pid) => (projects.find((p) => p.id === pid) || {}).name || tx('a finished project', 'مشروع منتهٍ');
-        const colourOf = (pid) => (projects.find((p) => p.id === pid) || {}).color || 'var(--faint)';
-        const loose = by.get(null) || 0;
-        return (
-          <div className="focus-byproj">
-            {named.sort((a, b) => b[1] - a[1]).map(([pid, m]) => (
-              <span key={pid} className="focus-byproj-row" style={{ '--pcolor': colourOf(pid) }}>
-                <span className="focus-byproj-dot" />{nameOf(pid)}<strong>{fmtFocus(m)}</strong>
-              </span>
-            ))}
-            {loose > 0 && <span className="focus-byproj-row loose"><span className="focus-byproj-dot" />{tx('No project', 'بلا مشروع')}<strong>{fmtFocus(loose)}</strong></span>}
-          </div>
-        );
-      })()}
-      {today.length === 0 && <p className="hint-text">{tx('No rounds yet today.', 'لا جولات اليوم بعد.')}</p>}
-      {today.map((h, i) => (
+      {rounds.length === 0 && <p className="hint-text">{tx('No rounds on this day.', 'لا جولات في هذا اليوم.')}</p>}
+      {rounds.map((h, i) => (
         <div key={`${h.endedAt}-${i}`} className="focus-histrow">
           <span className={`focus-dot ${h.completed ? 'ok' : 'part'}`} />
-          <span className="focus-histtask">{h.task}</span>
+          <span className="focus-histtask">{h.task}{h.projectId && nameOf(h.projectId) ? <span className="focus-histproj"> · {nameOf(h.projectId)}</span> : null}</span>
           <span className="ttime">{fmtTime(new Date(h.startedAt).toTimeString().slice(0, 5))}</span>
           <span className="ttime">{asMin(h.focusedSec)}m</span>
         </div>
@@ -579,4 +721,20 @@ function FocusSettings({ api, settings, templates, onSaved }) {
       <p className="hint-text"><Save size={12} /> {tx('Changes save as you leave each field.', 'تُحفظ التغييرات عند مغادرة كل حقل.')}</p>
     </div>
   );
+}
+
+/* The focus modes the shell holds, for the planner's own editors (a task can
+   name the mode it starts with). Empty everywhere but the desktop. */
+export function useFocusModes() {
+  const api = desktopFocus();
+  const [modes, setModes] = useState([]);
+  useEffect(() => {
+    if (!api) return undefined;
+    let alive = true;
+    const load = () => api.getData().then((d) => { if (alive) setModes((d && d.templates) || []); }).catch(() => {});
+    load();
+    const off = api.onDataChanged(load);
+    return () => { alive = false; off && off(); };
+  }, [api]);
+  return modes;
 }

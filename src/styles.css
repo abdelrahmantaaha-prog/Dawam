@@ -1786,3 +1786,46 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .note-group-h{display:flex;align-items:center;gap:5px;margin:4px 0 9px;font-size:12px;font-weight:800;letter-spacing:.4px;
   text-transform:uppercase;color:var(--muted)}
 .note-group-n{font-weight:700;color:var(--faint);font-variant-numeric:tabular-nums}
+/* Duration on backlog items and recurring tasks — same box as the task editor. */
+.dur-input{display:flex;flex-direction:column;gap:4px;margin:10px 0 4px}
+.dur-input > span:first-child{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--muted)}
+.dur-input .edit-dur-in input{width:90px}
+.dur-input .hint-text{margin:0}
+.dur-input.compact{flex-direction:row;align-items:center;gap:10px;margin:0 0 9px}
+
+/* ---- the focus tally: projects by day ---- */
+.focus-todaybar{display:flex;align-items:center;gap:6px;width:100%;margin:0 0 12px;padding:8px 12px;border:1px solid var(--line);
+  border-radius:11px;background:var(--surface);color:var(--muted);font:inherit;font-size:12.5px;cursor:pointer;text-align:start}
+.focus-todaybar strong{color:var(--ink);font-variant-numeric:tabular-nums}
+.focus-todaybar:hover{border-color:var(--verdigris)}
+.focus-todaybar-more{margin-inline-start:auto;font-size:11.5px;font-weight:700;color:var(--verdigris)}
+.tally-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.tally-head .focus-h{margin:0}
+.tally-nav{display:inline-flex;align-items:center;gap:6px}
+.tally-range{font-size:12px;font-weight:700;color:var(--muted);min-width:84px;text-align:center;font-variant-numeric:tabular-nums}
+.tally-scroll{overflow-x:auto;margin:0 -4px;padding:0 4px}
+.tally-grid{width:100%;border-collapse:separate;border-spacing:3px;font-size:12px;font-variant-numeric:tabular-nums}
+.tally-grid th,.tally-grid td{padding:0;text-align:center;font-weight:600}
+.tally-grid thead th button{display:flex;flex-direction:column;align-items:center;gap:1px;width:100%;min-width:44px;padding:4px 2px;border:1px solid transparent;
+  border-radius:8px;background:none;color:var(--muted);font:inherit;cursor:pointer}
+.tally-grid thead th button span{font-size:10px;text-transform:uppercase;letter-spacing:.4px}
+.tally-grid thead th button strong{font-size:13px;color:var(--ink)}
+.tally-grid thead th.today button strong{color:var(--verdigris)}
+.tally-grid thead th.sel button{border-color:var(--verdigris);background:var(--soft)}
+.tally-grid .tally-proj{text-align:start;white-space:nowrap;max-width:150px;overflow:hidden;text-overflow:ellipsis;padding-inline-end:8px;
+  font-size:12.5px;font-weight:700;color:var(--ink)}
+.tally-grid .tally-proj .focus-byproj-dot{display:inline-block;margin-inline-end:6px;vertical-align:middle}
+.tally-grid tbody td{height:30px;border-radius:7px;color:var(--ink);font-size:11px;
+  background:color-mix(in srgb, var(--pcolor, var(--verdigris)) calc(var(--heat, 0) * 100%), var(--surface))}
+.tally-grid tbody td.sel{outline:1px solid var(--verdigris);outline-offset:-1px}
+.tally-grid tr.loose .tally-proj{color:var(--muted);font-weight:600}
+.tally-grid tr.loose td{--pcolor:var(--faint)}
+.tally-grid .tally-sum{padding:0 6px;color:var(--muted);font-size:11.5px;white-space:nowrap;background:none}
+.tally-grid tbody .tally-sum{background:none}
+.tally-grid tfoot th,.tally-grid tfoot td{padding-top:5px;border-top:1px solid var(--line);font-size:11.5px;color:var(--ink);font-weight:800}
+.tally-grid tfoot td.sel{color:var(--verdigris)}
+.tally-dayh{margin-top:16px}
+.focus-histproj{color:var(--muted);font-weight:600}
+.focus-remember select{width:100%}
+.focus-modeauto{margin-top:-2px;color:var(--verdigris)}
+.focus-mode-row select{flex:1;min-width:0;font-size:12.5px;padding:5px 7px}

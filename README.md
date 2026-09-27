@@ -601,6 +601,20 @@ The tally lives on the project, one number per day (`project.focus`), not on
 the tasks: weeks are pruned after about a month and the tally has to outlive
 them, and a round with no task still happened. `src/projectfocus.js`.
 
+The focus page's **Tally** tab lays it out: projects down the side, the days
+of a week across, with week and all-time totals and a row for rounds that
+named no project. Days there run **Fajr to Fajr**, like everything else — a
+round finished at 1am belongs to the evening before.
+
+## A task can start in its own focus mode
+
+A focus mode (a named allow list with its learned filters) can be remembered
+for a task, for every task with a tag, or for every task in a project — from
+the focus page ("Load this mode automatically for…") or the task editor's
+*Focus mode* picker. Picking the task loads it; the most specific one wins
+(task, then tag, then project), and choosing another or tapping it off is
+still one tap. A mode deleted since is treated as none. `src/focusmode.js`.
+
 ## A tag can stand for a project
 
 Tags (the coloured labels) and projects are separate questions that are
@@ -618,7 +632,8 @@ in any add box when there is no start time). *Slot the day* gives it exactly
 that — ahead of the duration memory, the AI estimate and the heuristic, which
 are all ways of guessing a number the person has now said — and a start-only
 task gets its end from it. Typing a duration also teaches the memory, so next
-week's task with the same title starts from it.
+week's task with the same title starts from it. Backlog items and recurring
+tasks have the same box, and hand it to every task made from them.
 
 ## The Now lock
 

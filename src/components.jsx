@@ -3,6 +3,7 @@ import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, 
 import { taskDuration,taskUntil,spanLength,focusTargetMin,focusSpent,focusMet,hasVault,vaultWindowed,vaultUnlocked,autoWorth,taskWorth,estimateMinutes,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 import { durationFor, rememberDuration } from './durations.js';
+import { focusModeFor, modeKey } from './focusmode.js';
 import { describeRepeat, isScheduled } from './recur.js';
 import { applySuggestion, suggestFor, tokenAt } from './parse.js';
 
@@ -508,7 +509,7 @@ function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labe
               <span className="grip" onPointerDown={(e) => onDragStart(e, 'template', tp)} title={tx('Drag onto a slot', 'اسحب إلى موعد')}><GripVertical size={13} /></span>
               <button className="tpl-body tpl-open" onClick={() => onEditTpl(tp.id)} title={tx('Edit recurring task', 'تعديل المهمة المتكررة')}>
                 <span className="tpl-title">{tp.title}{usedTpl[tp.id] ? <span className="tpl-used"><Check size={11} />{usedTpl[tp.id] > 1 ? ` ×${usedTpl[tp.id]}` : ''}</span> : null}</span>
-                <span className="tpl-sub">{p && <span className="pdot" style={{ background: p.color }} />}{bName(b)}{timeLabel(tp) ? ` · ${timeLabel(tp)}` : ''}{nSub ? ` · ${nSub} ${LANG === 'ar' ? 'خطوة' : ('step' + (nSub > 1 ? 's' : ''))}` : ''}</span>
+                <span className="tpl-sub">{p && <span className="pdot" style={{ background: p.color }} />}{bName(b)}{timeLabel(tp) ? ` · ${timeLabel(tp)}` : ''}{taskDuration(tp) != null ? ` · ${taskDuration(tp)}${tx('m', 'د')}` : ''}{nSub ? ` · ${nSub} ${LANG === 'ar' ? 'خطوة' : ('step' + (nSub > 1 ? 's' : ''))}` : ''}</span>
                 {(isScheduled(tp.repeat) || tp.projectRef || tp.autoAdd) && (
                   <span className="tpl-sub tpl-meta">
                     {isScheduled(tp.repeat) && <span className="tpl-when"><Repeat size={9} /> {describeRepeat(tp.repeat, { dayName: wd, tx })}</span>}
@@ -545,7 +546,7 @@ function PlanSide({ tab, onTab, open = true, onToggleOpen, templates, pool, labe
                 <button className="tcheck" onClick={() => onTogglePoolDone(it.id)} aria-label={tx('Mark done', 'وضع كمنجز')}>{it.done ? <CheckCircle2 size={17} /> : <Circle size={17} />}</button>
                 <button className="pool-main" onClick={() => onOpenPool(it.id)}>
                   <span className="pool-title">{it.title}</span>
-                  <span className="tmeta">{p && <span className="lchip" style={{ '--lcolor': p.color }}>{p.name}</span>}<ProjectTag project={projectById(it.projectRef)} sm />{it.subtasks && it.subtasks.length > 0 && <span className="badge"><CheckCircle2 size={11} /> {doneN}/{it.subtasks.length}</span>}</span>
+                  <span className="tmeta">{p && <span className="lchip" style={{ '--lcolor': p.color }}>{p.name}</span>}<ProjectTag project={projectById(it.projectRef)} sm />{taskDuration(it) != null && <span className="badge"><Timer size={11} /> {taskDuration(it)}{tx('m', 'د')}</span>}{it.subtasks && it.subtasks.length > 0 && <span className="badge"><CheckCircle2 size={11} /> {doneN}/{it.subtasks.length}</span>}</span>
                 </button>
                 <button className="tpl-act" title={tx('Schedule on the selected day', 'جدولة في اليوم المحدد')} onClick={() => onPoolToDay(it.id)}><CornerUpRight size={15} /></button>
               </li>); };
@@ -699,7 +700,7 @@ function NotesEditor({ notes, onAdd, onUpdate, onDel }) {
 /* ------------------------------------------------------------------ */
 /*  Task editor                                                        */
 /* ------------------------------------------------------------------ */
-function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, todayISO, vaultOpen = false, onMoveDate, onClose, onChange, onDelete, onToPool, onSaveTemplate, onFocus, notebooks = [], onOpenNotebook, onNewNotebook }) {
+function TaskEditor({ task, projects, allProjects = [], focusModes = [], weekStart, dateISO, todayISO, vaultOpen = false, onMoveDate, onClose, onChange, onDelete, onToPool, onSaveTemplate, onFocus, notebooks = [], onOpenNotebook, onNewNotebook }) {
   const setField = (k, v) => onChange((t) => ({ ...t, [k]: v }));
   // Vault editing is write-anytime / read-only-in-window: the stored value is
   // never rendered while the window is shut, only replaced wholesale.
@@ -822,6 +823,27 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, toda
             {[10, 20, 30, 45].map((mn) => (<button key={mn} className="ghost sm" onClick={() => onFocus(mn)}>{mn}{tx('m', 'د')}</button>))}
             {tEndMin(task) != null && <button className="ghost sm focus-whole" onClick={() => onFocus(null, true)}>{tx('Until end', 'حتى النهاية')}</button>}
           </div>
+          {/* The focus mode a round on this task starts in. Empty falls back to
+              its tag's, then its project's (see src/focusmode.js), and the
+              first option says which — so "none" never hides an inherited one.
+              Desktop only: the modes live in the shell. */}
+          {focusModes.length > 0 && (() => {
+            const inherited = focusModeFor({ ...task, focusMode: null }, projects, allProjects, focusModes);
+            const inhName = inherited ? (focusModes.find((m) => modeKey(m.id) === inherited.id) || {}).name : '';
+            const own = modeKey(task.focusMode);
+            return (
+              <label className="worth-row focus-mode-row">
+                <Timer size={13} />
+                <span className="worth-label">{tx('Focus mode', 'نمط التركيز')}</span>
+                <select value={own && focusModes.some((m) => modeKey(m.id) === own) ? own : ''} onChange={(e) => setField('focusMode', e.target.value || null)}>
+                  <option value="">{inherited
+                    ? `${inhName} (${inherited.from === 'tag' ? tx('from its tag', 'من وسمها') : tx('from its project', 'من مشروعها')})`
+                    : tx('— none —', '— بدون —')}</option>
+                  {focusModes.map((m) => <option key={modeKey(m.id)} value={modeKey(m.id)}>{m.name}</option>)}
+                </select>
+              </label>
+            );
+          })()}
           {/* A target for the day, and the minutes actually measured against it.
               Ticking a task says you finished it; this says you gave it the
               time you said you would — which is the honest question for work
@@ -895,6 +917,33 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, toda
 /* ------------------------------------------------------------------ */
 /*  Pool item editor                                                   */
 /* ------------------------------------------------------------------ */
+/* The Duration box for anything that becomes a task — a backlog item or a
+   recurring task hands its duration to every task made from it, so Slot the
+   day sizes that task by it instead of guessing. The placeholder is what the
+   slotter would use today, so an empty box still says something true. */
+function DurationInput({ item, onChange, compact = false }) {
+  const own = taskDuration(item);
+  const guess = (() => { const m = durationFor(item.title); return estimateMinutes(m ? { ...item, duration: null, est: m } : { ...item, duration: null }); })();
+  return (
+    <label className={`dur-input${compact ? ' compact' : ''}`}>
+      <span><Timer size={12} /> {tx('Duration', 'المدة')}</span>
+      <span className="edit-dur-in">
+        <input className="time-input" type="number" min="5" max="480" step="5" inputMode="numeric"
+          value={own == null ? '' : item.duration}
+          placeholder={String(guess)}
+          onChange={(e) => onChange(e.target.value === '' ? null : Math.max(0, Math.min(480, Math.round(Number(e.target.value) || 0))) || null)}
+          onBlur={() => { if (own) rememberDuration(item.title, own, 'manual'); }}
+          aria-label={tx('Duration in minutes', 'المدة بالدقائق')} />
+        <span className="edit-dur-unit">{tx('min', 'دقيقة')}</span>
+        {own != null && <button className="mini-del" onClick={() => onChange(null)} aria-label={tx('Clear duration', 'مسح المدة')}><X size={13} /></button>}
+      </span>
+      {!compact && <span className="hint-text">{own != null
+        ? tx('Every task made from this is slotted for exactly this long.', 'كل مهمة تُنشأ من هنا تُجدول بهذه المدة بالضبط.')
+        : tx('Empty: Slot the day estimates it (the number shown).', 'فارغ: «جدولة اليوم» تقدّرها (الرقم الظاهر).')}</span>}
+    </label>
+  );
+}
+
 function PoolEditor({ item, projects, allProjects = [], onClose, onChange, onDelete, onToDay, onSaveTemplate, notebooks = [], onOpenNotebook, onNewNotebook }) {
   const setField = (k, v) => onChange((t) => ({ ...t, [k]: v }));
   return (
@@ -910,6 +959,7 @@ function PoolEditor({ item, projects, allProjects = [], onClose, onChange, onDel
             <label><span>{tx('Label', 'الوسم')}</span><select value={item.projectId || ''} onChange={(e) => setField('projectId', e.target.value || null)}><option value="">{tx('— none —', '— بدون —')}</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
             <label><span>{tx('Project', 'المشروع')}</span><select value={item.projectRef || ''} onChange={(e) => setField('projectRef', e.target.value || null)}><option value="">{tx('— none —', '— بدون —')}</option>{allProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
           </div>
+          <DurationInput item={item} onChange={(v) => setField('duration', v)} />
           <div className="editor-actions">
             <button className="primary sm" onClick={onToDay}><CornerUpRight size={14} /> {tx('Schedule on a day', 'جدولة في يوم')}</button>
             <button className="ghost sm" onClick={onSaveTemplate}><Repeat size={14} /> {tx('Save as recurring', 'حفظ كمتكررة')}</button>
@@ -1079,4 +1129,4 @@ function PointsPanel({ balance, ledger, rewards, penalties = [], onClose, onAddR
 /* ------------------------------------------------------------------ */
 /*  Habits — daily commitments; streaks glow brighter up to seven days */
 /* ------------------------------------------------------------------ */
-export { AppIcon,BlockRow,PaceChip,PaceStrip,ProjectTag,QuickAdd,QuotaLine,TokenSuggest,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };
+export { AppIcon,BlockRow,DurationInput,PaceChip,PaceStrip,ProjectTag,QuickAdd,QuotaLine,TokenSuggest,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };
