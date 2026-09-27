@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
   desktop: true,
   getState: () => ipcRenderer.invoke('get-state'),
   getData: () => ipcRenderer.invoke('get-data'),
-  // req: { task, workMin, allowed, taskId }
+  // req: { task, workMin, allowed, taskId, templateId, projectId }
   startWork: (req) => ipcRenderer.invoke('start-work', req),
   saveTemplate: (tpl) => ipcRenderer.invoke('save-template', tpl),
   deleteTemplate: (id) => ipcRenderer.invoke('delete-template', id),

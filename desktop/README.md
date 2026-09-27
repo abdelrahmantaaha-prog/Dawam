@@ -154,6 +154,12 @@ RHYTHM_SMOKE_BIN=desktop/release/win-unpacked/Rhythm.exe node desktop/smoke.mjs
 
 - Distraction matching is substring-based on `title + process name + address-bar
   domain`, case-insensitive, so browser tabs are covered with no extension.
+- **Always allowed** (Focus settings → Lists) is matched the same way and
+  clears a window in every round — relaxed or strict — without making the
+  round strict. The hard block is checked separately and still wins.
+- A round can carry a `projectId` (picked on the focus page or carried from
+  the task); it rides into the history entry and the `round-ended` event, and
+  the planner tallies the minutes on that project.
 - Force-return minimizes the distracting window. Nothing is closed, nothing is
   killed, no data is lost.
 - Chair detection pauses the round when it cannot see you — worth knowing if a

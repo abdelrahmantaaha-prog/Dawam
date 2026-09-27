@@ -15,10 +15,10 @@
 /* ------------------------------------------------------------------ */
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ArrowLeft, Bold, Check, Heading, Italic, Link as LinkIcon, List, ListOrdered,
+  ArrowLeft, Bold, Check, Hash, Heading, Italic, Layers, Link as LinkIcon, List, ListOrdered,
   Pin, Plus, Search, StickyNote, Trash2, Underline, X,
 } from 'lucide-react';
-import { NOTE_COLOURS, excerpt, isEmptyNote, sanitise } from './notes.js';
+import { NOTE_COLOURS, addTags, allNoteTags, excerpt, groupByTag, hasTag, isEmptyNote, noteTags, removeTag, sanitise, tagKey } from './notes.js';
 import { tx } from './core.jsx';
 import { applySort } from './filters.js';
 
@@ -34,7 +34,50 @@ const stamp = (ms) => {
 
 /* ---- the editor ---- */
 
-export function NoteEditor({ note, onChange, onClose, onDelete, taskTitle }) {
+/* ---- tags on one note ----
+   Typed, not picked: Enter or a comma files what is in the box, Backspace in
+   an empty box takes the last one back off. The tags already in use are
+   offered as suggestions so "reading" and "Reading list" do not drift apart
+   by accident. */
+function NoteTags({ note, allTags = [], onChange }) {
+  const [draft, setDraft] = useState('');
+  const tags = noteTags(note);
+  const commit = () => {
+    if (!draft.trim()) return;
+    onChange({ tags: addTags(note, draft) });
+    setDraft('');
+  };
+  const listId = `note-tags-${note.id}`;
+  return (
+    <div className="note-tags">
+      <Hash size={13} className="note-tags-ic" />
+      {tags.map((t) => (
+        <span key={tagKey(t)} className="note-tag">
+          {t}
+          <button onClick={() => onChange({ tags: removeTag(note, t) })} aria-label={`${tx('Remove tag', 'أزل الوسم')} ${t}`}><X size={11} /></button>
+        </span>
+      ))}
+      <input
+        className="note-tag-in"
+        list={listId}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); }
+          else if (e.key === 'Backspace' && !draft && tags.length) onChange({ tags: removeTag(note, tags[tags.length - 1]) });
+        }}
+        onBlur={commit}
+        placeholder={tags.length ? tx('Add tag', 'أضف وسمًا') : tx('Tag this note…', 'ضع وسمًا لهذه الملاحظة…')}
+        aria-label={tx('Add a tag', 'أضف وسمًا')}
+      />
+      <datalist id={listId}>
+        {allTags.filter((x) => !hasTag(note, x.tag)).map((x) => <option key={tagKey(x.tag)} value={x.tag} />)}
+      </datalist>
+    </div>
+  );
+}
+
+export function NoteEditor({ note, onChange, onClose, onDelete, taskTitle, allTags = [] }) {
   const bodyRef = useRef(null);
   const loadedFor = useRef(null);
 
@@ -77,6 +120,8 @@ export function NoteEditor({ note, onChange, onClose, onDelete, taskTitle }) {
         </div>
 
         {taskTitle && <div className="note-fromtask"><Check size={12} /> {tx('from', 'من')} “{taskTitle}”</div>}
+
+        <NoteTags note={note} allTags={allTags} onChange={onChange} />
 
         <div className="note-tools">
           <button className="icon sm" onMouseDown={(e) => e.preventDefault()} onClick={() => cmd('bold')} aria-label="Bold"><Bold size={15} /></button>
@@ -126,17 +171,66 @@ export function NoteEditor({ note, onChange, onClose, onDelete, taskTitle }) {
 
 /* ---- the wall ---- */
 
+/* Remembered per device: how someone likes to look at their wall is a
+   preference, not data, and it should not ride sync to a phone where the
+   other arrangement suits the screen better. */
+const GROUP_PREF = 'rhythm:notes:group';
+const readGroupPref = () => { try { return localStorage.getItem(GROUP_PREF) === 'tag'; } catch { return false; } };
+const writeGroupPref = (on) => { try { localStorage.setItem(GROUP_PREF, on ? 'tag' : 'none'); } catch { /* private mode */ } };
+
 export function NotesView({ notes, sky, stars, heroLight, SkyScene, filterBar, sort, onOpen, onNew, onChange, taskTitleFor }) {
   const [q, setQ] = useState('');
+  const [tagOn, setTagOn] = useState(null);          // one tag narrowed to, or null
+  const [grouped, setGrouped] = useState(readGroupPref);
+  const tagList = allNoteTags(notes);
+  // A tag that no note carries any more stops filtering, rather than leaving
+  // an empty wall with no way to tell why.
+  const activeTag = tagOn && tagList.some((x) => tagKey(x.tag) === tagKey(tagOn)) ? tagOn : null;
   const term = q.trim().toLowerCase();
-  const found = term
-    ? notes.filter((n) => `${n.title} ${excerpt(n.body, 4000)}`.toLowerCase().includes(term))
-    : notes;
+  const found = notes
+    .filter((n) => !activeTag || hasTag(n, activeTag))
+    .filter((n) => !term || `${n.title} ${noteTags(n).join(' ')} ${excerpt(n.body, 4000)}`.toLowerCase().includes(term));
   /* Pinned stays above the sort whatever it is: pinning is a statement about
      where something belongs on the wall, and an ordering that ignores it makes
      the pin do nothing. */
   const shown = applySort(found, sort === 'title' ? 'title' : 'recent', { title: (n) => n.title || excerpt(n.body, 40) })
     .slice().sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+
+  /* One card on the wall. Its tags are shown, and tapping one narrows the
+     wall to it. */
+  const card = (n) => {
+    const text = excerpt(n.body, 260);
+    const from = n.taskId && taskTitleFor ? taskTitleFor(n.taskId) : null;
+    return (
+      <button key={n.id} className="note-card" style={{ '--ncolour': n.colour }} onClick={() => onOpen(n.id)}>
+        <span
+          className={`note-pin ${n.pinned ? 'on' : ''}`}
+          role="button"
+          tabIndex={0}
+          aria-label={tx('Pin', 'تثبيت')}
+          onClick={(e) => { e.stopPropagation(); onChange(n.id, { pinned: !n.pinned }); }}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onChange(n.id, { pinned: !n.pinned }); } }}
+        >
+          <Pin size={13} />
+        </span>
+        {n.title ? <span className="note-card-t">{n.title}</span> : null}
+        {text ? <span className="note-card-b">{text}</span> : <span className="note-card-b empty">{tx('Empty note', 'ملاحظة فارغة')}</span>}
+        {noteTags(n).length > 0 && (
+          <span className="note-card-tags">
+            {noteTags(n).map((t) => (
+              <span key={tagKey(t)} className="note-card-tag" role="button" tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); setTagOn(t); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setTagOn(t); } }}>#{t}</span>
+            ))}
+          </span>
+        )}
+        <span className="note-card-f">
+          {from ? <span className="note-card-task">“{from}”</span> : null}
+          <span className="note-stamp">{stamp(n.updatedAt)}</span>
+        </span>
+      </button>
+    );
+  };
 
   return (
     <div className="hero-card wide">
@@ -151,8 +245,32 @@ export function NotesView({ notes, sky, stars, heroLight, SkyScene, filterBar, s
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={tx('Search notes…', 'ابحث في الملاحظات…')} />
           </span>
           {filterBar}
-          <button className="primary sm" onClick={onNew}><Plus size={15} /> {tx('New note', 'ملاحظة جديدة')}</button>
+          {tagList.length > 0 && (
+            <button className={`ghost sm note-groupbtn ${grouped ? 'on' : ''}`} aria-pressed={grouped}
+              onClick={() => { setGrouped(!grouped); writeGroupPref(!grouped); }}
+              title={tx('Group the wall by tag', 'جمّع الملاحظات حسب الوسم')}>
+              <Layers size={14} /> {tx('Group by tag', 'حسب الوسم')}
+            </button>
+          )}
+          {/* Narrowed to a tag, a new note starts with that tag — it was
+              written from inside that group. */}
+          <button className="primary sm" onClick={() => onNew(activeTag ? { tags: [activeTag] } : undefined)}><Plus size={15} /> {tx('New note', 'ملاحظة جديدة')}</button>
         </div>
+
+        {tagList.length > 0 && (
+          <div className="note-tagbar" role="toolbar" aria-label={tx('Tags', 'الوسوم')}>
+            <button className={`note-tagchip ${!activeTag ? 'on' : ''}`} onClick={() => setTagOn(null)}>{tx('All', 'الكل')}</button>
+            {tagList.map((x) => {
+              const on = !!activeTag && tagKey(activeTag) === tagKey(x.tag);
+              return (
+                <button key={tagKey(x.tag)} className={`note-tagchip ${on ? 'on' : ''}`} aria-pressed={on}
+                  onClick={() => setTagOn(on ? null : x.tag)}>
+                  <Hash size={11} />{x.tag}<span className="note-tagchip-n">{x.count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {notes.length === 0 && (
           <div className="proj-empty">
@@ -166,33 +284,19 @@ export function NotesView({ notes, sky, stars, heroLight, SkyScene, filterBar, s
         )}
 
         {/* Columns rather than a grid: notes are different heights, and a grid
-            would leave a hole under every short one. */}
-        <div className="note-wall">
-          {shown.map((n) => {
-            const text = excerpt(n.body, 260);
-            const from = n.taskId && taskTitleFor ? taskTitleFor(n.taskId) : null;
-            return (
-              <button key={n.id} className="note-card" style={{ '--ncolour': n.colour }} onClick={() => onOpen(n.id)}>
-                <span
-                  className={`note-pin ${n.pinned ? 'on' : ''}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={tx('Pin', 'تثبيت')}
-                  onClick={(e) => { e.stopPropagation(); onChange(n.id, { pinned: !n.pinned }); }}
-                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); onChange(n.id, { pinned: !n.pinned }); } }}
-                >
-                  <Pin size={13} />
-                </span>
-                {n.title ? <span className="note-card-t">{n.title}</span> : null}
-                {text ? <span className="note-card-b">{text}</span> : <span className="note-card-b empty">{tx('Empty note', 'ملاحظة فارغة')}</span>}
-                <span className="note-card-f">
-                  {from ? <span className="note-card-task">“{from}”</span> : null}
-                  <span className="note-stamp">{stamp(n.updatedAt)}</span>
-                </span>
-              </button>
-            );
-          })}
-        </div>
+            would leave a hole under every short one. Grouped, each tag gets
+            its own wall; a note with two tags is on both. */}
+        {grouped && !activeTag
+          ? groupByTag(shown).map((g) => (
+              <section key={g.tag == null ? '__none' : tagKey(g.tag)} className="note-group">
+                <h4 className="note-group-h">
+                  {g.tag == null ? tx('Untagged', 'بلا وسم') : <><Hash size={12} />{g.tag}</>}
+                  <span className="note-group-n">{g.notes.length}</span>
+                </h4>
+                <div className="note-wall">{g.notes.map((n) => card(n))}</div>
+              </section>
+            ))
+          : <div className="note-wall">{shown.map((n) => card(n))}</div>}
       </div>
     </div>
   );

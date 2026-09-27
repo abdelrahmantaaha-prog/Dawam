@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, AlarmClock, Rows3, Mic, Square, ListChecks, CalendarRange, Gift, Timer, Ban } from 'lucide-react';
-import {brokerFrom, blockForTime,taskUntil,spanLength,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,POINTS,goalWorth,goalCrossed,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import {brokerFrom, taskDuration,blockForTime,taskUntil,spanLength,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,POINTS,goalWorth,goalCrossed,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook, onStorageHealth, writesFailing, storageStats, storageHeadroom, recheckWrites } from './storage.js';
 import { isDerived } from '../shared/model.js';
 import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken, inAppShell } from './sync.js';
@@ -25,19 +25,21 @@ import { loadCalPrep, setCalPrep, prepFor as prepForEvent, meetingsForProject, i
 import { parseTaskText, describeParse } from './parse.js';
 import { NotesView, NoteEditor } from './notesview.jsx';
 import { FilterBar } from './filterbar.jsx';
-import { EMPTY as EMPTY_FILTER, applyFilter, applySort, arrange, isFiltering, matches as filterMatches, sortFor } from './filters.js';
+import { EMPTY as EMPTY_FILTER, applyFilter, applySort, arrange, clear as clearFilter, isFiltering, matches as filterMatches, sortFor } from './filters.js';
 import { stampWeek, writeTarget } from './weekdoc.js';
-import { loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, isEmptyNote, excerpt as noteExcerpt } from './notes.js';
+import { initialProject, projectOfTask, tagProjectOf, withTagProject } from './tagproject.js';
+import { addProjectFocus } from './projectfocus.js';
+import { allNoteTags, loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, isEmptyNote, excerpt as noteExcerpt } from './notes.js';
 import { MeetingSheet } from './meetingsheet.jsx';
 import { nextMark, TINY, stackGate, isPrayerAnchor, anchorLabel } from './habits.js';
-import { dueProjects, normalizePlan, todayQuota, worksOn } from './quota.js';
+import { dueProjects, normalizePlan, paceStatus, todayQuota, worksOn } from './quota.js';
 import { lockDue, lockEvery, lockOn, minutesToLock } from './nowlock.js';
 import { holdDevice, lockSupported, releaseDevice } from './applock.js';
 import { dueOn as recurDueOn, describeRepeat, isScheduled, normalizeRepeat } from './recur.js';
 import { TrelloCards } from './trelloview.jsx';
 import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
 
-import { AppIcon,BlockRow,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,ProjectTag,QuickAdd,QuotaLine,SkyScene,SubtaskEditor,TaskEditor,TokenSuggest,pyramidPath } from './components.jsx';
+import { AppIcon,BlockRow,PaceStrip,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,ProjectTag,QuickAdd,QuotaLine,SkyScene,SubtaskEditor,TaskEditor,TokenSuggest,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
 
 /* The pool rejected this app's token. Said plainly, and pointing at the field
@@ -993,6 +995,10 @@ export default function Rhythm() {
      period someone picked (or the row they typed into) only counts for
      untimed work. See blockForTime in core.jsx. */
   const periodOf = (t, fallback) => blockForTime(t, timings) || vBlock(fallback || t.block);
+  /* A new task's project: the one it was given, else the one its tag is fixed
+     to (Settings → Labels). See src/tagproject.js. Read through the ref, since
+     a quick add can create its tag in the same breath. */
+  const projectFor = (extra) => initialProject(extra.projectRef, extra.projectId, settingsRef.current.labels, settingsRef.current.projects);
 
   const addTask = (dayIdx, blockId, title, extra = {}) => {
     if (!title.trim()) return;
@@ -1004,8 +1010,9 @@ export default function Rhythm() {
     const w = weekShownRef.current.doc;
     const t = {
       id: uid(), title: title.trim(), day: dayIdx, block: blockId,
-      projectId: extra.projectId || null, projectRef: extra.projectRef || null,
+      projectId: extra.projectId || null, projectRef: projectFor(extra),
       time: extra.time || '', start: extra.start || '', end: extra.end || '', templateId: extra.templateId || null, done: false,
+      ...(taskDuration(extra) != null ? { duration: taskDuration(extra) } : {}),
       subtasks: extra.subtasks ? mkSubs(extra.subtasks.map((s) => (typeof s === 'string' ? s : s.title))) : [],
       notes: extra.notes || [], order: extra.order != null ? extra.order : (timeOrder(extra.time) + Date.now() % 1000),
     };
@@ -1041,7 +1048,8 @@ export default function Rhythm() {
     let learned = null;
     const tasks = w.tasks.map((t) => {
       if (t.id !== id) return t;
-      let next = fn(t);
+      // Retagging can refile the task under the new tag's project.
+      let next = withTagProject(t, fn(t), settingsRef.current.labels, settingsRef.current.projects);
       /* Time decides the period. A new or changed time moves the task to the
          period it falls in. A task moved to another period by hand, with a
          time that says otherwise, drops the time instead — the move was the
@@ -1116,9 +1124,10 @@ export default function Rhythm() {
     if (!title || !title.trim()) return;
     await putTaskOnDate(dateISO, {
       id: uid(), title: title.trim(), day: 0, block: periodOf(extra, blockId),
-      projectId: extra.projectId || null, projectRef: extra.projectRef || null,
+      projectId: extra.projectId || null, projectRef: projectFor(extra),
       time: extra.time || '', start: extra.start || '', end: extra.end || '',
       templateId: extra.templateId || null, done: false,
+      ...(taskDuration(extra) != null ? { duration: taskDuration(extra) } : {}),
       subtasks: extra.subtasks ? mkSubs(extra.subtasks.map((s) => (typeof s === 'string' ? s : s.title))) : [],
       notes: extra.notes || [], order: extra.order != null ? extra.order : (timeOrder(extra.time) + Date.now() % 1000),
     });
@@ -1127,7 +1136,7 @@ export default function Rhythm() {
     const it = poolRef.current.find((p) => p.id === poolId);
     if (!it || !slotForDate(dateISO)) return; // don't drop it from the backlog if it has nowhere to land
     persistPool(poolRef.current.filter((p) => p.id !== poolId));
-    await putTaskOnDate(dateISO, { id: uid(), title: it.title, day: 0, block: blockId, projectId: it.projectId || null, projectRef: it.projectRef || null, time: '', done: false, subtasks: it.subtasks || [], notes: it.notes || [], order: Date.now() });
+    await putTaskOnDate(dateISO, { id: uid(), title: it.title, day: 0, block: blockId, projectId: it.projectId || null, projectRef: it.projectRef || null, ...(taskDuration(it) != null ? { duration: taskDuration(it) } : {}), time: '', done: false, subtasks: it.subtasks || [], notes: it.notes || [], order: Date.now() });
   };
 
   const removeTask = (id) => { const w = weekRef.current; persistWeek({ ...w, tasks: w.tasks.filter((t) => t.id !== id) }); setEditing(null); };
@@ -1193,11 +1202,11 @@ export default function Rhythm() {
   /* ---- pool (backlog) ops ---- */
   const addPoolItem = (title, extra = {}) => {
     if (!title.trim()) return;
-    const it = { id: uid(), title: title.trim(), projectId: extra.projectId || null, projectRef: extra.projectRef || null, subtasks: extra.subtasks ? mkSubs(extra.subtasks.map((s) => (typeof s === 'string' ? s : s.title))) : [], notes: extra.notes || [], order: Date.now() };
+    const it = { id: uid(), title: title.trim(), projectId: extra.projectId || null, projectRef: projectFor(extra), ...(taskDuration(extra) != null ? { duration: taskDuration(extra) } : {}), subtasks: extra.subtasks ? mkSubs(extra.subtasks.map((s) => (typeof s === 'string' ? s : s.title))) : [], notes: extra.notes || [], order: Date.now() };
     persistPool([...poolRef.current, it]);
     return it;
   };
-  const mutatePoolItem = (id, fn) => persistPool(poolRef.current.map((p) => (p.id === id ? fn(p) : p)));
+  const mutatePoolItem = (id, fn) => persistPool(poolRef.current.map((p) => (p.id === id ? withTagProject(p, fn(p), settingsRef.current.labels, settingsRef.current.projects) : p)));
   const togglePoolDone = (id) => mutatePoolItem(id, (p) => ({ ...p, done: !p.done }));
   /* Emptying the drawer. Confirmed in the UI first — this is the one button
      here that destroys several things at once, and an undo would mean keeping
@@ -1219,7 +1228,7 @@ export default function Rhythm() {
     const t = w.tasks.find((x) => x.id === id);
     if (!t) return;
     persistWeek({ ...w, tasks: w.tasks.filter((x) => x.id !== id) });
-    persistPool([...poolRef.current, { id: uid(), title: t.title, projectId: t.projectId || null, projectRef: t.projectRef || null, subtasks: t.subtasks || [], notes: t.notes || [], order: Date.now() }]);
+    persistPool([...poolRef.current, { id: uid(), title: t.title, projectId: t.projectId || null, projectRef: t.projectRef || null, ...(taskDuration(t) != null ? { duration: taskDuration(t) } : {}), subtasks: t.subtasks || [], notes: t.notes || [], order: Date.now() }]);
     flash(tx('Moved to backlog.', 'نُقلت إلى قائمة الانتظار.'));
   };
   // Schedule a backlog item onto a day/block.
@@ -1230,7 +1239,7 @@ export default function Rhythm() {
     // The document for the week on SCREEN — dayIdx is an index into that week,
     // so the list it is appended to has to be that week's. See weekShown.
     const { iso: destISO, doc: w } = weekShownRef.current;
-    const t = { id: uid(), title: it.title, day: dayIdx, block: blockId, projectId: it.projectId || null, projectRef: it.projectRef || null, time: '', done: false, subtasks: it.subtasks || [], notes: it.notes || [], order: Date.now() };
+    const t = { id: uid(), title: it.title, day: dayIdx, block: blockId, projectId: it.projectId || null, projectRef: it.projectRef || null, ...(taskDuration(it) != null ? { duration: taskDuration(it) } : {}), time: '', done: false, subtasks: it.subtasks || [], notes: it.notes || [], order: Date.now() };
     persistWeek({ ...w, tasks: [...(w.tasks || []), t] }, destISO);
   };
 
@@ -1293,7 +1302,7 @@ export default function Rhythm() {
         const add = due.filter((tp) => !have.has(tp.id)).map((tp) => ({
           id: uid(), title: tp.title, day: dayIdx,
           block: blockForTime(tp, todayTimings) || vBlock(tp.block),
-          projectId: tp.projectId || null, projectRef: tp.projectRef || null,
+          projectId: tp.projectId || null, projectRef: initialProject(tp.projectRef, tp.projectId, settingsRef.current.labels, settingsRef.current.projects),
           time: tp.time || '', start: tp.start || '', end: tp.end || '', templateId: tp.id, done: false,
           subtasks: mkSubs(tp.subtasks || []), notes: [], order: timeOrder(tp.start) + Date.now() % 1000,
         }));
@@ -1449,6 +1458,9 @@ export default function Rhythm() {
       // Only the first tag is claimed — the task model carries one label.
       projectId: p.labelNames.length ? labelIdFor(p.labelNames[0]) : null,
       projectRef: p.projectId || null,
+      // "for 45m" with no start is a duration, not a slot: Slot the day sizes
+      // the task by it. With a start it has already become the end time.
+      duration: !p.start && p.minutes ? p.minutes : null,
     };
     if (toPool) { addPoolItem(p.title, extra); return; }
     const block = p.block || blockId || 'morning';
@@ -1502,6 +1514,7 @@ export default function Rhythm() {
        to the model at all. */
     dayTasks = dayTasks.map((t) => {
       if (t.start && t.end) return t;
+      if (taskDuration(t) != null) return t;   // said outright on the task: nothing to guess
       const m = durationFor(t.title);
       return m ? { ...t, est: m, estSig: taskTextSig(t) } : t;
     });
@@ -1512,7 +1525,7 @@ export default function Rhythm() {
        falls through to the built-in heuristic without a word of ceremony:
        slotting must never be hostage to the network. */
     let sized = 0, aiTried = false, estMap = null, aiWhy = '';
-    const needsEst = dayTasks.filter((t) => !(t.start && t.end) && (!t.est || t.estSig !== taskTextSig(t)));
+    const needsEst = dayTasks.filter((t) => !(t.start && t.end) && taskDuration(t) == null && (!t.est || t.estSig !== taskTextSig(t)));
     if ((settings.apiKey || brokerFrom(settings)) && needsEst.length) {
       aiTried = true;
       setSlotBusy(true);
@@ -1765,7 +1778,8 @@ export default function Rhythm() {
       // Habits come through here too, and a habit id is not a task id — only
       // pass one the planner can actually tick off afterwards.
       const known = (weekRef.current.tasks || []).some((x) => x.id === task.id);
-      window.rhythmFocus.startWork({ task: task.title || 'Focus', workMin: mins, allowed: [], taskId: known ? task.id : null });
+      window.rhythmFocus.startWork({ task: task.title || 'Focus', workMin: mins, allowed: [], taskId: known ? task.id : null,
+        projectId: known ? projectOfTask(task, settings.labels, settings.projects) : null });
       setView('focus');
       return;
     }
@@ -1961,10 +1975,10 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     preview.ops.filter((o) => o._keep).forEach((o) => {
       if (o.type === 'create_task') {
         const r = ensureLabel(o.project, labels); labels = r.labels;
-        newTasks.push({ id: uid(), title: o.title, day: clampDay(o.day), block: validBlock(o.block), projectId: r.id, time: o.time || '', start: (() => { const rr = parseRange(o.time); return rr ? mm2(rr.start) : ''; })(), end: (() => { const rr = parseRange(o.time); return rr && rr.end != null ? mm2(rr.end) : ''; })(), done: false, subtasks: mkSubs(o.subtasks), notes: o.note ? [{ id: uid(), type: 'text', content: o.note }] : [], order: timeOrder(o.time) + 0.5 });
+        newTasks.push({ id: uid(), title: o.title, day: clampDay(o.day), block: validBlock(o.block), projectId: r.id, projectRef: tagProjectOf(labels, r.id, settings.projects), time: o.time || '', start: (() => { const rr = parseRange(o.time); return rr ? mm2(rr.start) : ''; })(), end: (() => { const rr = parseRange(o.time); return rr && rr.end != null ? mm2(rr.end) : ''; })(), done: false, subtasks: mkSubs(o.subtasks), notes: o.note ? [{ id: uid(), type: 'text', content: o.note }] : [], order: timeOrder(o.time) + 0.5 });
       } else if (o.type === 'create_pool') {
         const r = ensureLabel(o.project, labels); labels = r.labels;
-        newPool.push({ id: uid(), title: o.title, projectId: r.id, subtasks: mkSubs(o.subtasks), notes: [], order: Date.now() });
+        newPool.push({ id: uid(), title: o.title, projectId: r.id, projectRef: tagProjectOf(labels, r.id, settings.projects), subtasks: mkSubs(o.subtasks), notes: [], order: Date.now() });
       } else if (o.type === 'add_subtask') { const t = findTask(o.taskId); if (t) t.subtasks = [...t.subtasks, { id: uid(), title: o.title, done: false }]; }
       else if (o.type === 'add_note') { const t = findTask(o.taskId); if (t) t.notes = [...t.notes, { id: uid(), type: 'text', content: o.note }]; }
     });
@@ -2382,7 +2396,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const focusTasks = [
     ...nowList
       .filter((t) => !t.done && !hasVault(t))
-      .map((t) => ({ id: t.id, title: t.title, minutes: spanOf(t) || durationFor(t.title) || null, when: timeLabel(t) })),
+      .map((t) => ({ id: t.id, title: t.title, minutes: spanOf(t) || taskDuration(t) || durationFor(t.title) || null, when: timeLabel(t), project: projectOfTask(t, settings.labels, settings.projects) })),
     // Meetings still ahead or running: a round sized to what remains of them.
     ...timedToday
       .filter((m) => !m.done && m.endMs > Date.now())
@@ -2420,6 +2434,23 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     }
   };
   const focusLearn = (title, minutes) => { rememberDuration(title, minutes, 'kept'); };
+  /* The same minutes, tallied against a project (src/projectfocus.js). The
+     round names its project when it was started — picked on the focus page,
+     or carried from the task — and a round from an older shell that does not
+     know about projects falls back to the task's own. Minutes land on the
+     day the round ended, on the Fajr-to-Fajr clock like everything else. */
+  const bankProjectFocus = (entry) => {
+    const minutes = Math.round(((entry && entry.focusedSec) || 0) / 60);
+    if (!(minutes > 0)) return;
+    let pid = entry.projectId || null;
+    if (!pid && entry.taskId) {
+      const t = (weekRef.current.tasks || []).find((x) => x.id === entry.taskId);
+      pid = projectOfTask(t, settingsRef.current.labels, settingsRef.current.projects);
+    }
+    if (!pid || !(settingsRef.current.projects || []).some((p) => p.id === pid)) return;
+    const iso = fmtISO(logicalDayMid(entry.endedAt || Date.now()));
+    persistProjects((prev) => prev.map((p) => (p.id === pid ? addProjectFocus(p, iso, minutes) : p)));
+  };
   useRoundEnded((entry) => {
     // A finished round is activity. Without this the lock would be waiting on
     // the other side of it, which reads as a punishment for having focused.
@@ -2428,6 +2459,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     // whether or not the question about it gets answered, and a dismissed card
     // should not throw away the one number that was actually measured.
     if (entry && entry.taskId) bankFocus(entry.taskId, Math.round((entry.focusedSec || 0) / 60));
+    if (entry) bankProjectFocus(entry);
     setPendingRound(entry);
     setView('focus');
   });
@@ -3060,6 +3092,14 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
      says nothing at Isha, which is the difference between a reminder and a
      nag. Past its block it stays until the day is over — a share you owe does
      not stop being owed because its hour went by. */
+  /* On pace or not, for every numbered goal that has a line to be measured
+     against (a target, a start and a deadline). The quota lines carry their
+     own chip; `paceOthers` is everything a page is not already showing. */
+  const verdictOf = (p) => paceStatus(p, projectPace(p));
+  const paceOthers = (shownIds) => (settings.projects || [])
+    .filter((p) => !p.completedAt && Number(p.target) > 0 && !shownIds.has(p.id))
+    .map((p) => ({ project: p, verdict: verdictOf(p) }))
+    .filter((x) => x.verdict.key !== 'unknown' && x.verdict.key !== 'done');
   const quotasNow = todayInView
     ? dueProjects(settings.projects || [], todayMid, { blockOrder: blockIdx })
         .filter((x) => {
@@ -3562,10 +3602,16 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               <div className="now-quotas">
                 <div className="now-quotas-h"><Target size={13} /> {tx('Today\u2019s share', 'نصيب اليوم')}</div>
                 {quotasNow.map(({ project, quota }) => (
-                  <QuotaLine key={project.id} project={project} quota={quota}
+                  <QuotaLine key={project.id} project={project} quota={quota} verdict={verdictOf(project)}
                     onLog={(n) => { logProgress(project.id, n); flash(`${project.name} +${n} ${project.unit || ''}`.trim()); }}
                     onOpen={() => { go('projects'); setBoardProject(null); }} />
                 ))}
+              </div>
+            )}
+            {todayInView && (
+              <div className="now-pace">
+                <PaceStrip items={paceOthers(new Set(quotasNow.map((x) => x.project.id)))}
+                  title={tx('Goals', 'الأهداف')} onOpen={() => { go('projects'); setBoardProject(null); }} />
               </div>
             )}
             {/* Being caught up is a result, and a result nobody collects stops
@@ -3680,22 +3726,46 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               return `${mon(selectedDate.getMonth())} · ${n} ${n !== 1 ? tr.tasks : tr.task}${usingFallback ? ` · ${tx('prayer times estimated', 'مواقيت تقديرية')}` : ''}`; })()} />
           <div className="hero-sheet">
         {filterBar(TASK_SORTS)}
+        {/* A filter that hides work has to say so, on the page it is hiding it
+            from. Now ignores the filter, so a Plan left filtered reads as
+            "my tasks are gone" while Now carries on — exactly how a stale
+            filter in the never-restarting desktop app looked. */}
+        {isFiltering(filter) && (() => {
+          const all = tasksOnDay(selectedDay);
+          const hidden = all.length - applyFilter(all, filter).length;
+          if (!hidden) return null;
+          return (
+            <div className="filter-hidden">
+              <span>{hidden === all.length
+                ? tx(`All ${hidden} tasks on this day are hidden by the filter.`, `كل المهام (${hidden}) في هذا اليوم مخفية بالتصفية.`)
+                : tx(`${hidden} of ${all.length} tasks on this day are hidden by the filter.`, `${hidden} من ${all.length} مهام في هذا اليوم مخفية بالتصفية.`)}</span>
+              <button className="ghost sm" onClick={() => setFilter(clearFilter(filter))}>{tx('Show all', 'اعرض الكل')}</button>
+            </div>
+          );
+        })()}
         {/* What the numbered projects want out of THIS day, on the day being
             planned rather than only on today — planning Thursday should show
             Thursday's share. Met ones stay, greyed, so a day that is done
             reads as done rather than as a day nothing was asked of. */}
         {(() => {
           const due = dueProjects(settings.projects || [], selectedDate, { blockOrder: blockIdx });
-          if (!due.length) return null;
+          const others = paceOthers(new Set(due.map((x) => x.project.id)));
+          if (!due.length && !others.length) return null;
           return (
-            <div className="plan-quotas">
-              <div className="plan-quotas-h"><Target size={12} /> {tx('Projects want, today', 'ما تطلبه المشاريع اليوم')}</div>
-              {due.map(({ project, quota }) => (
-                <QuotaLine key={project.id} project={project} quota={quota} compact
-                  onLog={(n) => { logProgress(project.id, n); flash(`${project.name} +${n} ${project.unit || ''}`.trim()); }}
-                  onOpen={() => { go('projects'); setBoardProject(null); }} />
-              ))}
-            </div>
+            <>
+              {due.length > 0 && (
+                <div className="plan-quotas">
+                  <div className="plan-quotas-h"><Target size={12} /> {tx('Projects want, today', 'ما تطلبه المشاريع اليوم')}</div>
+                  {due.map(({ project, quota }) => (
+                    <QuotaLine key={project.id} project={project} quota={quota} compact verdict={verdictOf(project)}
+                      onLog={(n) => { logProgress(project.id, n); flash(`${project.name} +${n} ${project.unit || ''}`.trim()); }}
+                      onOpen={() => { go('projects'); setBoardProject(null); }} />
+                  ))}
+                </div>
+              )}
+              <PaceStrip items={others} title={due.length ? null : tx('Goals', 'الأهداف')}
+                onOpen={() => { go('projects'); setBoardProject(null); }} />
+            </>
           );
         })()}
         <div className="wknav plan-nav">
@@ -3901,7 +3971,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           filterBar={filterBar(['recent', 'title'], true)}
           sort={filter.sort}
           onOpen={setOpenNote}
-          onNew={() => createNote()}
+          onNew={(over) => createNote(over || {})}
           onChange={patchNote}
           taskTitleFor={titleOfTask}
         />
@@ -3993,6 +4063,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           onChange={(patch) => patchNote(openNote, patch)}
           onClose={closeNote}
           onDelete={removeNote}
+          allTags={allNoteTags(notes)}
         />
       )}
 
@@ -4224,6 +4295,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {view === 'focus' && isDesktop() && (
         <FocusView
           tasks={focusTasks}
+          projects={(settings.projects || []).filter((p) => !p.completedAt)}
           rewards={(settings.rewards || []).filter((r) => r.name)}
           balance={balance}
           durationFor={durationFor}

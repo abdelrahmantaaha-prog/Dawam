@@ -9,6 +9,51 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## [3.3] — 2026-09-27
+
+Focus time counts towards projects, a tag can stand for a project, notes get
+tags, goals say whether they are on pace, and a task can simply say how long
+it takes.
+
+### Added
+- **Focus time by project.** A finished round's measured minutes are tallied
+  on the project it belongs to — the task's own project, or its tag's. The
+  focus page has a *Counts towards* picker (filled in from the task, and
+  usable for a round on a typed title), the Today tab breaks the day down by
+  project, a live round shows its project, and each project card shows its
+  total and the last seven days. Stored per day on the project
+  (`project.focus`), so it outlives pruned weeks. `src/projectfocus.js`.
+- **Tags fixed to a project** (Settings → Labels). Tagging a task files it
+  under that project too; retagging moves a project the old tag had set; a
+  project picked by hand is never overridden. Applies to quick add, the
+  editor, the backlog, brain dumps and self-adding recurring tasks.
+  `src/tagproject.js`.
+- **Note tags and grouping.** Tag a note from the sheet (Enter or a comma to
+  add, Backspace to remove, existing tags suggested). The wall has a tag bar
+  to narrow to one tag, search matches tags, a new note written inside a tag
+  starts with it, and *Group by tag* lays the wall out in sections — a note
+  with two tags sits in both, untagged ones last.
+- **Always allowed** (Focus settings → Lists): sites and keywords that are
+  never a distraction in any round. Unlike a round's cleared list it does not
+  make the round strict. The hard block still wins.
+- **On pace, on Plan and Now.** Every project with a numeric target says
+  whether it is on pace — "on pace", "+6 ahead", "12 pages behind" — on its
+  share-of-the-day line, and projects without a reminder today appear in a
+  *Goals* strip. The project card uses the same verdict (`paceStatus`).
+- **A Duration field on tasks.** Slot the day uses it instead of guessing,
+  ahead of memory, AI and the heuristic; a start-only task gets its end from
+  it. Typing it also teaches the duration memory for that title, and "for
+  45m" in a quick add without a start time fills it in.
+
+### Fixed
+- **A filter could hide every task on Plan with nothing to show for it.** A
+  filter on a project that was later completed (or a tag later deleted) had
+  an empty chip and no toggle left to switch it off, while Now — which
+  ignores the filter — carried on. The desktop app never restarts, so such a
+  filter could sit there for days. The chip now always names what it holds,
+  a finished project stays toggleable while it is selected, and Plan says
+  "N tasks on this day are hidden by the filter" with a *Show all* button.
+
 ## [3.2] — 2026-09-26
 
 "Slot the day" works again, sort reaches the board and the calendar, the

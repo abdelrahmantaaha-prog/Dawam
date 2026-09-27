@@ -18,6 +18,9 @@ const DEFAULTS = {
       'discord', 'whatsapp', 'telegram',
       'steam', 'epic games'
     ],
+    // Never a distraction during a round: sites and keywords you always work
+    // from. Clears a window without making the round strict. See session.js.
+    alwaysAllowed: [],
     blocklist: [],
     freeTimes: [],
     nudgeSound: true,

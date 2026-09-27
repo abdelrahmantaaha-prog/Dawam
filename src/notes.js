@@ -90,6 +90,7 @@ export const newNote = (over = {}) => ({
   body: '',
   colour: NOTE_COLOURS[0],
   pinned: false,
+  tags: [],              // free words for finding and grouping — see noteTags
   taskId: null,          // the task it was written from, if any
   eventKey: null,        // or the calendar occurrence — "uid|startMs"
   createdAt: fmtISO(new Date()),
@@ -127,3 +128,69 @@ export const notesForTask = (notes, taskId) => (notes || []).filter((n) => n.tas
 /* Per OCCURRENCE, not per series: the agenda for this Monday is not the agenda
    for next Monday, which is exactly the opposite of the description. */
 export const notesForEvent = (notes, eventKey) => (notes || []).filter((n) => n.eventKey && n.eventKey === eventKey);
+
+/* ---- tags ----
+   A note's tags are its own words, not the planner's labels: a label is a
+   colour for work, and a note about "Arabic grammar" should not have to
+   invent a task tag to be findable. Kept as written (so "Mutarjim" stays
+   capitalised) but compared without case or a leading '#', so "#ideas",
+   "Ideas" and "ideas " are one tag. */
+export const tagKey = (t) => String(t == null ? '' : t).trim().replace(/^#+/, '').replace(/\s+/g, ' ').toLowerCase();
+export const cleanTag = (t) => String(t == null ? '' : t).trim().replace(/^#+/, '').replace(/\s+/g, ' ').slice(0, 40);
+
+/* A note's tags, de-duplicated, empties dropped. Old notes have none. */
+export function noteTags(note) {
+  const seen = new Set();
+  const out = [];
+  for (const raw of (note && Array.isArray(note.tags) ? note.tags : [])) {
+    const t = cleanTag(raw);
+    const k = tagKey(t);
+    if (!k || seen.has(k)) continue;
+    seen.add(k); out.push(t);
+  }
+  return out;
+}
+
+/* Add one or several tags ("ideas, reading #later") to a note's list. */
+export function addTags(note, text) {
+  const words = String(text || '').split(/[,\n]|\s(?=#)/).map(cleanTag).filter(Boolean);
+  return noteTags({ tags: [...noteTags(note), ...words] });
+}
+
+export const removeTag = (note, tag) => noteTags(note).filter((t) => tagKey(t) !== tagKey(tag));
+export const hasTag = (note, tag) => noteTags(note).some((t) => tagKey(t) === tagKey(tag));
+
+/* Every tag in use, with how many notes carry it, most used first — the first
+   spelling seen is the one shown. */
+export function allNoteTags(notes) {
+  const by = new Map();
+  for (const n of notes || []) {
+    for (const t of noteTags(n)) {
+      const k = tagKey(t);
+      const cur = by.get(k);
+      if (cur) cur.count += 1; else by.set(k, { tag: t, count: 1 });
+    }
+  }
+  return [...by.values()].sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+}
+
+/* The wall grouped by tag. A note with two tags appears under both — a group
+   is a way of looking, not a folder a note has to live in exactly once — and
+   untagged notes come last, under `tag: null`. Order within a group is the
+   order given. */
+export function groupByTag(notes) {
+  const groups = new Map();
+  const loose = [];
+  for (const n of notes || []) {
+    const tags = noteTags(n);
+    if (!tags.length) { loose.push(n); continue; }
+    for (const t of tags) {
+      const k = tagKey(t);
+      if (!groups.has(k)) groups.set(k, { tag: t, notes: [] });
+      groups.get(k).notes.push(n);
+    }
+  }
+  const out = [...groups.values()].sort((a, b) => a.tag.localeCompare(b.tag, undefined, { sensitivity: 'base' }));
+  if (loose.length) out.push({ tag: null, notes: loose });
+  return out;
+}

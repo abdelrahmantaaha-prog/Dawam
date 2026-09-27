@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, CalendarRange, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, Gift, Timer, Ban } from 'lucide-react';
-import { taskUntil,spanLength,focusTargetMin,focusSpent,focusMet,hasVault,vaultWindowed,vaultUnlocked,autoWorth,taskWorth,estimateMinutes,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { taskDuration,taskUntil,spanLength,focusTargetMin,focusSpent,focusMet,hasVault,vaultWindowed,vaultUnlocked,autoWorth,taskWorth,estimateMinutes,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
-import { durationFor } from './durations.js';
+import { durationFor, rememberDuration } from './durations.js';
 import { describeRepeat, isScheduled } from './recur.js';
 import { applySuggestion, suggestFor, tokenAt } from './parse.js';
 
@@ -225,7 +225,46 @@ function ProjectTag({ project, sm = false }) {
 /*  would make it a reminder to go somewhere else and log it, which is  */
 /*  the step people skip.                                              */
 /* ------------------------------------------------------------------ */
-function QuotaLine({ project, quota, onLog, onOpen, compact = false }) {
+/* On pace or not, in the fewest words that still carry the number: "on pace",
+   "+6 ahead", "12 pages behind". `verdict` is paceStatus() from quota.js. */
+function PaceChip({ verdict, unit = '' }) {
+  if (!verdict || verdict.key === 'unknown') return null;
+  const n = verdict.gap == null ? 0 : Math.round(Math.abs(verdict.gap));
+  const u = unit ? ` ${unit}` : '';
+  const text = {
+    done: tx('reached', 'اكتمل'),
+    waiting: tx('not started', 'لم يبدأ'),
+    on: tx('on pace', 'على المسار'),
+    ahead: `${tx('ahead', 'متقدّم')} +${n}${u}`,
+    behind: `${n}${u} ${tx('behind', 'متأخر')}`,
+    far: `${n}${u} ${tx('behind', 'متأخر')}`,
+  }[verdict.key];
+  if (!text) return null;
+  return <span className={`pace-chip ${verdict.key}`}>{text}</span>;
+}
+
+/* Every project with a numeric target and a deadline that is not already
+   asking for its share on this page — so Plan and Now say whether each goal
+   is on pace, not only the ones with a reminder switched on. */
+function PaceStrip({ items, onOpen, title }) {
+  if (!items || !items.length) return null;
+  return (
+    <div className="pace-strip">
+      {title ? <div className="pace-strip-h"><TrendingUp size={12} /> {title}</div> : null}
+      <div className="pace-strip-row">
+        {items.map(({ project, verdict }) => (
+          <button key={project.id} className={`pace-item ${verdict.key}`} style={{ '--qcolour': project.color }} onClick={onOpen}>
+            <span className="quota-dot" />
+            <span className="pace-name">{project.name}</span>
+            <PaceChip verdict={verdict} unit={project.unit || ''} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function QuotaLine({ project, quota, onLog, onOpen, compact = false, verdict = null }) {
   const [n, setN] = useState('');
   const submit = () => { const v = Number(n); if (v > 0) { onLog(v); setN(''); } };
   const unit = project.unit || '';
@@ -233,7 +272,7 @@ function QuotaLine({ project, quota, onLog, onOpen, compact = false }) {
   return (
     <div className={`quota-line${quota.met ? ' met' : ''}${compact ? ' compact' : ''}`} style={{ '--qcolour': project.color }}>
       <button className="quota-main" onClick={onOpen}>
-        <span className="quota-name"><span className="quota-dot" />{project.name}</span>
+        <span className="quota-name"><span className="quota-dot" />{project.name}{verdict ? <PaceChip verdict={verdict} unit={project.unit || ''} /> : null}</span>
         <span className="quota-ask">
           {quota.need == null
             ? `${quota.total}/${quota.target} ${unit}`.trim()
@@ -704,6 +743,27 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, toda
               <label><span>{tx('Start', 'البداية')}</span><input className="time-input" type="time" value={task.start || ''} disabled={vaultLocksTime} onChange={(e) => onChange((t) => ({ ...t, start: e.target.value, autoSlot: null }))} /></label>
               <label><span>{tx('End', 'النهاية')}</span><input className="time-input" type="time" value={task.end || ''} disabled={vaultLocksTime} onChange={(e) => onChange((t) => ({ ...t, end: e.target.value, autoSlot: null }))} /></label>
             </div>
+            {/* How long it takes, said outright. "Slot the day" used to have to
+                deduce this — from memory, a model, or 25 minutes and a guess —
+                and a number the person states beats all three. Leaving the
+                field is also a lesson: the same title next week starts from it. */}
+            <label className="edit-dur">
+              <span><Timer size={12} /> {tx('Duration', 'المدة')}</span>
+              <span className="edit-dur-in">
+                <input className="time-input" type="number" min="5" max="480" step="5" inputMode="numeric"
+                  value={task.duration == null || task.duration === '' ? '' : task.duration}
+                  placeholder={String(estimateMinutes((() => { const m = durationFor(task.title); return m ? { ...task, duration: null, est: m } : { ...task, duration: null }; })()))}
+                  onChange={(e) => setField('duration', e.target.value === '' ? null : Math.max(0, Math.min(480, Math.round(Number(e.target.value) || 0))) || null)}
+                  onBlur={() => { const d = taskDuration(task); if (d) rememberDuration(task.title, d, 'manual'); }} />
+                <span className="edit-dur-unit">{tx('min', 'دقيقة')}</span>
+                {taskDuration(task) != null && <button className="mini-del" onClick={() => setField('duration', null)} aria-label={tx('Clear duration', 'مسح المدة')}><X size={13} /></button>}
+              </span>
+              <span className="hint-text">{tStartMin(task) != null && tEndMin(task) != null
+                ? tx('This task already has a start and an end, so its slot is fixed — the duration is used if you clear them.', 'لهذه المهمة بداية ونهاية، فمكانها ثابت — تُستخدم المدة إن مسحتهما.')
+                : taskDuration(task) != null
+                  ? tx('Slot the day gives it exactly this long.', '«جدولة اليوم» تمنحها هذه المدة بالضبط.')
+                  : tx('Empty: Slot the day estimates it (the number shown).', 'فارغ: «جدولة اليوم» تقدّرها (الرقم الظاهر).')}</span>
+            </label>
             {/* Runs until — the whole multi-day feature, in one date. The task
                 stays a single task; it simply belongs to every day up to this
                 one, and stops being overdue in the meantime. */}
@@ -745,7 +805,8 @@ function TaskEditor({ task, projects, allProjects = [], weekStart, dateISO, toda
                 ? `${tx('auto', 'تلقائي')} · ${(task.subtasks || []).length ? tx('split across steps', 'مقسّمة على الخطوات') : tx('on completion', 'عند الإنجاز')}`
                 : `${tx('auto would be', 'التلقائي')} ${autoWorth(task)}`}
               {(Number(task.pushes) || 0) > 0 ? ` · ${tx('pushed', 'مؤجّلة')} ×${Number(task.pushes)}` : ''}
-              {(() => { // what "Slot the day" would give it: memory beats cache beats heuristic
+              {(() => { // what "Slot the day" would give it: its own duration, then memory, cache, heuristic
+                if (taskDuration(task) != null) return ` · ${taskDuration(task)}${tx('m', 'د')} ${tx('(set)', '(محددة)')}`;
                 const m = durationFor(task.title);
                 const est = estimateMinutes(m ? { ...task, est: m } : task);
                 return ` · ~${est}${tx('m', 'د')}${m ? ` ${tx('(remembered)', '(محفوظة)')}` : ''}`;
@@ -1018,4 +1079,4 @@ function PointsPanel({ balance, ledger, rewards, penalties = [], onClose, onAddR
 /* ------------------------------------------------------------------ */
 /*  Habits — daily commitments; streaks glow brighter up to seven days */
 /* ------------------------------------------------------------------ */
-export { AppIcon,BlockRow,ProjectTag,QuickAdd,QuotaLine,TokenSuggest,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };
+export { AppIcon,BlockRow,PaceChip,PaceStrip,ProjectTag,QuickAdd,QuotaLine,TokenSuggest,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };

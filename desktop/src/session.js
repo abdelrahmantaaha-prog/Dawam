@@ -33,6 +33,15 @@ function windowKey(title, process, host) {
  * counting it would punish someone for being pulled away from a desk they then
  * came back to. It cannot be triggered by choice, which is what makes it safe
  * to leave uncapped. */
+/* Keywords and sites that are never a distraction during a round, whatever
+   the distraction list or a triage answer says. Matched the same way as every
+   other list here: a case-insensitive substring of title + process + domain. */
+function alwaysAllowed(settings) {
+  return (Array.isArray(settings && settings.alwaysAllowed) ? settings.alwaysAllowed : [])
+    .map((k) => String(k).toLowerCase().trim())
+    .filter(Boolean);
+}
+
 const MAX_PAUSE_SEC = 5 * 60;      // one pause, at most
 const PAUSE_BUDGET_SEC = 10 * 60;  // all manual pauses in one round, at most
 
@@ -49,6 +58,9 @@ class SessionManager extends EventEmitter {
     // It rides through to the history entry and back out on 'round-ended', so
     // the planner can tick off the task the person actually just did.
     this.taskId = null;
+    // The project the minutes count towards — picked on the focus page or
+    // carried from the task. The planner tallies it when the round ends.
+    this.projectId = null;
     this.rounds = 0;
     this.plannedMin = 0;
     this.totalSec = 0;
@@ -106,6 +118,7 @@ class SessionManager extends EventEmitter {
       pauseBudgetLeftSec: this.pauseBudgetLeft(),
       task: this.task,
       taskId: this.taskId,
+      projectId: this.projectId,
       templateId: this.templateId,
       rounds: this.rounds,
       plannedMin: this.plannedMin,
@@ -158,7 +171,7 @@ class SessionManager extends EventEmitter {
   }
 
   startWork(req) {
-    const { task, workMin, allowed, taskId, templateId } = req || {};
+    const { task, workMin, allowed, taskId, templateId, projectId } = req || {};
     const min = Math.max(1, Math.min(240, Number(workMin) || this.settings().workMin));
     const newTask = String(task || 'Deep work').trim() || 'Deep work';
     /* Verdicts seed from the policy this round was started under — by id, not
@@ -177,6 +190,7 @@ class SessionManager extends EventEmitter {
     this.pauseSpentSec = 0; // a fresh round gets a fresh budget
     this.task = newTask;
     this.taskId = taskId || null;
+    this.projectId = projectId ? String(projectId) : null;
     this.allowed = (Array.isArray(allowed) ? allowed : [])
       .map((k) => String(k).toLowerCase().trim())
       .filter(Boolean);
@@ -267,6 +281,7 @@ class SessionManager extends EventEmitter {
     this.pausedAt = 0;
     this.pauseSpentSec = 0;
     this.taskId = null;
+    this.projectId = null;
     this.drift = null;
     this.allowed = [];
     this.homeHwnd = 0;
@@ -290,8 +305,13 @@ class SessionManager extends EventEmitter {
     const neutral = own || (!title && !process);
 
     // A window cleared for this task never counts as a distraction,
-    // even if it matches the global distraction list.
-    const cleared = (this.allowed || []).some((k) => hay.includes(k));
+    // even if it matches the global distraction list. Neither does anything
+    // on the always-allowed list (Focus settings → Lists) — a dictionary, the
+    // docs you always work from. That list clears windows WITHOUT turning on
+    // strict mode: strict is "only these", and always-allowed is "never
+    // these", which are different promises.
+    const cleared = (this.allowed || []).some((k) => hay.includes(k))
+      || alwaysAllowed(this.settings()).some((k) => hay.includes(k));
     const key = neutral ? null : windowKey(title, process, host);
 
     // Slow pages briefly wear the wrong title while loading — hold judgment
@@ -436,6 +456,7 @@ class SessionManager extends EventEmitter {
     const entry = {
       task: this.task,
       taskId: this.taskId,
+      projectId: this.projectId,
       startedAt: this.startedAt,
       endedAt: Date.now(),
       plannedMin: this.plannedMin,
@@ -456,3 +477,4 @@ class SessionManager extends EventEmitter {
 }
 
 module.exports = SessionManager;
+module.exports.alwaysAllowed = alwaysAllowed;

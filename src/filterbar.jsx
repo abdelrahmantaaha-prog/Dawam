@@ -24,18 +24,24 @@ const SORT_LABEL = {
 export function FilterBar({ filter, onChange, labels = [], projects = [], sorts = ['manual'], compact = false }) {
   const [open, setOpen] = useState(false);
   const on = isFiltering(filter);
-  const live = projects.filter((p) => !p.completedAt);
+  /* Finished projects are left out of the picker — except one the filter is
+     still holding. That used to be the trap: filter on a project, complete
+     it, and the filter went on hiding every task while its chip had no name
+     and no toggle left to switch it off. The desktop app never restarts, so
+     an in-memory filter like that could sit there for days. */
+  const held = new Set(filter.projects || []);
+  const live = projects.filter((p) => !p.completedAt || held.has(p.id));
 
   const summary = describeFilter(filter, {
-    labelName: (id) => (labels.find((l) => l.id === id) || {}).name,
-    projectName: (id) => (live.find((p) => p.id === id) || {}).name,
+    labelName: (id) => (labels.find((l) => l.id === id) || {}).name || tx('a deleted tag', 'وسم محذوف'),
+    projectName: (id) => (projects.find((p) => p.id === id) || {}).name || tx('a deleted project', 'مشروع محذوف'),
   });
 
   return (
     <div className={`fbar ${compact ? 'compact' : ''}`}>
       <button className={`fbar-btn ${on ? 'on' : ''}`} onClick={() => setOpen((v) => !v)} aria-expanded={open}>
         <Filter size={14} />
-        {on ? summary : tx('Filter', 'تصفية')}
+        {on ? (summary || tx('Filtered', 'مُصفّى')) : tx('Filter', 'تصفية')}
       </button>
 
       {on && (

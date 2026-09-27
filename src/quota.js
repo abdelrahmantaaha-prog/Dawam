@@ -105,6 +105,31 @@ export function todayQuota(project, date) {
   return { iso, need, done, met, remaining, total, target, unit: (project && project.unit) || '' };
 }
 
+/* On pace or not, as one verdict the Plan and Now pages and the project card
+ * can all say the same way.
+ *
+ *   key     'done' | 'ahead' | 'on' | 'behind' | 'far' | 'waiting' | 'unknown'
+ *   gap     how far from where you should be today, in the project's unit —
+ *           positive is ahead, negative is behind. null when there is no line
+ *           to be measured against.
+ *
+ * 'far' is behind by more than an eighth of the whole target — the same
+ * threshold the project card has always drawn in red. 'unknown' means there
+ * is nothing to be on pace WITH: no numeric target, or no start and deadline.
+ * `pace` is projectPace(p) from core.jsx, passed in so this file stays free of
+ * the date-of-today it reads. */
+export function paceStatus(project, pace) {
+  const target = Number(project && project.target) || 0;
+  if (project && project.completedAt) return { key: 'done', gap: null };
+  if (!(target > 0) || !pace) return { key: 'unknown', gap: null };
+  if (pace.remaining <= 0) return { key: 'done', gap: null };
+  if (pace.notStarted) return { key: 'waiting', gap: null };
+  if (pace.onPace == null || pace.expected == null) return { key: 'unknown', gap: null };
+  const gap = pace.done - pace.expected;
+  if (pace.onPace) return { key: gap >= 1 ? 'ahead' : 'on', gap };
+  return { key: -gap / target > 0.12 ? 'far' : 'behind', gap };
+}
+
 /* The projects that want a word today, in the order their blocks run. Sorted
    by the caller's block order so the reminders sit where the day does. */
 export function dueProjects(projects, date, { blockOrder } = {}) {

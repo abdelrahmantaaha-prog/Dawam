@@ -603,7 +603,13 @@ const SLOT = { base: 25, perSubtask: 10, cap: 90, min: 10, estCap: 480 };
    duration the person set themselves is ground truth and must round-trip
    uncut. The heuristic stays the floor the app can always stand on when
    there is no key, no network, or no answer. */
+/* A duration typed on the task itself (the editor's Duration field, or "for
+   45m" in a quick add) outranks all of it — memory, AI and heuristic are all
+   ways of guessing a number the person has now simply said. */
+const taskDuration = (t) => { const n = Math.round(Number(t && t.duration)); return n > 0 ? Math.min(SLOT.estCap, n) : null; };
 const estimateMinutes = (t) => {
+  const own = taskDuration(t);
+  if (own != null) return Math.max(SLOT.min, own);
   const e = Number(t && t.est);
   if (Number.isFinite(e) && e > 0) return Math.max(SLOT.min, Math.min(SLOT.estCap, Math.round(e)));
   return Math.min(SLOT.cap, SLOT.base + ((t && t.subtasks) || []).length * SLOT.perSubtask);
@@ -896,7 +902,7 @@ function pushToToday(t, { activeBlock, curSinceFajr, sinceFajr }) {
   return next;
 }
 
-export { blockForTime,taskUntil,spans,spanLength,spanDayIndex,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,POINTS,goalWorth,goalCrossed,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
+export { taskDuration,blockForTime,taskUntil,spans,spanLength,spanDayIndex,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,POINTS,goalWorth,goalCrossed,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
 
 /* The shared key pool, if this copy has been pointed at one.
  *

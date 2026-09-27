@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Rows3, Coins } from 'lucide-react';
+import { Timer, Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Rows3, Coins } from 'lucide-react';
 import { boardSummary, columnsOf } from './board.js';
 import { DAILY, WEEKLY, MONTHLY, normalizeRepeat } from './recur.js';
-import { normalizePlan, todayQuota } from './quota.js';
+import { normalizePlan, paceStatus, todayQuota } from './quota.js';
+import { fmtFocus, projectFocusBetween, projectFocusTotal } from './projectfocus.js';
 import { TINY, habitStats, isPrayerAnchor, stackShape, wouldCycle } from './habits.js';
 import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
@@ -291,16 +292,21 @@ function ProjectCard({ p, open, onOpen, onUpd, onDel, onLog, taskInfo, onToggleT
   const submitLog = () => { const n = Number(amt); if (!n) return; onLog(n, note.trim()); setAmt(''); setNote(''); };
   const tasks = (taskInfo && taskInfo.tasks) || [];
   const lanes = boardSummary(tasks, columnsOf(p));
-  // Pace status: green (ahead/on), amber (a little behind), red (well behind)
+  // Pace status: green (ahead/on), amber (a little behind), red (well behind).
+  // One verdict (paceStatus in quota.js), so the card, Plan and Now agree.
+  const verdict = paceStatus(p, pace);
   let statusClass = 'neutral', statusText = hasTarget ? tx('no deadline set', 'لا موعد نهائي') : tx('in progress', 'قيد التنفيذ');
   if (completed) { statusClass = 'done'; statusText = tx('completed', 'مكتمل'); }
-  else if (pace.notStarted) { statusClass = 'neutral'; statusText = tx('not started yet', 'لم يبدأ بعد'); }
-  else if (pace.onPace === true) { statusClass = 'ok'; statusText = tx('on pace', 'على المسار'); }
-  else if (pace.onPace === false) {
-    const gap = pace.expected != null ? (pace.expected - pace.done) / (p.target || 1) : 0;
-    statusClass = gap > 0.12 ? 'behind' : 'warn';
+  else if (verdict.key === 'waiting') { statusClass = 'neutral'; statusText = tx('not started yet', 'لم يبدأ بعد'); }
+  else if (verdict.key === 'ahead' || verdict.key === 'on' || verdict.key === 'done') { statusClass = 'ok'; statusText = tx('on pace', 'على المسار'); }
+  else if (verdict.key === 'behind' || verdict.key === 'far') {
+    statusClass = verdict.key === 'far' ? 'behind' : 'warn';
     statusText = tx('behind pace', 'متأخر عن المسار');
   }
+  // Focus minutes measured against this project (src/projectfocus.js).
+  const focusAll = projectFocusTotal(p);
+  const weekAgo = fmtISO(addDays(new Date(), -6));
+  const focusWeek = projectFocusBetween(p, weekAgo, null);
   return (
     <div className={`proj-card ${completed ? 'proj-done' : ''}`} style={{ '--pcolor': p.color }}>
       <div className="proj-top">
@@ -332,6 +338,15 @@ function ProjectCard({ p, open, onOpen, onUpd, onDel, onLog, taskInfo, onToggleT
         {pace.perDay != null && pace.remaining > 0 && <span className="proj-stat"><Target size={12} /> {tx('need', 'المطلوب')} {pace.perDay < 1 ? pace.perDay.toFixed(1) : Math.ceil(pace.perDay)} {unit}/{tx('day', 'يوم')}</span>}
         {pace.projectedEnd && <span className="proj-stat"><Flag size={12} /> {tx('finishing', 'الانتهاء')} ~{pace.projectedEnd.getDate()} {mon(pace.projectedEnd.getMonth())}</span>}
       </div>}
+
+      {focusAll > 0 && (
+        <div className="proj-stats proj-focus">
+          <span className="proj-stat" title={tx('Measured focus rounds counted towards this project', 'جولات تركيز مقيسة محسوبة لهذا المشروع')}>
+            <Timer size={12} /> {fmtFocus(focusAll)} {tx('focused', 'تركيز')}
+          </span>
+          <span className="proj-stat">{fmtFocus(focusWeek)} {tx('in the last 7 days', 'في آخر ٧ أيام')}</span>
+        </div>
+      )}
 
       {/* A summary, not a second task list.
             It used to list eight tasks here — a worse copy of the board that
@@ -674,7 +689,17 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
             <div className="sect">
               <div className="sect-h"><Tag size={13} /> {tx('Labels & colours', 'الوسوم والألوان')}</div>
               <p className="hint-text" style={{ marginTop: 0 }}>{tx('Colour-coded tags for tasks. To track a long-term goal instead, use Projects.', 'وسوم ملوّنة للمهام. أما لتتبّع هدف طويل المدى فاستخدم المشاريع.')}</p>
-              {local.labels.map((p) => (<div key={p.id} className="projrow"><input className="swatch" type="color" value={p.color} onChange={(e) => updLabel(p.id, { color: e.target.value })} /><input className="projname" value={p.name} onChange={(e) => updLabel(p.id, { name: e.target.value })} /><button className="mini-del" onClick={() => delLabel(p.id)}><X size={13} /></button></div>))}
+              {/* A tag can be fixed to a project: tagging a task then files it
+                  under that project too, so the two are not picked separately
+                  every time. A project chosen by hand is never overridden. */}
+              {local.labels.map((p) => (<div key={p.id} className="projrow label-row"><input className="swatch" type="color" value={p.color} onChange={(e) => updLabel(p.id, { color: e.target.value })} /><input className="projname" value={p.name} onChange={(e) => updLabel(p.id, { name: e.target.value })} />
+                <select className="label-proj" value={p.project || ''} onChange={(e) => updLabel(p.id, { project: e.target.value || null })}
+                  aria-label={tx('Always files under project', 'يُنسب دائمًا إلى المشروع')} title={tx('Tasks with this tag go to this project', 'المهام بهذا الوسم تذهب إلى هذا المشروع')}>
+                  <option value="">{tx('no fixed project', 'بلا مشروع ثابت')}</option>
+                  {(local.projects || []).filter((x) => !x.completedAt || x.id === p.project).map((x) => <option key={x.id} value={x.id}>→ {x.name}</option>)}
+                </select>
+                <button className="mini-del" onClick={() => delLabel(p.id)}><X size={13} /></button></div>))}
+              {(local.projects || []).length > 0 && <p className="hint-text">{tx('Fix a tag to a project and every task you tag with it is filed under that project — and its focus time counts there. A project you pick by hand on a task always wins.', 'اربط وسمًا بمشروع وستُنسب كل مهمة تحمل هذا الوسم إلى ذلك المشروع — ويُحسب وقت تركيزها له. المشروع الذي تختاره يدويًا للمهمة يبقى هو الأقوى.')}</p>}
               <button className="ghost sm" onClick={addLabel}><Plus size={14} /> {tx('Add label', 'إضافة وسم')}</button>
             </div>
           )}

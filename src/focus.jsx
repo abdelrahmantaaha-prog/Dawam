@@ -17,6 +17,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Play, Pause, Square, SkipForward, Timer, ShieldCheck, AlertTriangle, Check, X, Trash2, Save, Settings as SettingsIcon, Flame, Eye } from 'lucide-react';
 import { tx, fmtTime } from './core.jsx';
+import { fmtFocus, roundsByProject } from './projectfocus.js';
 
 export const desktopFocus = () => (typeof window !== 'undefined' && window.rhythmFocus) || null;
 export const isDesktop = () => !!desktopFocus();
@@ -100,13 +101,17 @@ export function useRoundEnded(handler) {
 /* ------------------------------------------------------------------ */
 /*  The view                                                           */
 /* ------------------------------------------------------------------ */
-export function FocusView({ tasks = [], rewards = [], balance = 0, durationFor, pendingRound, onDismissRound, onMarkTaskDone, onLearnDuration }) {
+export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0, durationFor, pendingRound, onDismissRound, onMarkTaskDone, onLearnDuration }) {
   const { api, state, data, reload } = useFocus();
   const [tab, setTab] = useState('focus'); // focus | history | settings
   const [taskId, setTaskId] = useState('');
   const [title, setTitle] = useState('');
   const [minutes, setMinutes] = useState(50);
   const [cleared, setCleared] = useState('');
+  /* Where the minutes go. Picking a task fills it from the task's project (or
+     its tag's); a round on a typed title can name one by hand; a rest round
+     has none. */
+  const [projectId, setProjectId] = useState('');
   const [saveTpl, setSaveTpl] = useState(false);
   /* The applied policy, separate from the task. A template used to BE a task —
      picking one renamed whatever you were doing — which meant a set of
@@ -125,6 +130,7 @@ export function FocusView({ tasks = [], rewards = [], balance = 0, durationFor, 
   const pickTask = (t) => {
     setTaskId(t.id);
     setTitle(t.title);
+    setProjectId(t.project || '');
     const known = (t.minutes || null) || (durationFor ? durationFor(t.title) : null);
     setMinutes(clamp(Number(known) || settings?.workMin || 50, 1, 240));
     // The allow list is the policy's, not the task's, so picking a task leaves
@@ -158,7 +164,9 @@ export function FocusView({ tasks = [], rewards = [], balance = 0, durationFor, 
     // hunting for a task that does not exist when the round ends, and offering
     // to tick off nothing.
     const realTask = taskId && !String(taskId).startsWith('reward:') ? taskId : null;
-    await api.startWork({ task, workMin: minutes, allowed, taskId: realTask, templateId: useId });
+    const resting = String(taskId || '').startsWith('reward:');
+    const pid = !resting && projects.some((p) => p.id === projectId) ? projectId : null;
+    await api.startWork({ task, workMin: minutes, allowed, taskId: realTask, templateId: useId, projectId: pid });
     reload();
   };
 
@@ -182,7 +190,7 @@ export function FocusView({ tasks = [], rewards = [], balance = 0, durationFor, 
       )}
 
       {tab === 'focus' && (live
-        ? <LiveSession api={api} state={state} />
+        ? <LiveSession api={api} state={state} projects={projects} />
         : (
           <div className="focus-card">
             <h3 className="focus-h">{tx('Start a round', 'ابدأ جولة')}</h3>
@@ -221,7 +229,7 @@ export function FocusView({ tasks = [], rewards = [], balance = 0, durationFor, 
                 <div className="focus-tasklist focus-rewardlist">
                   {rewards.map((r) => (
                     <button key={r.id} className={`focus-taskbtn reward ${taskId === `reward:${r.id}` ? 'on' : ''}`}
-                      onClick={() => { setTaskId(`reward:${r.id}`); setTitle(r.name); setMinutes(clamp(Number(r.minutes) || 20, 1, 240)); }}>
+                      onClick={() => { setTaskId(`reward:${r.id}`); setTitle(r.name); setProjectId(''); setMinutes(clamp(Number(r.minutes) || 20, 1, 240)); }}>
                       <span className="focus-taskname">{r.name}</span>
                       {Number(r.cost) > 0 && Number(r.cost) <= balance ? <span className="ttime focus-afford">{tx('earned', 'مستحقة')}</span> : null}
                     </button>
@@ -235,6 +243,16 @@ export function FocusView({ tasks = [], rewards = [], balance = 0, durationFor, 
               <input value={title} onChange={(e) => { setTitle(e.target.value); setTaskId(''); }}
                 placeholder={tx('What are you working on?', 'على ماذا تعمل؟')} />
             </label>
+
+            {projects.length > 0 && !String(taskId || '').startsWith('reward:') && (
+              <label className="field">
+                <span>{tx('Counts towards', 'تُحسب لصالح')}</span>
+                <select value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                  <option value="">{tx('— no project —', '— بلا مشروع —')}</option>
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </label>
+            )}
 
             <div className="focus-row">
               <label className="field">
@@ -298,7 +316,7 @@ export function FocusView({ tasks = [], rewards = [], balance = 0, durationFor, 
           </div>
         ))}
 
-      {tab === 'history' && <FocusHistory history={history} />}
+      {tab === 'history' && <FocusHistory history={history} projects={projects} />}
       {tab === 'settings' && settings && <FocusSettings api={api} settings={settings} templates={templates} onSaved={reload} />}
     </div>
   );
@@ -308,7 +326,7 @@ export function FocusView({ tasks = [], rewards = [], balance = 0, durationFor, 
 /*  Live session — the same numbers the overlay shows, with room to     */
 /*  show the window that is currently being judged.                     */
 /* ------------------------------------------------------------------ */
-function LiveSession({ api, state }) {
+function LiveSession({ api, state, projects = [] }) {
   const s = state;
   const breakPhase = s.phase === 'break';
   const cls = breakPhase ? 'break' : s.paused ? 'paused' : s.drifting ? 'drifting' : 'working';
@@ -321,6 +339,10 @@ function LiveSession({ api, state }) {
         {!breakPhase && s.strict ? <span className="focus-strict"><ShieldCheck size={12} /> {tx('strict', 'صارم')}</span> : null}
       </span>
       <h3 className="focus-task">{breakPhase ? tx('Stand up. Walk. Hydrate.', 'قف. امشِ. اشرب ماء.') : s.task}</h3>
+      {!breakPhase && s.projectId && (() => {
+        const p = projects.find((x) => x.id === s.projectId);
+        return p ? <span className="focus-proj" style={{ '--pcolor': p.color }}><span className="focus-byproj-dot" />{p.name}</span> : null;
+      })()}
       <div className="focus-clock">{mmss(s.remainingSec)}</div>
       <div className="focus-bar"><span style={{ width: `${pct * 100}%` }} /></div>
 
@@ -406,7 +428,7 @@ function RoundEndedCard({ entry, onDismiss, onMarkDone, onLearn }) {
 /* ------------------------------------------------------------------ */
 /*  Today's rounds                                                      */
 /* ------------------------------------------------------------------ */
-function FocusHistory({ history }) {
+function FocusHistory({ history, projects = [] }) {
   const since = startOfToday();
   const today = history.filter((h) => h.endedAt >= since);
   const focused = today.reduce((n, h) => n + (h.focusedSec || 0), 0);
@@ -420,6 +442,26 @@ function FocusHistory({ history }) {
         <div><strong>{asMin(focused)}m</strong><span>{tx('focused', 'تركيز')}</span></div>
         <div><strong>{rate == null ? '—' : `${rate}%`}</strong><span>{tx('focus rate', 'نسبة التركيز')}</span></div>
       </div>
+      {/* Where today went, by project. Only drawn once some round named one —
+          a list that says "no project: 90m" and nothing else says nothing. */}
+      {(() => {
+        const by = roundsByProject(today);
+        const named = [...by.entries()].filter(([pid, m]) => pid && m > 0);
+        if (!named.length) return null;
+        const nameOf = (pid) => (projects.find((p) => p.id === pid) || {}).name || tx('a finished project', 'مشروع منتهٍ');
+        const colourOf = (pid) => (projects.find((p) => p.id === pid) || {}).color || 'var(--faint)';
+        const loose = by.get(null) || 0;
+        return (
+          <div className="focus-byproj">
+            {named.sort((a, b) => b[1] - a[1]).map(([pid, m]) => (
+              <span key={pid} className="focus-byproj-row" style={{ '--pcolor': colourOf(pid) }}>
+                <span className="focus-byproj-dot" />{nameOf(pid)}<strong>{fmtFocus(m)}</strong>
+              </span>
+            ))}
+            {loose > 0 && <span className="focus-byproj-row loose"><span className="focus-byproj-dot" />{tx('No project', 'بلا مشروع')}<strong>{fmtFocus(loose)}</strong></span>}
+          </div>
+        );
+      })()}
       {today.length === 0 && <p className="hint-text">{tx('No rounds yet today.', 'لا جولات اليوم بعد.')}</p>}
       {today.map((h, i) => (
         <div key={`${h.endedAt}-${i}`} className="focus-histrow">
@@ -497,6 +539,7 @@ function FocusSettings({ api, settings, templates, onSaved }) {
           'تُغطى كل الشاشات حتى تبدأ جولة بشيء محدّد ومدة. لم يعد هناك خروج مؤقت: الراحة إجابة مقبولة — اختر مكافأة من الأسفل وركّز عليها — أما فتح الجهاز دون تحديد أي شيء فلا.'))}
 
       <h4 className="focus-h4">{tx('Lists', 'القوائم')}</h4>
+      {list('alwaysAllowed', tx('Always allowed', 'مسموح دائمًا'), tx('Sites and keywords that are never a distraction in any round — the docs, dictionary or tools you always work from. Unlike a round’s cleared list, this does not make the round strict. The hard block still wins.', 'مواقع وكلمات لا تُعد إلهاءً في أي جولة — المراجع والقاموس والأدوات التي تعمل بها دائمًا. على خلاف قائمة الجولة، لا تجعل الجولة صارمة. الحظر التام يبقى أقوى.'))}
       {list('distractions', tx('Distractions', 'الملهيات'), tx('Matched against the window title, the app name and the address-bar domain.', 'تُطابق عنوان النافذة واسم التطبيق ونطاق شريط العنوان.'))}
       {list('blocklist', tx('Hard block', 'حظر تام'), tx('Minimized on sight, session or not.', 'تُصغَّر فور ظهورها، بجلسة أو بدونها.'))}
       {list('freeTimes', tx('Free times', 'أوقات حرة'), tx('20:00-23:00 — or fri,sat 14:00-02:00. The hard block is off inside these.', '20:00-23:00 — أو fri,sat 14:00-02:00. الحظر التام معطّل خلالها.'))}

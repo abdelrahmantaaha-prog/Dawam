@@ -116,7 +116,8 @@ dies with the original is not a backup):
 
 | Build | Where | Survives |
 |---|---|---|
-| Desktop | `DocumentsRhythm backupshythm-auto-YYYY-MM-DD.json` — plain files, "Open the folder" button | reinstalls, profile resets; copy them anywhere |
+| Desktop | `DocumentsRhythm backups
+hythm-auto-YYYY-MM-DD.json` — plain files, "Open the folder" button | reinstalls, profile resets; copy them anywhere |
 | Android | the app's private files (Capacitor `Directory.Data`) | updates, cleared WebView data — not an uninstall |
 | Browser | IndexedDB `rhythm-backups` | everything but clearing all site data |
 - The PIN is a soft lock (deters casual access). It is not encryption; the data
@@ -571,6 +572,13 @@ number rounds up, because a third of a page is still a page you have to open.
 
 Effectively a habit with an end date, which is why it reads like one.
 
+**On pace or not.** Plan and Now say it for every project with a numeric
+target and a deadline: on the share-of-the-day line when it has one, and in a
+*Goals* strip otherwise — "on pace", "+6 ahead", "12 pages behind", amber when
+a little behind and red past an eighth of the target. It is the same verdict
+the project card shows (`paceStatus` in `src/quota.js`), so a goal reads the
+same wherever it is mentioned.
+
 ## Focus targets
 
 A task can carry a **focus target** in minutes: not "is this finished" but "did
@@ -578,6 +586,39 @@ it get the time I promised it". Measured rounds count towards it, per date, so
 a target on something you return to all week means something on each of those
 days. Minutes are banked when a round ends whether or not the task is ticked
 off — work that is never really "done" is exactly the case a target is for.
+
+## Focus time goes to a project
+
+The same measured minutes are also tallied on a **project**, so the question
+"where did this week's attention go" has an answer. A round started on a task
+counts for that task's project — or, when it has none, for the project its tag
+is fixed to (below). A round on a typed title can name a project on the focus
+page (*Counts towards*); a rest round never counts. The Today tab breaks the
+day down by project, and each project card shows its total and the last seven
+days.
+
+The tally lives on the project, one number per day (`project.focus`), not on
+the tasks: weeks are pruned after about a month and the tally has to outlive
+them, and a round with no task still happened. `src/projectfocus.js`.
+
+## A tag can stand for a project
+
+Tags (the coloured labels) and projects are separate questions that are
+usually answered together. **Settings → Labels** can fix a tag to a project;
+from then on, tagging a task files it under that project too — from quick
+add, the editor, the backlog, a brain dump or a recurring task that adds
+itself. Retagging moves a project the old tag had set. A project picked by
+hand is never overridden, and clearing one is not undone by the tag that was
+already there. `src/tagproject.js`.
+
+## Duration
+
+A task can say how long it takes (**Duration**, in the editor, or "for 45m"
+in any add box when there is no start time). *Slot the day* gives it exactly
+that — ahead of the duration memory, the AI estimate and the heuristic, which
+are all ways of guessing a number the person has now said — and a start-only
+task gets its end from it. Typing a duration also teaches the memory, so next
+week's task with the same title starts from it.
 
 ## The Now lock
 
@@ -694,6 +735,18 @@ On Android the home-screen widget has a **+** that opens the app straight into
 that sheet. A widget cannot host a text field — RemoteViews has no such view,
 which is why every "quick add" widget on Android is a shortcut into its app —
 so this is the honest whole of what one can be.
+
+## Notes can be tagged and grouped
+
+A note's tags are its own words, not the planner's coloured labels — a note
+about grammar should not have to invent a task tag to be findable. Add them
+on the sheet (Enter or a comma; Backspace takes the last one off; tags already
+in use are suggested). "#Ideas", "ideas" and "ideas " are one tag.
+
+On the wall, the tag bar narrows to one tag and search matches tags. **Group
+by tag** lays the wall out in sections, remembered per device; a note with two
+tags sits in both — a group is a way of looking, not a folder a note has to
+live in exactly once — and untagged notes come last. `src/notes.js`.
 
 ## Habit stacking, made real
 
