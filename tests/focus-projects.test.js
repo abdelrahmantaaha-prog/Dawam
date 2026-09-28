@@ -61,36 +61,26 @@ describe('always allowed', () => {
   });
   afterEach(() => clearInterval(sm.timer));
 
-  it('never counts an allowed site as a distraction, even one on the distraction list', () => {
-    sm.startWork({ task: 'Translate' });
-    sm.onSample({ title: 'Doc - Google Docs', process: 'chrome', host: 'docs.google.com', hwnd: 1 });
-    expect(sm.getState().current.distracted).toBe(false);
-    // "almaany" matches case-insensitively, and wins over a triage-less unknown.
-    sm.onSample({ title: 'YouTube word — almaany dictionary', process: 'chrome', host: 'almaany.com', hwnd: 2 });
-    expect(sm.getState().current.distracted).toBe(false);
-    expect(sm.getState().ask).toBeNull();
+  it('is added to every focus mode\'s allow list', () => {
+    sm.startWork({ task: 'Translate', allowed: ['word'] });
+    sm.onSample({ title: 'Glossary', process: 'chrome', host: 'docs.google.com', hwnd: 1 });
+    expect(sm.getState().current.blocked).toBe(false);
+    // "almaany" matches case-insensitively.
+    sm.onSample({ title: 'Word — almaany dictionary', process: 'chrome', host: 'almaany.com', hwnd: 2 });
+    expect(sm.getState().current.blocked).toBe(false);
   });
 
-  it('does not make the round strict', () => {
+  it('does not turn a round without a focus mode into a blocking one', () => {
     sm.startWork({ task: 'Translate' });
     expect(sm.getState().strict).toBe(false);
-    // An ordinary unlisted window is still fine in relaxed mode.
-    sm.onSample({ title: 'Notes', process: 'notepad', host: '', hwnd: 3 });
-    expect(sm.getState().current.distracted).toBe(false);
+    sm.onSample({ title: 'Cats - YouTube', process: 'chrome', host: 'youtube.com', hwnd: 3 });
+    expect(sm.getState().current.blocked).toBe(false);
   });
 
-  it('clears a window in strict mode too', () => {
+  it('still blocks what neither list allows under a mode', () => {
     sm.startWork({ task: 'Translate', allowed: ['word'] });
-    sm.onSample({ title: 'Glossary', process: 'chrome', host: 'docs.google.com', hwnd: 4 });
-    expect(sm.getState().current.distracted).toBe(false);
-    sm.onSample({ title: 'Something else', process: 'chrome', host: 'news.example', hwnd: 5 });
-    expect(sm.getState().current.distracted).toBe(true);
-  });
-
-  it('still lets distractions be distractions', () => {
-    sm.startWork({ task: 'Translate' });
-    sm.onSample({ title: 'Cats - YouTube', process: 'chrome', host: 'youtube.com', hwnd: 6 });
-    expect(sm.getState().current.distracted).toBe(true);
+    sm.onSample({ title: 'Something else', process: 'chrome', host: 'news.example', hwnd: 4 });
+    expect(sm.getState().current.blocked).toBe(true);
   });
 });
 

@@ -29,8 +29,9 @@ your own server). **The service worker requires HTTPS** (or localhost).
 ## Desktop app — the planner and the focus suite together
 
 On Windows, Rhythm runs as its own app that also contains everything **Anchor**
-used to be: the always-on-top overlay, the drift watch, force-return, break and
-away blackouts, chair detection, hard blocks and free times. Anchor is not a
+used to be: the always-on-top overlay, focus modes (allow lists — anything not
+allowed is blocked), break and away blackouts, chair detection, hard blocks and
+free times. Anchor is not a
 separate program any more — see `desktop/README.md`.
 
 **Commitment mode has no step-out.** There was one — a 2.5-second hold on the

@@ -80,37 +80,3 @@ html, body {
 #card.break #dot { background: #60a5fa; box-shadow: 0 0 10px rgba(96, 165, 250, 0.7); }
 
 #card.paused #dot { background: #9ca3af; box-shadow: none; }
-
-#card.drifting {
-  border-color: rgba(245, 158, 11, 0.9);
-  background: rgba(46, 32, 10, 0.95);
-  animation: pulse 1.2s ease-in-out infinite;
-}
-#card.drifting #dot { background: #f59e0b; box-shadow: 0 0 10px rgba(245, 158, 11, 0.8); }
-#card.drifting #sub { color: #fbbf24; font-weight: 600; }
-
-@keyframes pulse {
-  0%, 100% { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
-  50% { box-shadow: 0 0 22px rgba(245, 158, 11, 0.65); }
-}
-
-/* triage buttons: shown in place of the standard buttons while a
-   "work or distraction?" question is pending — the card never resizes. */
-#askBtns[hidden], #stdBtns[hidden] { display: none; }
-
-#askBtns .pill {
-  width: auto;
-  height: 26px;
-  padding: 0 10px;
-  font-size: 10.5px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-#askBtns .pill.work { background: rgba(45, 212, 191, 0.2); color: #2dd4bf; }
-#askBtns .pill.dist { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
-#askBtns #askLater { width: 24px; height: 26px; font-size: 10px; }
-#askBtns button:hover { filter: brightness(1.35); }
-
-/* asking state gets a blue accent so it reads as a question, not an alarm
-   (unless drifting styling overrides it) */
-#card.asking { border-color: rgba(96, 165, 250, 0.55); }

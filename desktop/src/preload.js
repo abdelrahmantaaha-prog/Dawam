@@ -13,9 +13,6 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
   startWork: (req) => ipcRenderer.invoke('start-work', req),
   saveTemplate: (tpl) => ipcRenderer.invoke('save-template', tpl),
   deleteTemplate: (id) => ipcRenderer.invoke('delete-template', id),
-  triageVerdict: (key, verdict) => ipcRenderer.invoke('triage-verdict', key, verdict),
-  triageSnooze: (key) => ipcRenderer.invoke('triage-snooze', key),
-  templateVerdict: (id, key, verdict) => ipcRenderer.invoke('template-verdict', id, key, verdict),
   presenceReport: (present) => ipcRenderer.invoke('presence-report', present),
   awayDismiss: () => ipcRenderer.invoke('away-dismiss'),
   pause: () => ipcRenderer.invoke('pause'),
@@ -61,7 +58,6 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
   // Listeners return their own unsubscribe — React effects need to clean up,
   // and a planner that re-renders must not stack duplicate handlers.
   onState: (cb) => sub('state', (_e, s) => cb(s)),
-  onNudge: (cb) => sub('nudge', (_e, info) => cb(info)),
   onRoundEnded: (cb) => sub('round-ended', (_e, entry) => cb(entry)),
   onHistoryChanged: (cb) => sub('history-changed', () => cb()),
   onDataChanged: (cb) => sub('data-changed', () => cb())

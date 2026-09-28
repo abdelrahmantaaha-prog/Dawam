@@ -1,9 +1,8 @@
 # Rhythm Desktop — the planner and the focus suite in one app
 
 This is Rhythm on Windows: the same planner you use in the browser, in its own
-window, plus everything **Anchor** used to be — the always-on-top overlay, the
-drift watch, force-return, the break blackout, chair detection, hard blocks and
-free times. Anchor is not a separate app any more; this is where it lives.
+window, plus everything **Anchor** used to be — the always-on-top overlay, focus
+modes, the break blackout, chair detection, hard blocks and free times. Anchor is not a separate app any more; this is where it lives.
 
 The point of putting them together is the seam between them:
 
@@ -11,7 +10,7 @@ The point of putting them together is the seam between them:
   own slot sizes the round, or — when it has no slot — whatever past rounds
   taught Rhythm the task takes.
 - "Focus this" anywhere in the planner (a task, a habit) now starts a real
-  round with the overlay and the drift watch, instead of the plain countdown
+  round with the overlay, instead of the plain countdown
   the web build falls back to.
 - When the round ends, the planner is told — with the task id and the time
   actually spent. It offers to tick the task off, and it learns the duration
@@ -43,7 +42,7 @@ npm run desktop:dev         # in this folder (or `npm run desktop:dev` from the 
 | `src/main.js` | App bootstrap, tray, every window, all the IPC |
 | `src/session.js` | The session state machine and drift accounting — Anchor's, plus the planner task id it now carries |
 | `src/poller.js` + `src/active-window.ps1` | Foreground-window polling through a PowerShell sidecar, so there are no native modules to build |
-| `src/enforcer.ps1` | Minimize-the-offender / refocus-your-work window commands for force-return |
+| `src/enforcer.ps1` | Minimize-the-offender / refocus-your-work window commands for blocking |
 | `src/store.js` | Settings, templates and history in `%APPDATA%/Rhythm/rhythm-focus-data.json` |
 | `src/preload.js` | The one bridge, `window.rhythmFocus`, shared by every window |
 | `src/windows/` | Overlay, break blackout, away blackout, and the hidden presence worker |
@@ -152,16 +151,23 @@ RHYTHM_SMOKE_BIN=desktop/release/win-unpacked/Rhythm.exe node desktop/smoke.mjs
 
 ## Notes
 
-- Distraction matching is substring-based on `title + process name + address-bar
-  domain`, case-insensitive, so browser tabs are covered with no extension.
-- **Always allowed** (Focus settings → Lists) is matched the same way and
-  clears a window in every round — relaxed or strict — without making the
-  round strict. The hard block is checked separately and still wins.
+- A focus mode is an allow list and nothing else. Under one, any window not on
+  the list is minimized the moment it comes to the front and you are put back
+  on the last allowed window; allowed windows are simply open. There is no
+  distraction list, grace period, nudge or "work or distraction?" question any
+  more. A round without a focus mode blocks nothing. Rhythm itself, the Windows
+  shell, Task Manager and a blank browser tab are never blocked.
+- Matching is substring-based on `title + process name + address-bar domain`,
+  case-insensitive, so browser tabs are covered with no extension.
+- **Always allowed** (Focus settings → Lists) is added to every focus mode's
+  allow list. It never makes a round without a mode block anything.
 - A round can carry a `projectId` (picked on the focus page or carried from
   the task); it rides into the history entry and the `round-ended` event, and
   the planner tallies the minutes on that project.
-- Force-return minimizes the distracting window. Nothing is closed, nothing is
-  killed, no data is lost.
+- Blocking minimizes the window. Nothing is closed, nothing is killed, no data
+  is lost.
+- The overlay and the planner are moved back onto a screen that exists whenever
+  a monitor is unplugged or the displays change (`src/fit.js`).
 - Chair detection pauses the round when it cannot see you — worth knowing if a
   round ever looks like it stopped counting.
 - Chair detection also matters when packaging: the camera window loads its

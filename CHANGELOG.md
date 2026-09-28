@@ -9,6 +9,39 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## [3.5] — 2026-09-29
+
+The time lock arrives, focus modes become strict allow lists, and the prayer
+gate and the distraction list go.
+
+### Added
+- **The time lock** (Settings → Recurring, on by default). When a task with a
+  start and an end reaches its time, Rhythm is covered until you are focusing
+  on that task; ending the round early covers it again while the window lasts,
+  and ticking the task off releases it. A timed task can only be focused on
+  inside its own window, and while a window is open nothing else can be
+  focused on — not a habit, an untimed task or a meeting.
+
+### Changed
+- **Focus modes are allow lists, full stop** (desktop). Under a focus mode,
+  anything not on its list is minimized the moment it comes to the front;
+  anything on it is fully open. A round without a focus mode blocks nothing.
+  *Always allowed* is now added to every focus mode's list, and a mode
+  remembered for a task, tag or project is just its allow list.
+
+### Removed
+- **The prayer gate**, with its oath, its fifteen-minute hard lock and its
+  unmark penalty. Prayers are still tracked on Now and in Habits.
+- **The distraction list** and everything that hung off it on the desktop:
+  the grace period, the nudges and their sound, the forced return countdown,
+  the "work or distraction?" question and the learned filters.
+
+### Fixed
+- **The overlay vanished after unplugging an external screen** (desktop). It
+  kept its position on the monitor that was gone. It, and the planner window,
+  now move back onto a screen that exists at launch and whenever displays
+  change.
+
 ## [3.4] — 2026-09-27
 
 Tasks start in their own focus mode, the focus page shows every project's

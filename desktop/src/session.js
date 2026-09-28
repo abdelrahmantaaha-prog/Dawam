@@ -2,40 +2,58 @@ const { EventEmitter } = require('events');
 
 const BROWSERS = ['chrome', 'msedge', 'brave', 'firefox', 'opera', 'vivaldi', 'arc', 'zen', 'iron', 'librewolf'];
 
-// Stable identity for "this website / this app" so a triage verdict sticks
-// across visits. Browsers key by the address-bar DOMAIN (whole-website
-// verdicts: site:youtube.com covers every page there). When the domain
-// can't be read, fall back to the last title segment; other apps key by
-// process name.
-function windowKey(title, process, host) {
+/* A focus mode is an allow list and nothing else.
+
+   Under one, a window is either on the list — and then it is simply open — or
+   it is not, and then it is minimized the moment it comes to the front and
+   you are put back on the last allowed window. There is no grace period, no
+   nudge, no "work or distraction?" question and no distraction list: that
+   middle ground was where rounds leaked. A round started without a focus mode
+   blocks nothing.
+
+   A few windows are never judged, or the machine could not be used at all:
+   Rhythm's own, the Windows shell (desktop, taskbar, Start, search, the
+   on-screen keyboard, the lock screen), Task Manager, and a browser's blank
+   new tab — the page you type an allowed address into. */
+const SHELL = new Set([
+  'searchhost', 'searchapp', 'searchui', 'startmenuexperiencehost', 'shellexperiencehost',
+  'textinputhost', 'lockapp', 'taskmgr', 'rhythm', 'electron'
+]);
+const NEW_TAB = /^(new tab|new incognito tab|new private tab|new inprivate tab|start page|speed dial)\b/i;
+
+function isNeutral(title, process, host) {
   const proc = (process || '').toLowerCase();
-  if (!BROWSERS.includes(proc)) return proc ? `app:${proc}` : null;
+  if (!title && !proc) return true;
+  if (SHELL.has(proc)) return true;
+  if (title === 'Rhythm' || title === 'Anchor') return true;
+  if (proc === 'explorer' && (!title || title === 'Program Manager')) return true;
+  if (BROWSERS.includes(proc) && !host && NEW_TAB.test(String(title).trim())) return true;
+  return false;
+}
+
+// What to call a blocked window in a notification: the site, else the app.
+function blockLabel(title, process, host) {
   const domain = (host || '').toLowerCase().replace(/^(www|m)\./, '');
-  if (domain) return `site:${domain}`;
-  const parts = String(title || '').trim().split(/\s+[-–—|·]\s+/);
-  while (parts.length > 1 && /brave|chrome|edge|firefox|opera|vivaldi|librewolf/i.test(parts[parts.length - 1])) {
-    parts.pop();
-  }
-  const site = (parts.length > 1 ? parts[parts.length - 1] : parts[0] || '').toLowerCase().trim();
-  return site ? `site:${site}` : null;
+  if (domain) return domain;
+  return String(title || process || 'That window').trim();
 }
 
 /* Pausing is for a phone call, not for the rest of the afternoon.
  *
- * Everything that makes a work round mean anything — drift detection, the
- * nudge, the force-return — is gated on `!paused`, so an indefinite pause was
- * simply an off switch with an innocent name. Two limits close it: any one
- * pause resumes itself, and a round only has so much pause in it. Spend the
- * budget and the pause item stops working until the next round.
+ * A paused round stops its clock, and an indefinite pause was an off switch
+ * for the round with an innocent name. Two limits close it: any one pause
+ * resumes itself, and a round only has so much pause in it. Spend the budget
+ * and the pause item stops working until the next round. (The allow list keeps
+ * blocking through a pause — the clock waits, the rules do not.)
  *
  * The away-pause is deliberately exempt. That one is the app's own doing — it
  * fires when the chair empties and ends when the person sits back down — and
  * counting it would punish someone for being pulled away from a desk they then
  * came back to. It cannot be triggered by choice, which is what makes it safe
  * to leave uncapped. */
-/* Keywords and sites that are never a distraction during a round, whatever
-   the distraction list or a triage answer says. Matched the same way as every
-   other list here: a case-insensitive substring of title + process + domain. */
+/* Keywords and sites allowed under every focus mode, on top of the mode's own
+   list. Matched the same way as every other list here: a case-insensitive
+   substring of title + process + domain. */
 function alwaysAllowed(settings) {
   return (Array.isArray(settings && settings.alwaysAllowed) ? settings.alwaysAllowed : [])
     .map((k) => String(k).toLowerCase().trim())
@@ -46,7 +64,7 @@ const MAX_PAUSE_SEC = 5 * 60;      // one pause, at most
 const PAUSE_BUDGET_SEC = 10 * 60;  // all manual pauses in one round, at most
 
 // Session state machine: idle -> work -> break -> idle.
-// Drift detection runs only during an unpaused work phase.
+// The allow list is enforced for the whole work phase, paused or not.
 class SessionManager extends EventEmitter {
   constructor(store) {
     super();
@@ -71,18 +89,13 @@ class SessionManager extends EventEmitter {
     this.pauseAuto = false;    // the chair emptied, rather than a decision
     this.pauseSpentSec = 0;    // manual pause seconds used this round
     this.startedAt = 0;
-    this.distractedSec = 0;
-    this.driftCount = 0;
-    this.drift = null; // { startedAt, counted, lastNudgeAt, nextEnforceAt }
+    this.blockedCount = 0;     // windows closed off this round
+    this.lastBlocked = null;   // { hwnd, at } — so one window is counted once
     this.allowed = [];
-    this.homeHwnd = 0; // last on-task window — the "original doc" we force-return to
-    this.pendingAsk = null; // { key, label } — unknown window awaiting a triage verdict
-    this.snoozed = new Set(); // keys dismissed with "later" for this session
-    this.unknownRun = null; // { key, count } — consecutive samples of the same unknown window
-    this.sessionVerdicts = {}; // triage answers for THIS session; persisted only into the task's template
+    this.homeHwnd = 0; // last allowed window — where a block sends you back to
     this.stableKey = undefined; // identity of the current foreground window
     this.stableSince = 0; // when that identity last changed — drives the settling hold
-    this.lastSample = { title: '', process: '', hwnd: 0, distracted: false };
+    this.lastSample = { title: '', process: '', hwnd: 0, blocked: false };
     this.timer = setInterval(() => this.tick(), 1000);
   }
 
@@ -100,17 +113,10 @@ class SessionManager extends EventEmitter {
     return this.allowed.length > 0;
   }
 
-  enforceInSec() {
-    if (!this.drift || !this.drift.counted || !this.drift.nextEnforceAt) return null;
-    return Math.max(0, Math.ceil((this.drift.nextEnforceAt - Date.now()) / 1000));
-  }
-
   getState() {
-    const drifting = this.phase === 'work' && !this.paused && this.lastSample.distracted;
     return {
       strict: this.strict(),
       allowed: this.allowed,
-      enforceInSec: drifting ? this.enforceInSec() : null,
       phase: this.phase,
       paused: this.paused,
       pauseAuto: this.pauseAuto,
@@ -124,46 +130,13 @@ class SessionManager extends EventEmitter {
       plannedMin: this.plannedMin,
       totalSec: this.totalSec,
       remainingSec: this.remaining(),
-      distractedSec: this.distractedSec,
-      driftCount: this.driftCount,
-      drifting,
-      nudging: drifting && !!(this.drift && this.drift.counted),
-      ask: this.phase === 'work' && !this.paused ? this.pendingAsk : null,
+      blockedCount: this.blockedCount,
       current: {
         title: this.lastSample.title,
         process: this.lastSample.process,
-        distracted: this.lastSample.distracted
+        blocked: this.lastSample.blocked
       }
     };
-  }
-
-  setVerdict(key, verdict) {
-    if (!key || !['work', 'distraction'].includes(verdict)) return;
-    this.sessionVerdicts[key] = verdict;
-    // Persist into the policy this round is running under, if any — a round
-    // started without one forgets its verdicts when it ends.
-    const tpl = this.templateId
-      ? this.store.data.templates.find((t) => t.id === this.templateId)
-      : null;
-    if (tpl) {
-      tpl.verdicts = tpl.verdicts || {};
-      tpl.verdicts[key] = verdict;
-      this.store.save();
-    }
-    if (this.pendingAsk && this.pendingAsk.key === key) this.pendingAsk = null;
-    // Reclassify the current window immediately so the verdict takes effect now.
-    this.onSample({
-      title: this.lastSample.title,
-      process: this.lastSample.process,
-      host: this.lastSample.host,
-      hwnd: this.lastSample.hwnd
-    });
-  }
-
-  snoozeAsk(key) {
-    this.snoozed.add(key);
-    if (this.pendingAsk && this.pendingAsk.key === key) this.pendingAsk = null;
-    this.emitState();
   }
 
   emitState() {
@@ -174,15 +147,11 @@ class SessionManager extends EventEmitter {
     const { task, workMin, allowed, taskId, templateId, projectId } = req || {};
     const min = Math.max(1, Math.min(240, Number(workMin) || this.settings().workMin));
     const newTask = String(task || 'Deep work').trim() || 'Deep work';
-    /* Verdicts seed from the policy this round was started under — by id, not
-       by matching the task's name. Templates are no longer tasks, so "what is
-       allowed" and "what am I doing" are two separate questions and a policy
-       can be reused across every task it suits. A follow-up round of the same
-       task still keeps what was learned earlier this sitting. */
+    /* The focus mode is found by id, not by the task's name: "what is allowed"
+       and "what am I doing" are two separate questions, and one mode can be
+       used with every task it suits. */
     const tpl = templateId ? this.store.data.templates.find((t) => t.id === templateId) : null;
-    const carry = this.task === newTask ? this.sessionVerdicts : {};
     this.templateId = tpl ? tpl.id : null;
-    this.sessionVerdicts = { ...((tpl && tpl.verdicts) || {}), ...carry };
     this.phase = 'work';
     this.paused = false;
     this.pauseAuto = false;
@@ -198,13 +167,9 @@ class SessionManager extends EventEmitter {
     this.totalSec = min * 60;
     this.endsAt = Date.now() + this.totalSec * 1000;
     this.startedAt = Date.now();
-    this.distractedSec = 0;
-    this.driftCount = 0;
-    this.drift = null;
+    this.blockedCount = 0;
+    this.lastBlocked = null;
     this.homeHwnd = 0;
-    this.pendingAsk = null;
-    this.snoozed.clear();
-    this.unknownRun = null;
     this.emitState();
   }
 
@@ -222,7 +187,6 @@ class SessionManager extends EventEmitter {
     this.pausedAt = Date.now();
     this.pauseAuto = auto;
     this.paused = true;
-    this.drift = null;
     this.emitState();
     return true;
   }
@@ -282,11 +246,9 @@ class SessionManager extends EventEmitter {
     this.pauseSpentSec = 0;
     this.taskId = null;
     this.projectId = null;
-    this.drift = null;
     this.allowed = [];
     this.homeHwnd = 0;
-    this.pendingAsk = null;
-    this.unknownRun = null;
+    this.lastBlocked = null;
     this.emitState();
   }
 
@@ -295,29 +257,19 @@ class SessionManager extends EventEmitter {
     const process = sample.process || '';
     const host = (sample.host || '').toLowerCase();
     const hwnd = Number(sample.hwnd) || 0;
-    // Keywords (cleared list + distraction list) match the domain too, so
-    // "youtube" hits youtube.com even if the page title never says YouTube.
+    // The allow list matches the address-bar domain too, so "docs.google.com"
+    // clears the site even when the page title never says so.
     const hay = `${title} ${process} ${host}`.toLowerCase();
-
-    // Anchor's own windows and title-less system surfaces (desktop, alt-tab)
-    // are neutral — never a distraction, never the "home" window.
-    const own = process.toLowerCase() === 'electron' || title === 'Anchor';
-    const neutral = own || (!title && !process);
-
-    // A window cleared for this task never counts as a distraction,
-    // even if it matches the global distraction list. Neither does anything
-    // on the always-allowed list (Focus settings → Lists) — a dictionary, the
-    // docs you always work from. That list clears windows WITHOUT turning on
-    // strict mode: strict is "only these", and always-allowed is "never
-    // these", which are different promises.
-    const cleared = (this.allowed || []).some((k) => hay.includes(k))
+    const neutral = isNeutral(title, process, host);
+    // The always-allowed list (Focus settings → Lists) is added to every focus
+    // mode's allow list — a dictionary, the docs you always work from. It never
+    // turns a round without a mode into a blocking one.
+    const allowed = (this.allowed || []).some((k) => hay.includes(k))
       || alwaysAllowed(this.settings()).some((k) => hay.includes(k));
-    const key = neutral ? null : windowKey(title, process, host);
 
     // Slow pages briefly wear the wrong title while loading — hold judgment
-    // for a few seconds after the window's identity changes before any
-    // drift clock, countdown, or triage question starts.
-    const identity = neutral ? '(neutral)' : key || `t:${hay}`;
+    // for a few seconds after the window's identity changes.
+    const identity = neutral ? '(neutral)' : `${process.toLowerCase()}|${host || title}`;
     if (identity !== this.stableKey) {
       this.stableKey = identity;
       this.stableSince = Date.now();
@@ -325,104 +277,30 @@ class SessionManager extends EventEmitter {
     const settleMs = Math.max(0, Number(this.settings().settleSec) || 0) * 1000;
     const settling = !neutral && Date.now() - this.stableSince < settleMs;
 
-    // Triage verdicts beat everything except the cleared list — including
-    // strict mode, where a "work" answer whitelists a window on the fly.
-    const verdict = key ? this.sessionVerdicts[key] : undefined;
-    let distracted;
-    let unknownKey = null;
-    if (neutral || cleared || verdict === 'work') {
-      distracted = false;
-    } else if (settling) {
-      distracted = false;
-    } else if (verdict === 'distraction') {
-      distracted = true;
-    } else if (this.strict()) {
-      // Strict mode: unknown windows are off-task (the countdown runs), but
-      // still get the ask — answering Work rescues them.
-      distracted = true;
-      unknownKey = key;
-    } else {
-      const keywords = this.settings().distractions
-        .map((k) => String(k).toLowerCase().trim())
-        .filter(Boolean);
-      if (keywords.some((k) => hay.includes(k))) {
-        distracted = true;
-      } else {
-        distracted = false;
-        unknownKey = key;
-      }
+    const judged = this.phase === 'work' && this.strict() && !neutral;
+    const blocked = judged && !allowed && !settling;
+
+    if (this.phase === 'work' && allowed && !neutral && !settling && hwnd) this.homeHwnd = hwnd;
+
+    if (blocked && hwnd) {
+      const again = this.lastBlocked && this.lastBlocked.hwnd === hwnd && Date.now() - this.lastBlocked.at < 10000;
+      if (!again) this.blockedCount += 1;
+      this.lastBlocked = { hwnd, at: Date.now() };
+      this.emit('block', {
+        offender: hwnd,
+        target: this.homeHwnd,
+        task: this.task,
+        label: blockLabel(title, process, host)
+      });
     }
 
-    // In relaxed mode, ask only after the window holds the foreground for
-    // ~3 samples (a quick pass-through shouldn't interrupt). In strict mode
-    // ask immediately — the force-return clock is already ticking.
-    const askAfter = this.strict() ? 1 : 3;
-    if (unknownKey && this.phase === 'work' && !this.paused && !this.snoozed.has(unknownKey)) {
-      if (this.unknownRun && this.unknownRun.key === unknownKey) {
-        this.unknownRun.count += 1;
-      } else {
-        this.unknownRun = { key: unknownKey, count: 1 };
-      }
-      if (this.unknownRun.count >= askAfter && (!this.pendingAsk || this.pendingAsk.key !== unknownKey)) {
-        this.pendingAsk = {
-          key: unknownKey,
-          label: unknownKey.replace(/^(site|app):/, '')
-        };
-      }
-    } else if (!unknownKey) {
-      this.unknownRun = null;
-    }
-
-    // A still-settling window must not become the force-return target.
-    if (this.phase === 'work' && !this.paused && !distracted && !neutral && !settling && hwnd) {
-      this.homeHwnd = hwnd;
-    }
-
-    this.lastSample = { title, process, host, hwnd, distracted };
+    this.lastSample = { title, process, host, hwnd, blocked };
     this.emitState();
   }
 
   tick() {
     if (this.phase === 'idle') return;
     if (this.paused) { this.tickPaused(); return; }
-
-    if (this.phase === 'work' && this.lastSample.distracted) {
-      this.distractedSec += 1;
-      if (!this.drift) {
-        this.drift = { startedAt: Date.now(), counted: false, lastNudgeAt: 0, nextEnforceAt: 0 };
-      }
-      const s = this.settings();
-      // Strict mode (cleared list set) nudges almost immediately; otherwise
-      // the grace period lets you glance at something without being scolded.
-      const nudgeAtSec = this.strict() ? 1 : s.graceSec;
-      const enforceSec = Math.max(3, Number(s.enforceSec) || 10);
-      const driftSec = (Date.now() - this.drift.startedAt) / 1000;
-
-      if (driftSec >= nudgeAtSec) {
-        if (!this.drift.counted) {
-          this.drift.counted = true;
-          this.driftCount += 1;
-          // The clock starts: enforceSec after the nudge, you get returned by force.
-          this.drift.nextEnforceAt = Date.now() + enforceSec * 1000;
-        }
-        // Nudge once when grace runs out, then re-nudge every 45s while still drifting.
-        if (Date.now() - this.drift.lastNudgeAt > 45000) {
-          this.drift.lastNudgeAt = Date.now();
-          this.emit('nudge', { task: this.task, title: this.lastSample.title });
-        }
-        if (this.drift.nextEnforceAt && Date.now() >= this.drift.nextEnforceAt) {
-          this.drift.nextEnforceAt = Date.now() + enforceSec * 1000;
-          this.emit('enforce', {
-            offender: this.lastSample.hwnd,
-            target: this.homeHwnd,
-            task: this.task
-          });
-        }
-      }
-    } else if (this.drift) {
-      this.drift = null;
-    }
-
     if (this.remaining() <= 0) {
       this.phaseComplete();
     }
@@ -441,7 +319,6 @@ class SessionManager extends EventEmitter {
       this.phase = 'break';
       this.totalSec = s.breakMin * 60;
       this.endsAt = Date.now() + this.totalSec * 1000;
-      this.drift = null;
     } else if (this.phase === 'break') {
       this.emit('notify', {
         title: 'Break over',
@@ -460,9 +337,11 @@ class SessionManager extends EventEmitter {
       startedAt: this.startedAt,
       endedAt: Date.now(),
       plannedMin: this.plannedMin,
-      focusedSec: Math.max(0, elapsedSec - this.distractedSec),
-      distractedSec: this.distractedSec,
-      driftCount: this.driftCount,
+      // Nothing off-task can stay on screen, so the time spent is the time
+      // focused. The field names are kept for the history already on disk.
+      focusedSec: elapsedSec,
+      distractedSec: 0,
+      blockedCount: this.blockedCount,
       completed
     };
     this.store.data.history.unshift(entry);
@@ -478,3 +357,4 @@ class SessionManager extends EventEmitter {
 
 module.exports = SessionManager;
 module.exports.alwaysAllowed = alwaysAllowed;
+module.exports.isNeutral = isNeutral;

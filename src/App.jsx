@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, AlarmClock, Rows3, Mic, Square, ListChecks, CalendarRange, Gift, Timer, Ban } from 'lucide-react';
-import {brokerFrom, taskDuration,blockForTime,taskUntil,spanLength,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,POINTS,goalWorth,goalCrossed,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { Plus, X, Check, Play, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, AlarmClock, Rows3, Mic, Square, ListChecks, CalendarRange, Gift, Timer, Ban } from 'lucide-react';
+import {brokerFrom, taskDuration,blockForTime,taskUntil,spanLength,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,POINTS,goalWorth,goalCrossed,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook, onStorageHealth, writesFailing, storageStats, storageHeadroom, recheckWrites } from './storage.js';
 import { isDerived } from '../shared/model.js';
 import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken, inAppShell } from './sync.js';
@@ -12,8 +12,9 @@ import { isNative as nativeShell, ensurePermission, permissionState, pendingCoun
 import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, describeProposal, parseAssistantReply, parseEstimates, callAssistant, seriesDates } from './assistant.js';
 import { useDictation } from './dictation.js';
 import { loadDurations, durationFor, rememberDuration } from './durations.js';
-import { FocusView, isDesktop, useFocusLive, useFocusModes, useRoundEnded } from './focus.jsx';
+import { FocusView, isDesktop, useFocusLive, useFocusModes, useFocusTaskId, useRoundEnded } from './focus.jsx';
 import { focusModeFor, modeKey } from './focusmode.js';
+import { focusVerdict, liveTasks, timeLockDue, timeLockOn } from './timelock.js';
 import { loadFeeds, saveFeeds, refreshAll, loadInstances, busyOn, eventsOn } from './calsync.js';
 import { calKey, loadCalDone, toggleCalDone, pruneCalDone } from './caldone.js';
 import { DayEvents } from './calview.jsx';
@@ -143,7 +144,6 @@ export default function Rhythm() {
   const [locked, setLocked] = useState(false);          // PIN lock screen
   const [foldedTasks, setFoldedTasks] = useState(() => new Set()); // collapsed subtask lists (Now/Overdue)
   const [editingTpl, setEditingTpl] = useState(null); // recurring task edited from the plan sidebar
-  const [oathText, setOathText] = useState('');      // the gate's typed oath
   const [chatOpen, setChatOpen] = useState(false);   // planning assistant
   const [chatMsgs, setChatMsgs] = useState([]);      // [{role:'user'|'assistant', text, proposals?, applied?}]
   const [chatInput, setChatInput] = useState('');
@@ -1729,19 +1729,6 @@ export default function Rhythm() {
   };
 
   // Prayer performance, stored per-day inside the week object.
-  // Anti-cheat penalty: unmarking a prayer during its own window arms a fresh
-  // 15-minute hard lock. Persisted in a device-local (non-synced) key so a page
-  // reload can't dodge it. Keyed by day:block.
-  const PENALTY_KEY = 'rhythm:prayerPenalty';
-  const prayerPenaltyRef = useRef((() => {
-    try {
-      const raw = JSON.parse(localStorage.getItem(PENALTY_KEY) || '{}');
-      const cutoff = Date.now() - 2 * 86400000; // drop entries older than ~2 days
-      const out = {}; for (const k in raw) if (raw[k] > cutoff) out[k] = raw[k];
-      return out;
-    } catch { return {}; }
-  })());
-  const savePenalty = () => { try { localStorage.setItem(PENALTY_KEY, JSON.stringify(prayerPenaltyRef.current)); } catch { /* ignore */ } };
   const togglePrayer = async (blockId, forDate) => {
     const t = forDate ? new Date(forDate) : new Date(); t.setHours(0, 0, 0, 0);
     const ws = startOfWeek(t, settings.weekStartDay);
@@ -1751,10 +1738,6 @@ export default function Rhythm() {
     const prayers = { ...(cur.prayers || {}) };
     const day = { ...(prayers[dIdx] || {}) };
     const willBeDone = !day[blockId];
-    const key = `${fmtISO(t)}:${blockId}`;
-    // Unmark → punish (re-lock 15 min). Re-mark → clear any pending penalty.
-    if (!willBeDone) { prayerPenaltyRef.current[key] = Date.now(); savePenalty(); }
-    else if (prayerPenaltyRef.current[key]) { delete prayerPenaltyRef.current[key]; savePenalty(); }
     // A prayer is a thing finished. The Now lock says "finish one thing" and
     // has to mean it wherever the thing is finished, not only on its own card.
     if (willBeDone) marked();
@@ -1766,6 +1749,20 @@ export default function Rhythm() {
 
   // "Plan the day" wizard: walk templates then backlog, one by one.
   const startFocus = (task, minutes, untilEnd) => {
+    /* The time lock's second half: a timed task only inside its own window,
+       and while any window is open, only the task it belongs to. See
+       src/timelock.js. */
+    const verdict = focusVerdict({
+      settings, task, curMin,
+      isToday: nowList.some((x) => x.id === task.id),
+      live: liveTasks(nowList, curMin),
+    });
+    if (!verdict.ok) {
+      flash(verdict.reason === 'live'
+        ? `${tx('Now is the time for', 'الآن وقت')} “${verdict.task.title}”`
+        : `${tx('Its time is', 'وقتها')} ${timeLabel(verdict.task)} — ${tx('focus on it then.', 'ركّز عليها حينها.')}`);
+      return false;
+    }
     const now = Date.now();
     let endsAt = now + (minutes || 25) * 60000;
     if (untilEnd) {
@@ -1781,17 +1778,20 @@ export default function Rhythm() {
       const mins = Math.max(1, Math.round((endsAt - now) / 60000));
       // Habits come through here too, and a habit id is not a task id — only
       // pass one the planner can actually tick off afterwards.
-      const known = (weekRef.current.tasks || []).some((x) => x.id === task.id);
-      // Its remembered focus mode comes along — the allow list and learned
-      // filters, not the length: the length was just chosen here.
+      // Today's tasks count even when another week is on screen: the time lock
+      // lifts by this id, so dropping it would leave the cover up mid-round.
+      const known = (weekRef.current.tasks || []).some((x) => x.id === task.id) || nowList.some((x) => x.id === task.id);
+      // Its remembered focus mode comes along — the allow list, not the
+      // length: the length was just chosen here.
       const mode = known ? focusModeFor(task, settings.labels, settings.projects, focusModes) : null;
       const tpl = mode ? focusModes.find((m) => modeKey(m.id) === mode.id) : null;
       window.rhythmFocus.startWork({ task: task.title || 'Focus', workMin: mins, allowed: (tpl && tpl.allowed) || [], taskId: known ? task.id : null,
         templateId: tpl ? tpl.id : null, projectId: known ? projectOfTask(task, settings.labels, settings.projects) : null });
       setView('focus');
-      return;
+      return true;
     }
     setFocus({ id: task.id, title: task.title || 'Focus', endsAt });
+    return true;
   };
   useEffect(() => {
     if (!focus) return;
@@ -2514,38 +2514,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const topLuma = 0.299 * sky.top[0] + 0.587 * sky.top[1] + 0.114 * sky.top[2];
   const heroLight = topLuma < 140; // light text once the sky behind it is dark enough to need it
   // Prayers hang on the current logical day (Fajr→Fajr), so during the pre-dawn
-  // hours the gating prayer is last night's Isha — already handled by todayMid.
+  // hours the current prayer is last night's Isha — already handled by todayMid.
   const prayerDayCol = todayCol;
   const prayersToday = ((todayInView ? week : todayData)?.prayers || {})[prayerDayCol] || {};
-  // Which prayer, if any, is gating the app right now.
-  //  • Inside a prayer period → that prayer.
-  //  • During Duha/morning (after sunrise, before Dhuhr) → still Fajr, until Fajr
-  //    is marked done. This keeps the Fajr lock on until Dhuhr begins.
-  let gateId = null;
-  if (PRAYER_BLOCKS.includes(activeId)) gateId = activeId;
-  else if (activeId === 'morning' && !prayersToday['fajr']) gateId = 'fajr';
-  const gateBlock = gateId ? blockById(gateId) : activeBlock;
-  const gateStart = cleanTime(todayTimings[gateBlock.startKey]) || '';
-  // For the Fajr-through-Duha lock, show the window ending at Dhuhr (when it lifts).
-  const gateEnd = gateId === 'fajr' && activeId === 'morning'
-    ? (cleanTime(todayTimings.Dhuhr) || '')
-    : (gateBlock.endKey ? cleanTime(todayTimings[gateBlock.endKey]) || '' : '');
-  const gateActive = settings.prayerGate !== false && !!gateId && prayerDayCol >= 0 && !prayersToday[gateId];
-  // Hard window: the first 15 minutes of a prayer's own period belong to the
-  // prayer — the gate cannot be dismissed, not even by marking it done. The
-  // modulo handles the overnight Isha wrap. (The Fajr-through-morning carryover
-  // is long past its start by then, so it is never hard-locked.)
-  const PRAYER_HARD_MIN = 15;
-  const gateStartMin = gateStart ? minutesOf(gateStart) : null;
-  const gateElapsed = gateStartMin == null ? null : ((curMin - gateStartMin) + 1440) % 1440;
-  // Fresh-arrival lock (first 15 min of the period)…
-  const gateArrivalLeft = gateElapsed != null && gateElapsed < PRAYER_HARD_MIN ? PRAYER_HARD_MIN - gateElapsed : 0;
-  // …plus the unmark penalty (15 min from the moment it was unticked). nowTick in
-  // the render deps makes this recompute each minute so the countdown advances.
-  const gatePenaltyKey = gateId ? `${fmtISO(todayMid)}:${gateId}` : '';
-  const gatePenaltyTs = gatePenaltyKey ? prayerPenaltyRef.current[gatePenaltyKey] : 0;
-  const gatePenaltyLeft = gatePenaltyTs ? Math.ceil((PRAYER_HARD_MIN * 60000 - (Date.now() - gatePenaltyTs)) / 60000) : 0;
-  const gateHardLeft = Math.max(gateArrivalLeft, gatePenaltyLeft > 0 ? gatePenaltyLeft : 0);
   /* ---- planning assistant (chat; proposes, never writes) ---- */
   /* Everything the assistant is allowed to name. An id that isn't in here is
      dropped by validateProposal, so this list — not the prompt — is what
@@ -2601,7 +2572,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       balance,
       view,
       alarm: alarmAt ? `${pad(alarmAt.getHours())}:${pad(alarmAt.getMinutes())}` : '',
-      options: { lang: settings.lang, theme: settings.theme || 'auto', time24: !!settings.time24, prayerGate: settings.prayerGate !== false },
+      options: { lang: settings.lang, theme: settings.theme || 'auto', time24: !!settings.time24 },
     });
   };
   const sendChat = async () => {
@@ -2889,7 +2860,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         clearSlots(i);
         return true;
       }
-      case 'start_focus': { const t = liveTask(p.taskId); if (!t) return false; startFocus(t, p.minutes || 25, false); return true; }
+      case 'start_focus': { const t = liveTask(p.taskId); if (!t) return false; return startFocus(t, p.minutes || 25, false); }
       case 'set_alarm': { const m = minutesOf(p.at); if (m == null) return false; await setWake(m, p.label || tx('Wake up', 'استيقظ')); return true; }
       case 'cancel_alarm': await clearWake(); return true;
       case 'overdue_to_today':
@@ -2963,16 +2934,10 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     recurring: (id) => ((templates || []).find((t) => t.id === id) || {}).title,
   };
 
-  const confirmOath = () => {
-    if (!isOath(oathText)) return; // belt and braces: the button is disabled too
-    togglePrayer(gateId, todayMid);
-    setOathText('');
-  };
-  const gateHard = gateActive && gateHardLeft > 0;
   const usedTpl = {}; week.tasks.forEach((t) => { if (t.day === selectedDay && t.templateId) usedTpl[t.templateId] = (usedTpl[t.templateId] || 0) + 1; });
   const isSelectedToday = sameDay(selectedDate, todayMid);
   // Prayers as built-in habits: derived views over the existing prayer log, so
-  // marking a prayer at the gate and ticking it here are the same action. Not
+  // marking a prayer on Now and ticking it here are the same action. Not
   // stored in settings.habits — no duplicate state to drift.
   const prayerDoneOn = (blockId, iso) => {
     const d = parseISO(iso); const ws = startOfWeek(d, settings.weekStartDay);
@@ -3172,7 +3137,17 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
      Both halves count: the desktop shell's own session, and the plain
      countdown the web and Android builds fall back to. */
   const roundLive = useFocusLive() || !!focus;
-  const nowLocked = todayInView && !roundLive
+  /* The time lock. While a timed task's window is open, the app is covered
+     until a round on THAT task is running — the web countdown or the desktop
+     session, whichever this build has. Ending the round early brings it back
+     while the window lasts. See src/timelock.js. */
+  const deskRoundTaskId = useFocusTaskId();
+  const timeLocked = !locked && timeLockDue({ settings, live: liveNow, roundTaskIds: [focus && focus.id, deskRoundTaskId] });
+  const timeLockTask = timeLocked ? liveNow[0] : null;
+  useEffect(() => { if (timeLocked && view !== 'now' && view !== 'focus') setView('now'); }, [timeLocked]);   // eslint-disable-line
+  // The Now lock stands aside while the time lock is up: one cover is enough,
+  // and its "tick something off" card would be a way round this one.
+  const nowLocked = todayInView && !roundLive && !timeLocked
     && lockDue({ settings, since: lastDoneAt, now: Date.now(), pending: pendingNow });
   // Being locked means being on Now. Nothing else is reachable, so leaving the
   // view underneath on Plan would only mean a strange flash on release.
@@ -4059,7 +4034,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           onClose={() => setEditing(null)} onChange={(fn) => mutateTask(editingTask.id, fn)}
           onDelete={() => removeTask(editingTask.id)} onToPool={() => { taskToPool(editingTask.id); setEditing(null); }}
           onSaveTemplate={() => { addTemplate({ title: editingTask.title, block: editingTask.block, time: editingTask.time, projectId: editingTask.projectId, projectRef: editingTask.projectRef || null, duration: taskDuration(editingTask), subtasks: editingTask.subtasks.map((s) => s.title) }); flash(tx('Saved as a recurring task.', 'حُفظت كمهمة متكررة.')); }}
-          onFocus={(mins, untilEnd) => { startFocus(editingTask, mins, untilEnd); setEditing(null); }}
+          onFocus={(mins, untilEnd) => { if (startFocus(editingTask, mins, untilEnd)) setEditing(null); }}
           notebooks={notebooksFor(editingTask.id)}
           onOpenNotebook={setOpenNote}
           onNewNotebook={() => createNote({ taskId: editingTask.id })} />
@@ -4134,10 +4109,13 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       )}
       {drag && drag.kind === 'task' && (<div className={`pool-drop-hint ${drag.over && drag.over.type === 'pool' ? 'on' : ''}`} data-droppool="1"><Inbox size={15} /> {tx('Drop here to move to backlog', 'أفلت هنا للنقل إلى قائمة الانتظار')}</div>)}
 
-      {focus && !gateActive && (() => {
+      {focus && (() => {
         const remain = Math.max(0, focus.endsAt - Date.now());
         const mm = Math.floor(remain / 60000), ssv = Math.floor((remain % 60000) / 1000);
-        const ftask = week.tasks.find((t) => t.id === focus.id);
+        const ftask = week.tasks.find((t) => t.id === focus.id) || nowList.find((t) => t.id === focus.id);
+        // Ending early while this task's window is still open puts the time
+        // lock straight back up, so say so on the button rather than surprise.
+        const windowOpen = timeLockOn(settings) && liveNow.some((t) => t.id === focus.id);
         const subs = ftask?.subtasks || [];
         const allDone = subs.length > 0 && subs.every((st) => st.done);
         return (
@@ -4155,34 +4133,16 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 ))}</ul>
               )}
               <p className="gate-note">{allDone ? tx('All steps done — wrap up whenever.', 'انتهت كل الخطوات — أنهِ متى شئت.') : tx('Rhythm is locked while you focus.', 'التطبيق مقفل أثناء تركيزك.')}</p>
-              <button className="ghost sm" onClick={() => setFocus(null)}>{allDone ? tx('Done', 'تم') : tx('End early', 'إنهاء مبكر')}</button>
+              {ftask && !ftask.done && (
+                <button className="primary sm" onClick={() => { toggleDone(ftask.id); setFocus(null); }}><CheckCircle2 size={14} /> {tx('Finished — tick it off', 'انتهيت — علّمها منجزة')}</button>
+              )}
+              <button className="ghost sm" onClick={() => setFocus(null)}>
+                {windowOpen ? tx('End early (Rhythm locks again)', 'إنهاء مبكر (سيُقفل التطبيق مجددًا)') : allDone ? tx('Done', 'تم') : tx('End early', 'إنهاء مبكر')}
+              </button>
             </div>
           </div>
         );
       })()}
-
-      {gateActive && (
-        <div className="gate">
-          <div className="gate-card">
-            <span className="gate-eyebrow">{tx('Time for prayer', 'حان وقت الصلاة')}</span>
-            <span className="gate-name">{bName(gateBlock)} {bSub(gateBlock) && <span className="gate-ar">{bSub(gateBlock)}</span>}</span>
-            <span className="gate-time">{fmtTime(gateStart)}{gateEnd ? `–${fmtTime(gateEnd)}` : ''}</span>
-            <p className="gate-note">{gateHard ? tx('This time belongs to the prayer.', 'هذا الوقت للصلاة.') : gateId === 'fajr' && activeId === 'morning' ? tx('Fajr stays locked through the morning until Dhuhr.', 'يبقى قفل الفجر طوال الصباح حتى الظهر.') : tx("Rhythm is paused until you've prayed.", 'التطبيق متوقف حتى تصلّي.')}</p>
-            {gateHard ? (
-              <div className="gate-hard"><Lock size={15} /> {gateHardLeft} {tx('min', 'د')}</div>
-            ) : (
-              <div className="gate-oath">
-                <label className="gate-oath-label" htmlFor="oath-in">{tx('Type', 'اكتب')} <span className="gate-oath-word">{OATH_AR}</span> {tx('to confirm you have prayed', 'لتأكيد أنك صلّيت')}</label>
-                <input id="oath-in" className="gate-oath-input" dir="rtl" lang="ar" value={oathText} autoComplete="off" autoCorrect="off" spellCheck="false"
-                  onChange={(e) => setOathText(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && isOath(oathText)) confirmOath(); }}
-                  placeholder={OATH_AR} aria-label={tx('Type the oath', 'اكتب القسم')} />
-                <button className="primary gate-btn" disabled={!isOath(oathText)} onClick={confirmOath}><CheckCircle2 size={16} /> {tx('Confirm', 'تأكيد')} {bName(gateBlock)}</button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {wizard && (() => {
         const it = wizard.items[wizard.idx];
@@ -4329,7 +4289,12 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
 
       {view === 'focus' && isDesktop() && (
         <FocusView
-          tasks={focusTasks}
+          // The picker starts rounds itself, so the time lock's rule is applied
+          // here too: only what may be focused on right now is offered.
+          tasks={focusTasks.filter((ft) => focusVerdict({
+            settings, curMin, isToday: true, live: liveNow,
+            task: nowList.find((t) => t.id === ft.id) || { id: ft.id },
+          }).ok)}
           projects={(settings.projects || []).filter((p) => !p.completedAt)}
           rewards={(settings.rewards || []).filter((r) => r.name)}
           balance={balance}
@@ -4346,6 +4311,24 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
 
       {locked && settings.pin && (
         <PinScreen onVerify={verifyPin} onSuccess={() => setLocked(false)} />
+      )}
+
+      {/* The time lock. One way out: a round on the task whose time it is. */}
+      {timeLockTask && (
+        <div className="gate time-lock" role="dialog" aria-modal="true">
+          <div className="gate-card">
+            <span className="gate-eyebrow">{tx('Its time has come', 'حان وقتها')}</span>
+            <span className="gate-name">{timeLockTask.title}</span>
+            <span className="gate-time">{timeLabel(timeLockTask)}</span>
+            {liveNow.length > 1 && (
+              <span className="gate-time">{tx('Also now:', 'أيضًا الآن:')} {liveNow.slice(1).map((t) => t.title).join(' · ')}</span>
+            )}
+            <p className="gate-note">{tx('Rhythm stays locked until you are focusing on it.', 'يبقى التطبيق مقفلًا حتى تركّز عليها.')}</p>
+            <button className="primary gate-btn" onClick={() => startFocus(timeLockTask, null, true)}>
+              <Play size={16} /> {tx('Start focusing', 'ابدأ التركيز')}
+            </button>
+          </div>
+        </div>
       )}
 
       {/* The fifteen-minute lock. Deliberately the last overlay in the tree and
@@ -4428,7 +4411,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       {/* One line, from anywhere. Sits above the nav on the side the language
           does not start from, so it never covers the first tab; hidden while
           the lock is up, which is the one moment adding work is not the point. */}
-      {!nowLocked && !locked && !gateActive && (
+      {!nowLocked && !locked && !timeLocked && (
         <button className="qa-fab" onClick={() => setQuickAdd(true)} aria-label={tx('Quick add', 'إضافة سريعة')} title={tx('Quick add', 'إضافة سريعة')}>
           <Plus size={22} />
         </button>

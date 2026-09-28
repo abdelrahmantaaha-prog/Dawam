@@ -14,19 +14,6 @@ const isRTL = () => LANG === 'ar';
 const tx = (en, ar) => (LANG === 'ar' && ar != null ? ar : en);
 const LANGS = [{ id: 'en', label: 'English', native: 'English' }, { id: 'ar', label: 'Arabic', native: 'العربية' }];
 
-/* ------------------------------------------------------------------ */
-/*  The prayer oath — the gate is released by typing والله, not a tap.  */
-/*  Normalised generously so a real attempt always counts: diacritics,  */
-/*  tatweel, the ﷲ ligature, alef variants and whitespace are folded.   */
-/* ------------------------------------------------------------------ */
-const OATH_AR = '\u0648\u0627\u0644\u0644\u0647'; // والله
-const normalizeArabic = (s) => String(s || '')
-  .replace(/[\u064B-\u0652\u0670\u0640]/g, '')     // harakat + tatweel
-  .replace(/\uFDF2/g, '\u0627\u0644\u0644\u0647')   // ﷲ ligature → الله
-  .replace(/[\u0622\u0623\u0625]/g, '\u0627')       // آ أ إ → ا
-  .replace(/\s+/g, '');
-const isOath = (s) => normalizeArabic(s) === OATH_AR;
-
 const uid = () => (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2) + Date.now().toString(36));
 /*  Escapes all HTML first, then applies a small inline/block subset:  */
 /*  # headings, - / 1. lists, **bold**, *italic*, `code`, [text](url). */
@@ -293,7 +280,10 @@ const DEFAULT_SETTINGS = {
      to get ready rather than to discover it has begun. */
   leadMin: 30,
   weekStartDay: 6,
-  prayerGate: true,
+  /* While a timed task's own window is open, Rhythm stays covered until you
+     are focusing on that task, and no round can be started on a timed task
+     outside its window. See src/timelock.js. */
+  timeLock: true,
   time24: false,
   prayer: { useLive: true, city: 'Cairo', country: 'Egypt', method: 5, customTimes: { ...DEFAULT_TIMINGS } },
   /* Read-only calendars, and how hard the planner should route around them.
@@ -408,6 +398,7 @@ function migrateSettings(s) {
   base.brokerUrl = typeof s.brokerUrl === 'string' ? s.brokerUrl : '';
   base.brokerToken = typeof s.brokerToken === 'string' ? s.brokerToken : '';
   delete base.aiProvider;
+  delete base.prayerGate;   // the prayer gate is gone (3.3)
   base.autoDark = s.autoDark !== false;
   // The old boolean becomes the new three-way switch: auto-dark off meant
   // "always light"; anything else keeps the automatic behaviour.
@@ -902,7 +893,7 @@ function pushToToday(t, { activeBlock, curSinceFajr, sinceFajr }) {
   return next;
 }
 
-export { taskDuration,blockForTime,taskUntil,spans,spanLength,spanDayIndex,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,POINTS,goalWorth,goalCrossed,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,OATH_AR,normalizeArabic,isOath,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
+export { taskDuration,blockForTime,taskUntil,spans,spanLength,spanDayIndex,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultWindowed,vaultUnlocked,pushToToday,slotPassed,SLOT,estimateMinutes,taskTextSig,structureDay,POINTS,goalWorth,goalCrossed,autoWorth,taskWorth,shares,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds };
 
 /* The shared key pool, if this copy has been pointed at one.
  *

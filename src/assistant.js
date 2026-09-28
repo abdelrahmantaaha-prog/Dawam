@@ -20,7 +20,7 @@ const BLOCK_IDS = BLOCKS.map((b) => b.id);
 export const VIEWS = ['now', 'plan', 'calendar', 'projects', 'habits', 'notes', 'overdue', 'focus'];
 const THEMES = ['auto', 'light', 'dark'];
 const LANGS_OK = ['en', 'ar'];
-const TOGGLES = ['time24', 'prayerGate'];
+const TOGGLES = ['time24'];
 export const WEEKDAY_IDS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
 /* A repeat with no end date runs for a week. That is the person's own rule,
@@ -203,7 +203,7 @@ export const ACTIONS = [
   { kind: 'open_view', fields: { view: 'view' }, doc: 'switch to Now, Plan, Overdue or Focus' },
   { kind: 'set_language', fields: { lang: 'lang' }, doc: 'switch the interface language' },
   { kind: 'set_theme', fields: { theme: 'theme' }, doc: 'light, dark, or automatic by sunset' },
-  { kind: 'set_option', fields: { option: 'toggle', on: 'bool' }, doc: 'time24 = 24-hour clock; prayerGate = the prayer gate that blocks the app until the prayer is marked' },
+  { kind: 'set_option', fields: { option: 'toggle', on: 'bool' }, doc: 'time24 = 24-hour clock' },
 ];
 
 /* Which days a repeat actually lands on. Pure, so the description a person
@@ -386,7 +386,7 @@ export function buildDaySnapshot({
   }
   if (labels && labels.length) L.push(`\nLABELS: ${labels.join(', ')}`);
   if (alarm) L.push(`\nWAKE ALARM: ${alarm}`);
-  if (options) L.push(`SETTINGS: language=${options.lang} theme=${options.theme} time24=${options.time24 ? 'on' : 'off'} prayerGate=${options.prayerGate ? 'on' : 'off'}`);
+  if (options) L.push(`SETTINGS: language=${options.lang} theme=${options.theme} time24=${options.time24 ? 'on' : 'off'}`);
   return L.join('\n');
 }
 
@@ -525,7 +525,7 @@ export function describeProposal(p, names = {}) {
     case 'open_view': return `${tx('Open', 'افتح')} ${p.view}`;
     case 'set_language': return `${tx('Switch language to', 'غيّر اللغة إلى')} ${p.lang === 'ar' ? 'العربية' : 'English'}`;
     case 'set_theme': return `${tx('Theme', 'المظهر')}: ${p.theme}`;
-    case 'set_option': return `${p.option === 'time24' ? tx('24-hour clock', 'نظام ٢٤ ساعة') : tx('Prayer gate', 'بوابة الصلاة')} → ${p.on ? tx('on', 'مفعّل') : tx('off', 'معطّل')}`;
+    case 'set_option': return `${tx('24-hour clock', 'نظام ٢٤ ساعة')} → ${p.on ? tx('on', 'مفعّل') : tx('off', 'معطّل')}`;
 
     default: return p.kind;
   }

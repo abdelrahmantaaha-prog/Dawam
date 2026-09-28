@@ -117,7 +117,7 @@ try {
   // paused round never accumulates the 30 seconds that make it worth logging.
   // The blackout screens are switched off for the same reason: a test has no
   // business covering the person's displays.
-  await ev('window.rhythmFocus.saveSettings({ chairDetect: false, breakScreen: false, nudgeSound: false, blocklist: [] })');
+  await ev('window.rhythmFocus.saveSettings({ chairDetect: false, breakScreen: false, blocklist: [] })');
   await sleep(800);
 
   check('the focus tab exists', await ev('[...document.querySelectorAll(".navbtn")].some((b) => /Focus|تركيز/.test(b.textContent))'));

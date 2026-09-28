@@ -303,10 +303,10 @@ const POLL_MS = 60000;
    while a task editor is open makes the app feel like it is fighting you.
    Rhythm's editors and dialogs all sit inside `.overlay`.
 
-   Deliberately NOT `.gate`. The prayer gate and the focus lock also cover the
+   Deliberately NOT `.gate`. The time lock and the focus lock also cover the
    screen, but they are locks rather than edit forms: nothing is being typed
-   behind them, and the prayer gate in particular can stay up for fifteen
-   minutes or more. Treating those as "mid-edit" meant a fresh launch deferred
+   behind them, and the time lock in particular can stay up for as long as a
+   task's window lasts. Treating those as "mid-edit" meant a fresh launch deferred
    its first sync indefinitely — the app looked signed in and idle while never
    syncing at all. */
 function userIsEditing() {

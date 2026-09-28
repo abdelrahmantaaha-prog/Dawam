@@ -86,6 +86,23 @@ export function useFocusLive() {
   return live;
 }
 
+/* Which planned task the running round is for, or null. The time lock lifts
+   only for a round on the task whose time it is, so "a round is running" is
+   not enough — it has to know which one. A break keeps the task. */
+export function useFocusTaskId() {
+  const api = desktopFocus();
+  const [taskId, setTaskId] = useState(null);
+  useEffect(() => {
+    if (!api) return undefined;
+    let alive = true;
+    const read = (s) => (s && s.phase !== 'idle' ? s.taskId || null : null);
+    api.getState().then((s) => { if (alive) setTaskId(read(s)); }).catch(() => {});
+    const off = api.onState((s) => setTaskId(read(s)));
+    return () => { alive = false; off && off(); };
+  }, [api]);
+  return taskId;
+}
+
 /* The planner listens for finished rounds wherever it is — that is what lets
    App switch to this view and ask the question at the moment it matters. */
 export function useRoundEnded(handler) {
@@ -307,14 +324,14 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
             </div>
 
             <label className="field">
-              <span>{tplId ? `${tx('Cleared by', 'مسموح حسب')} “${tplName}”` : tx('Cleared for this round', 'مسموح لهذه الجولة')}</span>
+              <span>{tplId ? `${tx('Allowed by', 'مسموح حسب')} “${tplName}”` : tx('Allowed in this round', 'المسموح في هذه الجولة')}</span>
               <textarea rows={2} value={cleared} onChange={(e) => setCleared(e.target.value)}
-                placeholder={tx('one site or app per line — leave empty for relaxed mode', 'موقع أو تطبيق في كل سطر — اتركه فارغًا للوضع المتساهل')} />
+                placeholder={tx('one site or app per line, e.g. docs.google.com or code', 'موقع أو تطبيق في كل سطر، مثل docs.google.com أو code')} />
             </label>
             <p className="hint-text">
               {textToList(cleared).length
-                ? tx('Strict: everything else is off-task and you get returned by force.', 'صارم: كل ما عداها خارج المهمة وستُعاد بالقوة.')
-                : tx('Relaxed: only your distraction list nudges you.', 'متساهل: قائمة الإلهاء وحدها هي التي تنبّهك.')}
+                ? tx('Only these are open. Every other site and app is closed the moment it comes to the front.', 'هذه وحدها مفتوحة. أي موقع أو تطبيق آخر يُغلق فور ظهوره في المقدمة.')
+                : tx('No allow list: nothing is blocked this round.', 'لا قائمة سماح: لا شيء محظور في هذه الجولة.')}
             </p>
             {tplAuto && tplId && picked && picked.mode && (
               <p className="hint-text focus-modeauto">
@@ -340,14 +357,14 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
 
             <label className="check">
               <input type="checkbox" checked={saveTpl} onChange={(e) => { setSaveTpl(e.target.checked); if (e.target.checked && !tplName) setTplName(title.trim()); }} />
-              <span>{tplId ? tx('Update this focus mode', 'حدّث نمط التركيز هذا') : tx('Save these restrictions as a focus mode', 'احفظ هذه القيود كنمط تركيز')}</span>
+              <span>{tplId ? tx('Update this focus mode', 'حدّث نمط التركيز هذا') : tx('Save this allow list as a focus mode', 'احفظ قائمة السماح هذه كنمط تركيز')}</span>
             </label>
             {saveTpl && (
               <label className="field">
                 <span>{tx('Name it', 'سمِّه')}</span>
                 <input value={tplName} onChange={(e) => setTplName(e.target.value)}
                   placeholder={tx('Deep work, Admin, Reading…', 'عمل عميق، إداري، قراءة…')} />
-                <span className="hint-text">{tx('A focus mode is a set of restrictions, not a task — you can use it with any task.', 'نمط التركيز مجموعة قيود لا مهمة — يمكنك استخدامه مع أي مهمة.')}</span>
+                <span className="hint-text">{tx('A focus mode is an allow list, not a task — you can use it with any task.', 'نمط التركيز قائمة سماح لا مهمة — يمكنك استخدامه مع أي مهمة.')}</span>
               </label>
             )}
 
@@ -358,13 +375,13 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
             {templates.length > 0 && (
               <div className="focus-templates">
                 <h4 className="focus-h4">{tx('Focus modes', 'أنماط التركيز')}</h4>
-                <p className="hint-text">{tx('Restrictions and allow lists you can apply to any task.', 'قيود وقوائم سماح يمكن تطبيقها على أي مهمة.')}</p>
+                <p className="hint-text">{tx('Allow lists you can apply to any task. Under one, anything not on the list is blocked.', 'قوائم سماح يمكن تطبيقها على أي مهمة. تحتها، يُحظر كل ما ليس في القائمة.')}</p>
                 {templates.map((tpl) => (
                   <div key={tpl.id} className={`focus-tplrow${tplId === tpl.id ? ' on' : ''}`}>
                     <button className="focus-tplname" onClick={() => useTemplate(tpl)}>
                       <span>{tpl.name}</span>
                       <span className="ttime">{tpl.workMin}m</span>
-                      {tpl.allowed?.length ? <span className="focus-strict"><ShieldCheck size={12} /> {tx('strict', 'صارم')}</span> : null}
+                      {tpl.allowed?.length ? <span className="focus-strict"><ShieldCheck size={12} /> {tpl.allowed.length} {tx('allowed', 'مسموح')}</span> : null}
                       {tplId === tpl.id ? <span className="focus-applied">{tx('applied', 'مطبّق')}</span> : null}
                     </button>
                     <button className="ghost sm" onClick={async () => { if (tplId === tpl.id) { setTplId(''); } await api.deleteTemplate(tpl.id); reload(); }}
@@ -389,14 +406,14 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
 function LiveSession({ api, state, projects = [] }) {
   const s = state;
   const breakPhase = s.phase === 'break';
-  const cls = breakPhase ? 'break' : s.paused ? 'paused' : s.drifting ? 'drifting' : 'working';
+  const cls = breakPhase ? 'break' : s.paused ? 'paused' : 'working';
   const pct = s.totalSec ? clamp(1 - s.remainingSec / s.totalSec, 0, 1) : 0;
 
   return (
     <div className={`focus-card focus-live ${cls}`}>
       <span className="focus-phase">
         {breakPhase ? tx('Break', 'استراحة') : s.paused ? tx('Paused', 'موقوف') : tx('Focusing', 'تركيز')}
-        {!breakPhase && s.strict ? <span className="focus-strict"><ShieldCheck size={12} /> {tx('strict', 'صارم')}</span> : null}
+        {!breakPhase && s.strict ? <span className="focus-strict"><ShieldCheck size={12} /> {tx('allow list', 'قائمة سماح')}</span> : null}
       </span>
       <h3 className="focus-task">{breakPhase ? tx('Stand up. Walk. Hydrate.', 'قف. امشِ. اشرب ماء.') : s.task}</h3>
       {!breakPhase && s.projectId && (() => {
@@ -409,28 +426,7 @@ function LiveSession({ api, state, projects = [] }) {
       {!breakPhase && (
         <div className="focus-stats">
           <span>{tx('Round', 'جولة')} {s.rounds + 1}</span>
-          <span>{tx('Drifted', 'شرود')} {s.driftCount}×</span>
-          <span>{tx('Off-task', 'خارج المهمة')} {asMin(s.distractedSec)}m</span>
-        </div>
-      )}
-
-      {s.drifting && (
-        <p className="focus-drift">
-          <AlertTriangle size={14} />
-          {s.enforceInSec != null
-            ? tx(`Off-task — forced back in ${s.enforceInSec}s`, `خارج المهمة — ستُعاد خلال ${s.enforceInSec} ث`)
-            : tx('Off-task', 'خارج المهمة')}
-        </p>
-      )}
-
-      {s.ask && (
-        <div className="focus-ask">
-          <span><Eye size={14} /> <strong>{s.ask.label}</strong> — {tx('work or distraction?', 'عمل أم إلهاء؟')}</span>
-          <span className="focus-ask-btns">
-            <button className="primary sm" onClick={() => api.triageVerdict(s.ask.key, 'work')}>{tx('Work', 'عمل')}</button>
-            <button className="ghost sm" onClick={() => api.triageVerdict(s.ask.key, 'distraction')}>{tx('Distraction', 'إلهاء')}</button>
-            <button className="ghost sm" onClick={() => api.triageSnooze(s.ask.key)} aria-label={tx('Ask later', 'لاحقًا')}><X size={14} /></button>
-          </span>
+          {s.strict ? <span>{tx('Blocked', 'حُظر')} {s.blockedCount || 0}×</span> : <span>{tx('Nothing blocked', 'لا حظر')}</span>}
         </div>
       )}
 
@@ -466,7 +462,7 @@ function RoundEndedCard({ entry, onDismiss, onMarkDone, onLearn }) {
       </h3>
       <p className="hint-text">
         {tx(`${focusedMin} min focused of ${spentMin} spent`, `${focusedMin} دقيقة تركيز من ${spentMin} دقيقة`)}
-        {entry.driftCount ? tx(` · drifted ${entry.driftCount}×`, ` · شردت ${entry.driftCount} مرة`) : ''}
+        {entry.blockedCount ? tx(` · ${entry.blockedCount} blocked`, ` · حُظر ${entry.blockedCount}`) : ''}
       </p>
       <div className="focus-actions">
         {entry.taskId && (
@@ -531,8 +527,7 @@ function FocusTally({ history, projects = [], dayOf }) {
 
   const rounds = history.filter((h) => dayOf(h.endedAt) === sel);
   const focused = rounds.reduce((n, h) => n + (h.focusedSec || 0), 0);
-  const distracted = rounds.reduce((n, h) => n + (h.distractedSec || 0), 0);
-  const rate = focused + distracted ? Math.round((focused / (focused + distracted)) * 100) : null;
+  const blocked = rounds.reduce((n, h) => n + (h.blockedCount || 0), 0);
   const nameOf = (pid) => (projects.find((p) => p.id === pid) || {}).name || '';
 
   return (
@@ -602,7 +597,7 @@ function FocusTally({ history, projects = [], dayOf }) {
       <div className="focus-totals">
         <div><strong>{rounds.length}</strong><span>{tx('rounds', 'جولات')}</span></div>
         <div><strong>{fmtFocus(asMin(focused))}</strong><span>{tx('focused', 'تركيز')}</span></div>
-        <div><strong>{rate == null ? '—' : `${rate}%`}</strong><span>{tx('focus rate', 'نسبة التركيز')}</span></div>
+        <div><strong>{blocked}</strong><span>{tx('blocked', 'محظور')}</span></div>
       </div>
       {rounds.length === 0 && <p className="hint-text">{tx('No rounds on this day.', 'لا جولات في هذا اليوم.')}</p>}
       {rounds.map((h, i) => (
@@ -662,13 +657,8 @@ function FocusSettings({ api, settings, templates, onSaved }) {
         {num('breakMin', tx('Break minutes', 'دقائق الاستراحة'), 1, 60)}
       </div>
 
-      <h4 className="focus-h4">{tx('Drift', 'الشرود')}</h4>
-      <div className="focus-row">
-        {num('graceSec', tx('Grace seconds', 'مهلة بالثواني'), 0, 300, tx('A glance is not a drift.', 'النظرة العابرة ليست شرودًا.'))}
-        {num('enforceSec', tx('Force return after', 'الإعادة القسرية بعد'), 3, 300)}
-      </div>
-      {num('settleSec', tx('Settling seconds', 'ثواني الاستقرار'), 0, 30, tx('A loading page should not be judged by its loading title.', 'الصفحة أثناء التحميل لا تُحاكم بعنوانها المؤقت.'))}
-      {toggle('nudgeSound', tx('Sound on nudge', 'صوت عند التنبيه'))}
+      <h4 className="focus-h4">{tx('Blocking', 'الحظر')}</h4>
+      {num('settleSec', tx('Settling seconds', 'ثواني الاستقرار'), 0, 30, tx('A page that is still loading is not judged by its loading title. Under a focus mode, anything not allowed is closed once these pass.', 'الصفحة أثناء التحميل لا تُحاكم بعنوانها المؤقت. تحت نمط تركيز، يُغلق غير المسموح بعد مرورها.'))}
 
       <h4 className="focus-h4">{tx('Breaks and the chair', 'الاستراحات والكرسي')}</h4>
       {toggle('breakScreen', tx('Black out the screen on breaks', 'إظلام الشاشة أثناء الاستراحة'))}
@@ -681,9 +671,8 @@ function FocusSettings({ api, settings, templates, onSaved }) {
           'تُغطى كل الشاشات حتى تبدأ جولة بشيء محدّد ومدة. لم يعد هناك خروج مؤقت: الراحة إجابة مقبولة — اختر مكافأة من الأسفل وركّز عليها — أما فتح الجهاز دون تحديد أي شيء فلا.'))}
 
       <h4 className="focus-h4">{tx('Lists', 'القوائم')}</h4>
-      {list('alwaysAllowed', tx('Always allowed', 'مسموح دائمًا'), tx('Sites and keywords that are never a distraction in any round — the docs, dictionary or tools you always work from. Unlike a round’s cleared list, this does not make the round strict. The hard block still wins.', 'مواقع وكلمات لا تُعد إلهاءً في أي جولة — المراجع والقاموس والأدوات التي تعمل بها دائمًا. على خلاف قائمة الجولة، لا تجعل الجولة صارمة. الحظر التام يبقى أقوى.'))}
-      {list('distractions', tx('Distractions', 'الملهيات'), tx('Matched against the window title, the app name and the address-bar domain.', 'تُطابق عنوان النافذة واسم التطبيق ونطاق شريط العنوان.'))}
-      {list('blocklist', tx('Hard block', 'حظر تام'), tx('Minimized on sight, session or not.', 'تُصغَّر فور ظهورها، بجلسة أو بدونها.'))}
+      {list('alwaysAllowed', tx('Always allowed', 'مسموح دائمًا'), tx('Added to every focus mode’s allow list — the docs, dictionary or tools you always work from. A round without a focus mode still blocks nothing.', 'تُضاف إلى قائمة المسموح في كل نمط تركيز — المراجع والقاموس والأدوات التي تعمل بها دائمًا. الجولة بلا نمط تركيز لا تحظر شيئًا.'))}
+      {list('blocklist', tx('Always blocked', 'محظور دائمًا'), tx('Minimized on sight, round or not, focus mode or not. Matched against the window title, the app name and the address-bar domain.', 'تُصغَّر فور ظهورها، بجولة أو بدونها، وبنمط تركيز أو بدونه. تُطابق عنوان النافذة واسم التطبيق ونطاق شريط العنوان.'))}
       {list('freeTimes', tx('Free times', 'أوقات حرة'), tx('20:00-23:00 — or fri,sat 14:00-02:00. The hard block is off inside these.', '20:00-23:00 — أو fri,sat 14:00-02:00. الحظر التام معطّل خلالها.'))}
 
       <h4 className="focus-h4">{tx('This app', 'هذا التطبيق')}</h4>
@@ -699,24 +688,6 @@ function FocusSettings({ api, settings, templates, onSaved }) {
         </span>
       </label>
       {toggle('openPlannerAtStart', tx('Open the planner window at launch', 'افتح نافذة المخطط عند التشغيل'), tx('Off means Rhythm starts in the tray.', 'إيقافها يعني أن ريذم يبدأ في شريط المهام.'))}
-
-      {templates.some((t) => t.verdicts && Object.keys(t.verdicts).length) && (
-        <>
-          <h4 className="focus-h4">{tx('Learned filters', 'المرشّحات المكتسبة')}</h4>
-          {templates.filter((t) => t.verdicts && Object.keys(t.verdicts).length).map((t) => (
-            <div key={t.id} className="focus-verdicts">
-              <strong>{t.name}</strong>
-              {Object.entries(t.verdicts).map(([k, v]) => (
-                <span key={k} className={`focus-verdict ${v}`}>
-                  {k.replace(/^(site|app):/, '')}
-                  <button className="ghost sm" onClick={async () => { await api.templateVerdict(t.id, k, null); onSaved(); }}
-                    aria-label={tx('Forget', 'انسَ')}><X size={12} /></button>
-                </span>
-              ))}
-            </div>
-          ))}
-        </>
-      )}
 
       <p className="hint-text"><Save size={12} /> {tx('Changes save as you leave each field.', 'تُحفظ التغييرات عند مغادرة كل حقل.')}</p>
     </div>

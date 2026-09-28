@@ -9,21 +9,12 @@ const DEFAULTS = {
   settings: {
     workMin: 50,
     breakMin: 10,
-    graceSec: 15,
-    enforceSec: 10,
     settleSec: 5,
-    distractions: [
-      'youtube', 'netflix', 'prime video', 'twitch',
-      'twitter', 'x.com', 'reddit', 'tiktok', 'instagram', 'facebook', '9gag',
-      'discord', 'whatsapp', 'telegram',
-      'steam', 'epic games'
-    ],
-    // Never a distraction during a round: sites and keywords you always work
-    // from. Clears a window without making the round strict. See session.js.
+    // Allowed under every focus mode, on top of the mode's own list: sites and
+    // keywords you always work from. See session.js.
     alwaysAllowed: [],
     blocklist: [],
     freeTimes: [],
-    nudgeSound: true,
     breakScreen: true,
     chairDetect: true,
     awaySec: 10,
@@ -59,8 +50,7 @@ class Store {
 
   /* Anchor's own data file, wherever Electron put it when Anchor ran as its
      own app. Read once, on a first launch that finds nothing of ours — the
-     merge should not cost the person their distraction list, their templates
-     or their history. */
+     merge should not cost the person their focus modes or their history. */
   legacyFile() {
     return path.join(path.dirname(app.getPath('userData')), 'anchor', 'anchor-data.json');
   }
@@ -72,15 +62,19 @@ class Store {
     let text = fs.readFileSync(file, 'utf8');
     if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
     const raw = JSON.parse(text);
+    // The distraction list, its grace period and nudges are gone: a focus mode
+    // is an allow list and everything else is blocked. Old keys are dropped.
+    const settings = { ...DEFAULTS.settings, ...(raw.settings || {}) };
+    for (const k of ['distractions', 'graceSec', 'enforceSec', 'nudgeSound']) delete settings[k];
     return {
-      settings: { ...DEFAULTS.settings, ...(raw.settings || {}) },
+      settings,
       /* A template used to BE a task: it was keyed by task name, and applying
          one renamed whatever you were doing. It is a named set of restrictions
          now, usable with any task, so the old `task` field becomes its name. */
-      templates: (Array.isArray(raw.templates) ? raw.templates : []).map((t) => ({
-        ...t,
-        name: String((t && (t.name || t.task)) || '').trim() || 'Focus',
-      })),
+      templates: (Array.isArray(raw.templates) ? raw.templates : []).map((t) => {
+        const { verdicts, ...rest } = t || {};   // learned "work/distraction" answers: gone
+        return { ...rest, name: String((t && (t.name || t.task)) || '').trim() || 'Focus' };
+      }),
       history: Array.isArray(raw.history) ? raw.history : []
     };
   }

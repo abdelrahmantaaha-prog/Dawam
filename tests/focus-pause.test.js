@@ -1,8 +1,7 @@
 /* Pausing was an off switch with an innocent name.
 
-   Drift detection, the nudge and the force-return are all gated on
-   `!paused`, so a pause that never ends disables every part of a focus round
-   while the round still looks like it is running. These pin the two limits
+   A paused round stops its clock, so a pause that never ends is a round that
+   never ends while still looking like it is running. These pin the two limits
    that close it, and the one exemption that must stay open. */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createRequire } from 'node:module';

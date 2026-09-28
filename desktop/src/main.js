@@ -16,6 +16,7 @@ const fs = require('fs');
 const Store = require('./store');
 const SessionManager = require('./session');
 const { startPoller, startEnforcer } = require('./poller');
+const { fitRect } = require('./fit');
 const calendar = require('./calendar');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -315,6 +316,37 @@ if (!app.requestSingleInstanceLock()) {
       store.data.settings.overlayPos = { x: ox, y: oy };
       store.save();
     });
+    keepOnScreen();   // the saved spot may be on a monitor that is not plugged in today
+  }
+
+  /* A window left on a screen that has been unplugged is still "open" and
+     still on top — just nowhere anyone can see or drag it. Run at launch and
+     whenever displays change; Windows shuffles windows itself right after a
+     display goes, so the check runs again a moment later to have the last word. */
+  function keepOnScreen() {
+    const areas = screen.getAllDisplays().map((d) => d.workArea);
+    const wa = screen.getPrimaryDisplay().workArea;
+    if (overlay && !overlay.isDestroyed()) {
+      const b = overlay.getBounds();
+      const to = fitRect(b, areas, { x: wa.x + wa.width - b.width - 16, y: wa.y + 16 });
+      if (to.x !== b.x || to.y !== b.y) {
+        overlay.setPosition(to.x, to.y);
+        store.data.settings.overlayPos = to;
+        store.save();
+      }
+    }
+    if (planner && !planner.isDestroyed() && !planner.isMaximized() && !planner.isFullScreen()) {
+      const b = planner.getBounds();
+      const w = Math.min(b.width, wa.width), h = Math.min(b.height, wa.height);
+      const to = fitRect(b, areas, { x: wa.x + (wa.width - w) / 2, y: wa.y + (wa.height - h) / 2 });
+      if (to.x !== b.x || to.y !== b.y) planner.setBounds({ x: to.x, y: to.y, width: w, height: h });
+    }
+  }
+  let refitTimer = null;
+  function onDisplaysChanged() {
+    keepOnScreen();
+    clearTimeout(refitTimer);
+    refitTimer = setTimeout(keepOnScreen, 1500);
   }
 
   function createPlanner() {
@@ -363,6 +395,7 @@ if (!app.requestSingleInstanceLock()) {
 
   function showPlanner() {
     if (!planner || planner.isDestroyed()) createPlanner();
+    keepOnScreen();
     if (lockWins.length) planner.setAlwaysOnTop(true, 'screen-saver', 1);
     planner.show();
     planner.focus();
@@ -494,6 +527,10 @@ if (!app.requestSingleInstanceLock()) {
 
     createOverlay();
     createPlanner();
+    // Unplugging a monitor must never strand the overlay (or the planner) on it.
+    screen.on('display-removed', onDisplaysChanged);
+    screen.on('display-added', onDisplaysChanged);
+    screen.on('display-metrics-changed', onDisplaysChanged);
 
     if (store.migratedFromAnchor) {
       notify('Anchor moved in', 'Your focus settings, templates and history came across to Rhythm.');
@@ -532,8 +569,8 @@ if (!app.requestSingleInstanceLock()) {
     }
 
     // Hard block: matched windows are minimized on sight, session or not.
-    // Runs independently of the session machinery, so it beats cleared
-    // lists and "work" verdicts by construction. Free times switch it off.
+    // Runs independently of the session machinery, so it beats a focus
+    // mode's allow list by construction. Free times switch it off.
     let lastBlockNotifyAt = 0;
     function hardBlockCheck(s) {
       const list = (store.data.settings.blocklist || [])
@@ -597,16 +634,19 @@ if (!app.requestSingleInstanceLock()) {
       if (Date.now() - lastPresentAt > awayMs) showAwayScreens();
     }, 1000);
 
-    sessions.on('nudge', (info) => {
-      broadcast('nudge', info);
-      notify('You drifted', `Back to: ${info.task}`);
-      if (overlay && !overlay.isDestroyed() && !overlay.isVisible()) overlay.show();
-    });
     sessions.on('notify', (n) => notify(n.title, n.body));
-    sessions.on('enforce', ({ offender, target }) => {
+    // A window the focus mode does not allow: minimized, and you are put back
+    // on the last allowed window. One notification per half minute at most —
+    // the block itself is the message; a stream of toasts would be noise.
+    let lastModeNotifyAt = 0;
+    sessions.on('block', ({ offender, target, label }) => {
       if (offender) enforcer.send(`minimize ${offender}`);
       if (target && target !== offender) {
         setTimeout(() => enforcer.send(`focus ${target}`), 300);
+      }
+      if (Date.now() - lastModeNotifyAt > 30000) {
+        lastModeNotifyAt = Date.now();
+        notify('Not allowed', `${label} is not in this focus mode.`);
       }
     });
     sessions.on('history-changed', () => broadcast('history-changed'));
@@ -623,20 +663,6 @@ if (!app.requestSingleInstanceLock()) {
       templates: store.data.templates,
       history: store.data.history
     }));
-    ipcMain.handle('triage-verdict', (_e, key, verdict) => {
-      sessions.setVerdict(key, verdict);
-      broadcast('data-changed');
-    });
-    ipcMain.handle('triage-snooze', (_e, key) => sessions.snoozeAsk(key));
-    ipcMain.handle('template-verdict', (_e, id, key, verdict) => {
-      const tpl = store.data.templates.find((t) => t.id === id);
-      if (!tpl) return;
-      tpl.verdicts = tpl.verdicts || {};
-      if (verdict === null) delete tpl.verdicts[key];
-      else tpl.verdicts[key] = verdict;
-      store.save();
-      broadcast('data-changed');
-    });
     ipcMain.handle('start-work', (_e, req) => {
       sessions.startWork(req);
       updateTray(sessions.getState());
@@ -650,19 +676,13 @@ if (!app.requestSingleInstanceLock()) {
       const existing = tpl.id
         ? store.data.templates.find((t) => t.id === tpl.id)
         : store.data.templates.find((t) => String(t.name).toLowerCase() === name.toLowerCase());
-      /* Learned filters travel with the policy. A live round contributes what
-         it has taught only when it is running under THIS policy — matching on
-         the task name would hand one policy's lessons to another the moment
-         two rounds happened to be called the same thing. */
-      const liveVerdicts = existing && sessions.templateId === existing.id ? sessions.sessionVerdicts : {};
       const entry = {
         id: (existing && existing.id) || Date.now(),
         name,
         workMin: Math.max(1, Math.min(240, Number(tpl.workMin) || 50)),
         allowed: (Array.isArray(tpl.allowed) ? tpl.allowed : [])
           .map((k) => String(k).trim())
-          .filter(Boolean),
-        verdicts: { ...((existing && existing.verdicts) || {}), ...liveVerdicts }
+          .filter(Boolean)
       };
       store.data.templates = store.data.templates.filter((t) => t.id !== entry.id);
       store.data.templates.unshift(entry);

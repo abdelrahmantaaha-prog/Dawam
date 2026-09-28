@@ -5,7 +5,7 @@ import { DAILY, WEEKLY, MONTHLY, normalizeRepeat } from './recur.js';
 import { normalizePlan, paceStatus, todayQuota } from './quota.js';
 import { fmtFocus, projectFocusBetween, projectFocusTotal } from './projectfocus.js';
 import { TINY, habitStats, isPrayerAnchor, stackShape, wouldCycle } from './habits.js';
-import { isOath,OATH_AR,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
+import { hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
 import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
 
 import { AppIcon,BlockRow,DurationInput,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
@@ -156,7 +156,7 @@ function HabitCard({ id, h, habits = [], todayISO, open, rewards = [], balance =
       {open && (
         <div className="proj-edit">
           {isPrayer ? (
-            <p className="hint-text" style={{ margin: 0 }}>{tx('Built-in — tracked from the prayer gate. Marking it here and praying at the gate are the same record.', 'مدمجة — تُتتبَّع من قفل الصلاة. تعليمها هنا والصلاة عند القفل سجلٌ واحد.')}</p>
+            <p className="hint-text" style={{ margin: 0 }}>{tx('Built-in — the same record as ticking the prayer on Now.', 'مدمجة — السجل نفسه الذي تعلّمه من صفحة «الآن».')}</p>
           ) : (<>
           <div className="proj-field"><span>{tx('Habit name', 'اسم العادة')}</span><input className="projname" value={h.name} onChange={(e) => onUpd({ name: e.target.value })} /></div>
           <div className="proj-grid2">
@@ -718,6 +718,12 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                   onChange={(e) => patch({ leadMin: Math.max(0, Math.min(180, Number(e.target.value) || 0)) })} />
                 <span className="hint-text">{tx('Time to close what you were doing and be there, rather than to find out it has started. Zero turns it off.', 'وقت لتُنهي ما بين يديك وتكون هناك، بدل أن تكتشف أنها بدأت. الصفر يوقف هذا.')}</span>
               </label>
+              <div className="sect-h" style={{ marginTop: 16 }}><Lock size={13} /> {tx('The time lock', 'قفل الوقت')}</div>
+              <label className="toggle">
+                <input type="checkbox" checked={local.timeLock !== false} onChange={(e) => patch({ timeLock: e.target.checked })} />
+                <span>{tx('When a timed task\'s time comes, lock Rhythm until I am focusing on it', 'عندما يحين وقت مهمة موقوتة، اقفل التطبيق حتى أركّز عليها')}</span>
+              </label>
+              <p className="hint-text">{tx('A task with a start and an end can only be focused on inside that window, and while it is open it is the only thing you can focus on. Ending the round early locks Rhythm again until the window closes.', 'المهمة ذات البداية والنهاية لا يمكن التركيز عليها إلا داخل وقتها، وأثناءه تكون الشيء الوحيد الذي يمكنك التركيز عليه. إنهاء الجولة مبكرًا يقفل التطبيق مجددًا حتى ينتهي وقتها.')}</p>
               <div className="sect-h" style={{ marginTop: 16 }}><Lock size={13} /> {tx('The Now lock', 'قفل «الآن»')}</div>
               <label className="toggle">
                 <input type="checkbox" checked={!!(local.nowLock && local.nowLock.on)}
@@ -745,11 +751,6 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
           </>)}
 
           {tab === 'prayer' && (<>
-            <div className="sect">
-              <div className="sect-h"><Lock size={13} /> {tx('Prayer lock', 'قفل الصلاة')}</div>
-              <label className="toggle"><input type="checkbox" checked={local.prayerGate !== false} onChange={(e) => patch({ prayerGate: e.target.checked })} /><span>{tx('Pause the app at each prayer time until the prayer is marked done', 'أوقف التطبيق عند كل وقت صلاة حتى يتم تعليم الصلاة كمنجزة')}</span></label>
-              <p className="hint-text">{tx('Fajr stays locked through the morning until Dhuhr, releasing as soon as you mark it done.', 'يبقى قفل الفجر طوال الصباح حتى الظهر، ويُرفع فور تعليمه كمنجز.')}</p>
-            </div>
             <div className="sect">
               <div className="sect-h">{tx('Prayer times', 'مواقيت الصلاة')}</div>
               <label className="toggle"><input type="checkbox" checked={local.prayer.useLive} onChange={(e) => setPrayer({ useLive: e.target.checked })} /><span>{tx('Calculate automatically for Cairo (Egyptian Authority)', 'احسب تلقائيًا للقاهرة (الهيئة المصرية العامة للمساحة)')}</span></label>

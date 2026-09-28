@@ -2,7 +2,7 @@
 /*  Which focus mode a task starts with.                               */
 /*                                                                     */
 /*  A focus mode (the desktop's "template": a named allow list, a       */
-/*  length, learned filters) used to be picked by hand every round.     */
+/*  and a length) used to be picked by hand every round.                */
 /*  Most work always wants the same one — translating wants the         */
 /*  dictionary cleared, admin wants the inbox — so a mode can be        */
 /*  remembered for a task, for a tag, or for a project, and picking     */
