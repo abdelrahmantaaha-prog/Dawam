@@ -1829,3 +1829,9 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .focus-remember select{width:100%}
 .focus-modeauto{margin-top:-2px;color:var(--verdigris)}
 .focus-mode-row select{flex:1;min-width:0;font-size:12.5px;padding:5px 7px}
+/* Habits among the Plan tasks, and dragged into order on the Habits page */
+.block-habit{display:flex;align-items:center;gap:6px;padding:3px 0}
+.block-habit>.habit-line{flex:1;min-width:0}
+.block-habit.dragging,.habit-stack.dragging{opacity:.35}
+.block-habit.drop-before,.habit-stack.drop-before{box-shadow:inset 0 2px 0 -0.5px var(--verdigris)}
+.block-habit.drop-after,.habit-stack.drop-after{box-shadow:inset 0 -2px 0 -0.5px var(--verdigris)}

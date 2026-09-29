@@ -6,6 +6,7 @@ import { durationFor, rememberDuration } from './durations.js';
 import { focusModeFor, modeKey } from './focusmode.js';
 import { describeRepeat, isScheduled } from './recur.js';
 import { applySuggestion, suggestFor, tokenAt } from './parse.js';
+import { mergeHabits } from './habits.js';
 
 function FlameGlyph({ level = 0, size = 14 }) {
   const l = Math.max(0, Math.min(7, level));
@@ -317,12 +318,16 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
     ...events.map((e) => ({ kind: 'event', at: e.startMin, e })),
     ...cards.map((c) => ({ kind: 'card', at: c.dueMin, c })),
   ].sort((a, b) => a.at - b.at);
+  // Habits share the manual order with the tasks: each one sits after as
+  // many of the period's tasks as its slot says (dragged there, or first).
   const rows = [];
   { let fi = 0;
-    for (const t of tasks) {
-      const ts = tStartMin(t) ?? Infinity;
-      while (fi < fixtures.length && fixtures[fi].at <= ts) rows.push(fixtures[fi++]);
-      rows.push({ kind: 'task', t });
+    for (const row of mergeHabits(tasks, habits)) {
+      if (row.kind === 'task') {
+        const ts = tStartMin(row.t) ?? Infinity;
+        while (fi < fixtures.length && fixtures[fi].at <= ts) rows.push(fixtures[fi++]);
+      }
+      rows.push(row);
     }
     while (fi < fixtures.length) rows.push(fixtures[fi++]);
   }
@@ -338,13 +343,16 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
           <span className="prayer-title">{tx(`${block.name} prayer`, `صلاة ${block.ar}`)}</span>
         </div>
       )}
-      {habits.length > 0 && (
-        <div className="block-habits">
-          {habits.map((h) => <HabitLine key={h.id} h={h} iso={habitDate} onToggle={onToggleHabit} />)}
-        </div>
-      )}
       {tasks.length === 0 && habits.length === 0 && fixtures.length === 0 && !adding && <button className="empty" onClick={() => setAdding(true)}>{bHint(block)}</button>}
       {rows.map((row, ri) => {
+        if (row.kind === 'habit') { const h = row.h;
+          const hBefore = taskDrop && taskDrop.habitId === h.id && !taskDrop.after;
+          const hAfter = taskDrop && taskDrop.habitId === h.id && taskDrop.after;
+          return (
+          <div key={`hb-${h.id}`} data-habitid={h.id} className={`block-habit ${draggingId === h.id ? 'dragging' : ''} ${hBefore ? 'drop-before' : ''} ${hAfter ? 'drop-after' : ''}`}>
+            <span className="grip" onPointerDown={(e) => onDragStart(e, 'habit', h)} title={tx('Drag to reorder within this period', 'اسحب لإعادة الترتيب داخل هذه الفترة')}><GripVertical size={15} /></span>
+            <HabitLine h={h} iso={habitDate} onToggle={onToggleHabit} />
+          </div>); }
         if (row.kind === 'event') { const e = row.e; return (
           <div key={`ev-${e.uid || ''}-${ri}`} className={`cal-inline ${e.done ? 'done' : ''}`}>
             {onToggleCalEvent

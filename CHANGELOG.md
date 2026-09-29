@@ -9,6 +9,10 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+- Habits can be dragged into order, only within their own day period. On Plan
+  they sit among the period's tasks where you drop them (kept every day); the
+  Now queue follows the same order.
+
 ## [3.5] — 2026-09-29
 
 The time lock arrives, focus modes become strict allow lists, and the prayer

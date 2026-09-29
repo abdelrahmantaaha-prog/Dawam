@@ -12,8 +12,39 @@ import { AppIcon,BlockRow,DurationInput,FlameGlyph,HabitLine,Landscape,NoteBlock
 import { saveJson } from './files.js';
 import { CalendarSettings } from './calview.jsx';
 import { TrelloSettings } from './trelloview.jsx';
-function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, rewards = [], balance = 0, onClaim, onAdd, onUpd, onDel, onToggleDay, onFocus, onMarkTiny }) {
+function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, rewards = [], balance = 0, onClaim, onAdd, onUpd, onDel, onMove, onToggleDay, onFocus, onMarkTiny }) {
   const [openId, setOpenId] = useState(null);
+  // Drag to reorder, held to the habit's own period: only cards carrying the
+  // same data-block count as a place to drop. Pointer events rather than
+  // HTML drag and drop, which never fires on a phone.
+  const [drag, setDrag] = useState(null); // { id, block, over, after }
+  const startHabitDrag = (e, h) => {
+    if (!onMove || e.button > 0) return;
+    e.preventDefault();
+    const block = h.block || 'morning';
+    let cur = { id: h.id, block, over: null, after: false };
+    setDrag(cur);
+    const move = (ev) => {
+      const el = document.elementFromPoint(ev.clientX, ev.clientY);
+      const card = el && el.closest('[data-habit-id]');
+      let next = { ...cur, over: null, after: false };
+      if (card && card.dataset.block === block && card.dataset.habitId !== h.id && card.dataset.fixed !== '1') {
+        const r = card.getBoundingClientRect();
+        next = { ...cur, over: card.dataset.habitId, after: ev.clientY > r.top + r.height / 2 };
+      }
+      if (next.over !== cur.over || next.after !== cur.after) { cur = next; setDrag(next); }
+    };
+    const end = (ev) => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      if (ev.type === 'pointerup' && cur.over) onMove(cur.id, cur.over, cur.after);
+      setDrag(null);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+  };
   // The day runs Fajr → next Fajr, so "today" comes from the caller, which
   // knows the boundary. Falling back to the calendar date would mean that
   // before dawn every habit looked unkept and every streak looked broken.
@@ -37,13 +68,16 @@ function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, rew
           // chain they sit so the card can be drawn hanging off the one above.
           const group = stackShape(habits.filter((h) => (h.block || 'morning') === b.id));
           if (!group.length) return null;
+          const movable = onMove && group.filter(({ habit }) => !habit.prayer).length > 1;
           return (
             <div key={b.id} className="habit-group">
               <div className="habit-group-h blk-ink" style={{ '--bi-light': b.accentDeep, '--bi-dark': b.accent }}>{bName(b)}{bSub(b) ? ` · ${bSub(b)}` : ''}</div>
               {group.map(({ habit: h, depth, hasAnchor, anchorsOthers }) => (
-                <div key={h.id} className={`habit-stack d${depth}${hasAnchor ? ' hung' : ''}${anchorsOthers ? ' anchors' : ''}`}>
+                <div key={h.id} data-habit-id={h.id} data-block={h.block || 'morning'} data-fixed={h.prayer ? '1' : '0'}
+                  className={`habit-stack d${depth}${hasAnchor ? ' hung' : ''}${anchorsOthers ? ' anchors' : ''}${drag && drag.id === h.id ? ' dragging' : ''}${drag && drag.over === h.id ? (drag.after ? ' drop-after' : ' drop-before') : ''}`}>
                   {hasAnchor && <span className="habit-link" aria-hidden="true" />}
                   <HabitCard id={`habit-${h.id}`} h={h} habits={habits} todayISO={todayISO} open={openId === h.id}
+                    onGrip={movable && !h.prayer ? (e) => startHabitDrag(e, h) : null}
                     rewards={rewards} balance={balance} onClaim={onClaim}
                     onOpen={() => setOpenId(openId === h.id ? null : h.id)}
                     onUpd={(patch) => onUpd(h.id, patch)} onDel={() => { onDel(h.id); setOpenId(null); }}
@@ -70,7 +104,7 @@ function HabitsView({ habits, sky, stars, heroLight, todayISO: todayISOProp, rew
   );
 }
 
-function HabitCard({ id, h, habits = [], todayISO, open, rewards = [], balance = 0, onClaim, onOpen, onUpd, onDel, onToggle, onFocus, onMarkTiny = () => {} }) {
+function HabitCard({ id, h, habits = [], todayISO, open, rewards = [], balance = 0, onClaim, onOpen, onUpd, onDel, onToggle, onFocus, onMarkTiny = () => {}, onGrip = null }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const isPrayer = !!h.prayer; // built-in, derived from the prayer log
   const streak = habitStreak(h, todayISO);
@@ -91,6 +125,7 @@ function HabitCard({ id, h, habits = [], todayISO, open, rewards = [], balance =
   return (
     <div id={id} className={`habit-card glow-${glow}`} style={{ '--hcolor': h.color }}>
       <div className="habit-top">
+        {onGrip && <span className="grip" onPointerDown={onGrip} title={tx('Drag to reorder within this period', 'اسحب لإعادة الترتيب داخل هذه الفترة')}><GripVertical size={15} /></span>}
         <button className={`habit-check ${doneToday ? 'on' : ''}`} onClick={() => onToggle(todayISO)} aria-label={tx('Toggle today', 'تبديل اليوم')}>
           {doneToday ? <CheckCircle2 size={22} /> : <Circle size={22} />}
         </button>

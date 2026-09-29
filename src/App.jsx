@@ -33,7 +33,7 @@ import { initialProject, projectOfTask, tagProjectOf, withTagProject } from './t
 import { addProjectFocus } from './projectfocus.js';
 import { allNoteTags, loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, isEmptyNote, excerpt as noteExcerpt } from './notes.js';
 import { MeetingSheet } from './meetingsheet.jsx';
-import { nextMark, TINY, stackGate, isPrayerAnchor, anchorLabel } from './habits.js';
+import { nextMark, TINY, stackGate, isPrayerAnchor, anchorLabel, moveHabit, mergeHabits, dropInMerged, applyHabitOrder } from './habits.js';
 import { dueProjects, normalizePlan, paceStatus, todayQuota, worksOn } from './quota.js';
 import { lockDue, lockEvery, lockOn, minutesToLock } from './nowlock.js';
 import { holdDevice, lockSupported, releaseDevice } from './applock.js';
@@ -829,6 +829,7 @@ export default function Rhythm() {
   const addHabit = () => { const h = newHabit(); persistHabits((prev) => [...prev, h]); return h; };
   const updHabit = (id, patch) => persistHabits((prev) => prev.map((h) => h.id === id ? { ...h, ...patch } : h));
   const delHabit = (id) => persistHabits((prev) => prev.filter((h) => h.id !== id));
+  const reorderHabit = (id, targetId, after) => persistHabits((prev) => moveHabit(prev, id, targetId, after));
   /* The two-minute version, marked straight rather than by cycling: this is
      offered at the moment someone is deciding whether to bother at all, and
      making them press twice to reach it is exactly the friction it exists to
@@ -1183,14 +1184,15 @@ export default function Rhythm() {
   // Drag-to-reorder: drop the task into `blockId` right before/after `targetId`
   // (or at the block's end when targetId is null), then renumber 1..n so the
   // manual order is stable. This exact order drives the one-at-a-time Now queue.
-  const moveTaskToPosition = (id, blockId, targetId, after) => {
+  // `orderedIds` (from a drop among habits) gives the destination order outright.
+  const moveTaskToPosition = (id, blockId, targetId, after, orderedIds = null) => {
     const w = weekRef.current;
     const dragged = w.tasks.find((t) => t.id === id); if (!dragged) return;
     const dest = w.tasks.filter((t) => t.block === blockId && t.id !== id).sort((a, b) => (a.done - b.done) || (a.order - b.order));
     let idx = dest.length;
     if (targetId) { const ti = dest.findIndex((t) => t.id === targetId); if (ti >= 0) idx = ti + (after ? 1 : 0); }
-    const ordered = [...dest.slice(0, idx), dragged, ...dest.slice(idx)];
-    const orderOf = new Map(ordered.map((t, i) => [t.id, i + 1]));
+    const ordered = orderedIds || [...dest.slice(0, idx), dragged, ...dest.slice(idx)].map((t) => t.id);
+    const orderOf = new Map(ordered.map((tid, i) => [tid, i + 1]));
     // Dragged into a period its time is not in: the drag is the newer decision,
     // so the time goes (same rule as mutateTask). A vault keeps its window.
     const timeSays = blockForTime(dragged, timings);
@@ -1200,6 +1202,25 @@ export default function Rhythm() {
       return { ...t, block: blockId, start: '', end: '', time: '', autoSlot: null };
     };
     persistWeek({ ...w, tasks: w.tasks.map((t) => (t.id === id ? { ...moved(t), order: orderOf.get(t.id) } : orderOf.has(t.id) ? { ...t, order: orderOf.get(t.id) } : t)) });
+  };
+
+  /* A drop inside a period that has habits: habits and tasks share one order
+     there. Habits never leave their period — a habit dragged elsewhere just
+     goes back. A task keeps every rule moveTaskToPosition already applies. */
+  const dropAmongHabits = (d, blockId) => {
+    const hs = (settingsRef.current.habits || []).filter((h) => (h.block || 'morning') === blockId);
+    if (d.kind === 'habit' && d.fromBlock !== blockId) return true;
+    if (!hs.length) return false;
+    const shown = tasksFor(selectedDay, blockId).filter((t) => !t.__spanDay);
+    const rows = mergeHabits(shown, hs);
+    const target = d.over.habitId ? { kind: 'habit', id: d.over.habitId } : d.over.taskId ? { kind: 'task', id: d.over.taskId } : null;
+    if (!target && d.fromBlock === blockId) return true; // let go on its own period's empty space
+    const task = d.kind === 'task' ? weekRef.current.tasks.find((t) => t.id === d.id) : null;
+    const res = dropInMerged(rows, { kind: d.kind, id: d.id, row: task ? { kind: 'task', t: task } : undefined }, target, d.over.after);
+    if (!res) return true;
+    if (d.kind === 'task') moveTaskToPosition(d.id, blockId, null, false, res.taskIds);
+    persistHabits((prev) => applyHabitOrder(prev, res.habitIds, res.slots));
+    return true;
   };
 
   /* ---- pool (backlog) ops ---- */
@@ -1860,9 +1881,9 @@ export default function Rhythm() {
     let taskEl = null;
     while (el) {
       if (el.dataset) {
-        if (!taskEl && el.dataset.taskid) taskEl = el;
+        if (!taskEl && (el.dataset.taskid || el.dataset.habitid)) taskEl = el;
         if (el.dataset.dropblock) {
-          if (kind === 'task' && taskEl) { const r = taskEl.getBoundingClientRect(); return { type: 'block', id: el.dataset.dropblock, taskId: taskEl.dataset.taskid, after: y > r.top + r.height / 2 }; }
+          if ((kind === 'task' || kind === 'habit') && taskEl) { const r = taskEl.getBoundingClientRect(); return { type: 'block', id: el.dataset.dropblock, taskId: taskEl.dataset.taskid || null, habitId: taskEl.dataset.habitid || null, after: y > r.top + r.height / 2 }; }
           return { type: 'block', id: el.dataset.dropblock, taskId: null, after: false };
         }
         if (el.dataset.dropday && kind === 'task') return { type: 'day', iso: el.dataset.dropday };
@@ -1875,7 +1896,7 @@ export default function Rhythm() {
   const startDrag = (e, kind, item) => {
     e.preventDefault();
     const color = item.projectId ? (labelById(item.projectId)?.color || null) : null;
-    const s = { kind, id: item.id, title: item.title, time: timeLabel(item) || '', color, fromBlock: item.block || null, x: e.clientX, y: e.clientY, over: null };
+    const s = { kind, id: item.id, title: item.title || item.name, time: timeLabel(item) || '', color, fromBlock: item.block || null, x: e.clientX, y: e.clientY, over: null };
     dragRef.current = s; setDrag({ ...s });
   };
   useEffect(() => {
@@ -1890,8 +1911,11 @@ export default function Rhythm() {
     const up = () => {
       const d = dragRef.current; dragRef.current = null; setDrag(null);
       if (!d || !d.over) return;
-      if (d.kind === 'task') {
-        if (d.over.type === 'block') {
+      if (d.kind === 'habit') {
+        if (d.over.type === 'block') dropAmongHabits(d, d.over.id);
+      } else if (d.kind === 'task') {
+        if (d.over.type === 'block' && dropAmongHabits(d, d.over.id)) { /* placed among the habits */ }
+        else if (d.over.type === 'block') {
           if (d.over.taskId && d.over.taskId !== d.id) moveTaskToPosition(d.id, d.over.id, d.over.taskId, d.over.after);
           else if (d.over.id !== d.fromBlock) moveTaskToPosition(d.id, d.over.id, null, false);
         } else if (d.over.type === 'day') moveTaskToDate(d.id, d.over.iso);
@@ -3058,12 +3082,18 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const queue = [];
   for (const b of BLOCKS) {
     if (PRAYER_BLOCKS.includes(b.id) && blockIdx(b.id) === activeIdx && !prayersToday[b.id]) queue.push({ kind: 'prayer', block: b });
-    for (const h of habitsOf(b.id)) if (!habitDoneOn(h, nowHabitISO) && !waitingHabitIds.has(h.id)) queue.push({ kind: 'habit', block: b, h });
     // An ended, unchecked meeting takes its place among the tasks by clock
-    // time — the same tucking rule the Plan timeline uses.
+    // time — the same tucking rule the Plan timeline uses. Habits sit where
+    // they were dragged to on the Plan (their slot among the period's tasks).
     const ms = pastByBlock[b.id] || [];
     let mi = 0;
-    for (const t of nowList.filter((t) => t.block === b.id && !t.done && !liveIds.has(t.id) && !soonIds.has(t.id) && !runningIds.has(t.id))) {
+    for (const row of mergeHabits(nowList.filter((t) => t.block === b.id), habitsOf(b.id))) {
+      if (row.kind === 'habit') {
+        if (!habitDoneOn(row.h, nowHabitISO) && !waitingHabitIds.has(row.h.id)) queue.push({ kind: 'habit', block: b, h: row.h });
+        continue;
+      }
+      const t = row.t;
+      if (t.done || liveIds.has(t.id) || soonIds.has(t.id) || runningIds.has(t.id)) continue;
       const ts = tStartMin(t) ?? Infinity;
       while (mi < ms.length && mStartMin(ms[mi]) <= ts) queue.push({ kind: 'cal', block: b, m: ms[mi++] });
       queue.push({ kind: 'task', block: b, t });
@@ -3845,7 +3875,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 suggestLabels={settings.labels || []} suggestProjects={settings.projects || []}
                 onDragStart={startDrag}
                 dragActive={dragActive} dragOver={drag && drag.over && drag.over.type === 'block' && drag.over.id === b.id}
-                draggingId={drag && drag.kind === 'task' ? drag.id : null}
+                draggingId={drag && (drag.kind === 'task' || drag.kind === 'habit') ? drag.id : null}
                 over={drag && drag.over ? drag.over : null} />
             ))}
           </div>
@@ -4003,7 +4033,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         <HabitsView
           habits={[...prayerHabits, ...settings.habits]} sky={sky} stars={stars} heroLight={heroLight} todayISO={nowHabitISO}
           rewards={settings.rewards || []} balance={balance} onClaim={cashIn}
-          onAdd={addHabit} onUpd={updHabit} onDel={delHabit} onToggleDay={toggleAnyHabitDay} onMarkTiny={markHabitTiny}
+          onAdd={addHabit} onUpd={updHabit} onDel={delHabit} onMove={reorderHabit} onToggleDay={toggleAnyHabitDay} onMarkTiny={markHabitTiny}
           onFocus={(h, mins) => startFocus({ id: h.id, title: h.name }, mins)}
         />
       )}

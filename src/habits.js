@@ -273,3 +273,80 @@ export function nextMark(current, { hasTiny }) {
   if (current === FULL) return hasTiny ? TINY : undefined;
   return undefined;
 }
+
+/* Dragging a habit into a new place. Order is simply where a habit sits in
+   the saved list — the Habits page, the Plan timeline and the Now queue all
+   read it that way — so a move is a splice. It only ever happens inside one
+   day period: a drop on a habit from another period (or on a built-in prayer,
+   which is not in the list at all) changes nothing, because moving a habit
+   to another period is a decision the editor asks for by name. */
+export function moveHabit(habits, id, targetId, after = false) {
+  const list = habits || [];
+  if (!id || id === targetId) return list;
+  const from = list.findIndex((h) => h.id === id);
+  const target = list.find((h) => h.id === targetId);
+  if (from < 0 || !target) return list;
+  const blockOf = (h) => h.block || 'morning';
+  if (blockOf(list[from]) !== blockOf(target)) return list;
+  const rest = list.filter((h) => h.id !== id);
+  const at = rest.findIndex((h) => h.id === targetId) + (after ? 1 : 0);
+  return [...rest.slice(0, at), list[from], ...rest.slice(at)];
+}
+
+/* Habits among the tasks. A habit happens every day but the tasks around it
+   change, so its place in a period is kept as a count — `slot` is how many of
+   that period's tasks come before it ("after the second thing this morning").
+   With no slot it sits first, which is where habits always used to be.
+   Several habits wanting the same spot keep their saved-list order.
+   `tasks` is the period's list exactly as shown, finished ones included. */
+export function mergeHabits(tasks, habits) {
+  const ts = tasks || [];
+  const hs = (habits || []).map((h, i) => ({ h, i, at: Math.max(0, Math.min(ts.length, Math.floor(Number(h.slot) || 0))) }))
+    .sort((a, b) => (a.at - b.at) || (a.i - b.i));
+  const rows = [];
+  let hi = 0;
+  for (let ti = 0; ti <= ts.length; ti++) {
+    while (hi < hs.length && hs[hi].at === ti) rows.push({ kind: 'habit', h: hs[hi++].h });
+    if (ti < ts.length) rows.push({ kind: 'task', t: ts[ti] });
+  }
+  return rows;
+}
+
+/* One drag inside a period's merged list: take the dragged row out, put it
+   before/after the target row, and read back what that means — the tasks'
+   new order, each habit's new slot, and the habits' order among themselves.
+   Returns null when nothing sensible can be done (unknown rows). */
+export function dropInMerged(rows, drag, target, after = false) {
+  const key = (r) => (r.kind === 'habit' ? `h:${r.h.id}` : `t:${r.t.id}`);
+  const dk = `${drag.kind === 'habit' ? 'h' : 't'}:${drag.id}`;
+  const tk = target ? `${target.kind === 'habit' ? 'h' : 't'}:${target.id}` : null;
+  if (dk === tk) return null;
+  const moving = drag.row || rows.find((r) => key(r) === dk);
+  if (!moving) return null;
+  const rest = rows.filter((r) => key(r) !== dk);
+  let at = rest.length;
+  if (tk) { const i = rest.findIndex((r) => key(r) === tk); if (i < 0) return null; at = i + (after ? 1 : 0); }
+  const out = [...rest.slice(0, at), moving, ...rest.slice(at)];
+  const taskIds = [];
+  const slots = {};
+  const habitIds = [];
+  for (const r of out) {
+    if (r.kind === 'task') taskIds.push(r.t.id);
+    else { slots[r.h.id] = taskIds.length; habitIds.push(r.h.id); }
+  }
+  return { taskIds, slots, habitIds };
+}
+
+/* Puts one period's habits in the given order and slots, leaving every other
+   habit — and where each period's habits sit in the saved list — alone. */
+export function applyHabitOrder(habits, habitIds, slots) {
+  const list = habits || [];
+  const want = new Set(habitIds);
+  const seq = habitIds.map((id) => list.find((h) => h.id === id)).filter(Boolean);
+  let k = 0;
+  return list.map((h) => {
+    if (!want.has(h.id)) return h;
+    const next = seq[k++];
+    return { ...next, slot: slots[next.id] ?? next.slot };
+  });
+}
