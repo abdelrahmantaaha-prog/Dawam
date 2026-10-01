@@ -60,7 +60,9 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
   onState: (cb) => sub('state', (_e, s) => cb(s)),
   onRoundEnded: (cb) => sub('round-ended', (_e, entry) => cb(entry)),
   onHistoryChanged: (cb) => sub('history-changed', () => cb()),
-  onDataChanged: (cb) => sub('data-changed', () => cb())
+  onDataChanged: (cb) => sub('data-changed', () => cb()),
+  /* Something outside asked for a fresh snapshot (main.js, export-request). */
+  onExportNow: (cb) => sub('export-now', () => cb())
 });
 
 function sub(channel, handler) {

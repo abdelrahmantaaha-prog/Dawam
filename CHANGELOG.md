@@ -9,6 +9,12 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+- The desktop shell answers an outside ask for a fresh snapshot: dropping a
+  file named `export-request` into DocumentsRhythm backups makes the
+  planner write today's snapshot within a second or two, while the app is
+  running. Built for gates that read the snapshot (the Claude prompt gate
+  uses it), so they judge the plan as it is now, not as it was an hour ago.
+
 - Habits can be dragged into order, only within their own day period. On Plan
   they sit among the period's tasks where you drop them (kept every day); the
   Now queue follows the same order.

@@ -625,6 +625,13 @@ export default function Rhythm() {
     const every = setInterval(() => { takeAutoBackupRef.current(); }, 60 * 60000);
     return () => { clearTimeout(first); clearInterval(every); };
   }, [ready, autoBackupOn]);   // eslint-disable-line
+  // The desktop shell relays an outside ask for a fresh snapshot (export-request).
+  useEffect(() => {
+    if (!ready || !autoBackupOn) return undefined;
+    const api = typeof window !== 'undefined' ? window.rhythmFocus : null;
+    if (!api || typeof api.onExportNow !== 'function') return undefined;
+    return api.onExportNow(() => { takeAutoBackupRef.current(); });
+  }, [ready, autoBackupOn]);
   const restoreAutoBackup = async (name) => {
     const text = await readBackup(name);
     if (!text) return { ok: false, msg: tx('That backup could not be read.', 'تعذّرت قراءة هذه النسخة.') };

@@ -776,6 +776,31 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.handle('backup-where', () => backupDir());
 
+    /* ---- export on request ----
+       Other programs on this machine (the Claude gate, for one) read the
+       daily snapshot, and an hourly file can be an hour behind the planner.
+       They cannot reach the planner's storage — by design — but they can
+       ask: dropping a file named "export-request" in the backups folder has
+       the planner write a fresh snapshot within a second or two, while the
+       app is running. The name fails backupName's pattern on purpose, so the
+       renderer can neither create nor read it; only this process touches it. */
+    const EXPORT_REQ = 'export-request';
+    const serveExportRequest = () => {
+      const f = path.join(backupDir(), EXPORT_REQ);
+      fs.promises.unlink(f).then(
+        () => { if (planner && !planner.isDestroyed()) planner.webContents.send('export-now'); },
+        () => {},   // no request file: nothing asked
+      );
+    };
+    try {
+      fs.mkdirSync(backupDir(), { recursive: true });
+      // (Windows sometimes reports no filename: when in doubt, look — the look is one cheap unlink)
+      const reqWatcher = fs.watch(backupDir(), (_event, name) => { if (!name || name === EXPORT_REQ) serveExportRequest(); });
+      reqWatcher.on('error', () => {});
+      app.on('before-quit', () => { try { reqWatcher.close(); } catch { /* going down anyway */ } });
+      serveExportRequest();   // one left from while the app was closed
+    } catch { /* a planner that cannot watch the folder still backs up hourly */ }
+
     /* ---- account sync ----
        The planner runs on rhythm://app, which is not the deployment's origin,
        so its own fetch() could never carry the session cookie (SameSite) and
