@@ -17,11 +17,23 @@
 /*  factor of three. Dividing by the sittings that are actually left is */
 /*  the difference between a number that guides and a number that lies. */
 /* ------------------------------------------------------------------ */
-import { addDays, fmtISO, parseISO } from './core.jsx';
+import { addDays, BLOCKS, fmtISO, minutesOf, parseISO } from './core.jsx';
 
-/* project.plan = { days:[0..6], block:'morning', start:'09:00' }
+/* project.plan = { days:[0..6], block:'morning', start:'09:00',
+                    sittings:[{ block, start }, …] }
    No `days` means every day — the same "mid-edit is not a silent stop" rule
-   the recurrence schedules use. */
+   the recurrence schedules use.
+
+   `sittings` splits the day's share into chunks — eleven pages as four after
+   Fajr, four after Dhuhr and three at Isha, rather than eleven pages some time
+   in the morning. One sitting is the old shape, and `block`/`start` are kept
+   equal to the first sitting so a build that has never heard of sittings still
+   asks at the right hour. */
+const blockRank = (id) => { const i = BLOCKS.findIndex((b) => b.id === id); return i < 0 ? 1 : i; };
+const sittingOrder = (a, b) => (blockRank(a.block) - blockRank(b.block))
+  || ((minutesOf(a.start) ?? -1) - (minutesOf(b.start) ?? -1));
+export const sortSittings = (list) => [...list].sort(sittingOrder);
+
 export function normalizePlan(p) {
   const plan = (p && p.plan) || {};
   const days = [...new Set((plan.days || [])
@@ -30,7 +42,68 @@ export function normalizePlan(p) {
   // `perDay` is what a project with no deadline falls back to — carried through
   // rather than normalised away, since there is no pace to compute without it.
   const perDay = Number(plan.perDay) > 0 ? Number(plan.perDay) : null;
-  return { on: !!plan.on, days, block: plan.block || 'morning', start: plan.start || '', perDay };
+  const given = Array.isArray(plan.sittings) ? plan.sittings.filter((s) => s && typeof s === 'object') : [];
+  const sittings = given.length
+    ? sortSittings(given.map((s) => ({ block: BLOCKS.some((b) => b.id === s.block) ? s.block : 'morning', start: s.start || '' })))
+    : [{ block: plan.block || 'morning', start: plan.start || '' }];
+  return { on: !!plan.on, days, block: sittings[0].block, start: sittings[0].start, perDay, sittings };
+}
+
+/* The plan to store after the sittings change: sorted, and with the legacy
+   `block`/`start` pointing at the first one. Never empty — removing the last
+   sitting is not a way to switch the reminder off; the toggle is. */
+export function withSittings(plan, sittings) {
+  const list = sortSittings((sittings || []).length ? sittings : [{ block: plan.block || 'morning', start: plan.start || '' }]);
+  return { ...plan, sittings: list, block: list[0].block, start: list[0].start };
+}
+
+/* A day's share cut into `n` pieces, the larger ones first: 11 in three is
+   4, 4, 3. Front-loaded on purpose — the sitting most likely to happen is the
+   first one, and a day that runs out early should have done the most. A share
+   smaller than the number of sittings leaves the late ones at zero rather than
+   inventing fractions of a page. */
+export function splitShare(need, n) {
+  const k = Math.max(1, Math.floor(Number(n) || 1));
+  const total = Math.max(0, Math.ceil(Number(need) || 0));
+  const base = Math.floor(total / k);
+  const extra = total - base * k;
+  return Array.from({ length: k }, (_, i) => base + (i < extra ? 1 : 0));
+}
+
+/* Each sitting with its piece of today's share.
+ *
+ *   amount   this sitting's piece.
+ *   upTo     what the day should have reached by the end of this sitting.
+ *   met      whether today's log already covers it.
+ *
+ * Judged against the running total, not per sitting: four pages written at
+ * Fajr toward an eleven-page day cover the first sitting whenever they were
+ * typed in, and eight written in one go cover the first two. With no number to
+ * divide (no deadline, no rate) there are no pieces — the sittings still say
+ * when, and each just reports progress. */
+export function sittingsFor(project, quota) {
+  const plan = normalizePlan(project);
+  const parts = quota && quota.need != null ? splitShare(quota.need, plan.sittings.length) : null;
+  let upTo = 0;
+  return plan.sittings.map((s, i) => {
+    const amount = parts ? parts[i] : null;
+    if (parts) upTo += amount;
+    return { ...s, index: i, count: plan.sittings.length, amount, upTo: parts ? upTo : null,
+      met: parts ? quota.done >= upTo : !!(quota && quota.met) };
+  });
+}
+
+/* What is owed by now, given which sittings have arrived (the caller knows the
+   clock and the period; this file does not). Missed sittings roll forward — a
+   share you owe does not stop being owed because its hour went by. Returns
+   null when nothing has arrived yet, and the sitting to name otherwise. */
+export function owedNow(project, quota, hasArrived) {
+  const sits = sittingsFor(project, quota).filter((s) => s.amount == null || s.amount > 0);
+  const arrived = sits.filter(hasArrived);
+  if (!arrived.length) return null;
+  const last = arrived[arrived.length - 1];
+  if (last.upTo == null) return { sitting: last, owed: null, sittings: sits };
+  return { sitting: last, owed: Math.max(0, last.upTo - quota.done), sittings: sits };
 }
 
 /* Does this project ask anything of this date? It has to have a number to
@@ -92,14 +165,19 @@ export function todayQuota(project, date) {
   const remaining = Math.max(0, target - total);
   const done = loggedOn(project, iso);
   const end = project && project.deadline ? parseISO(project.deadline) : null;
+  // The share is fixed by where the day STARTED. Dividing what is left after
+  // today's own log moved the goalposts while you worked — eleven pages became
+  // ten after the first five — and with the day cut into sittings it reshuffled
+  // the pieces under your feet.
+  const owedAtStart = Math.max(0, target - (total - done));
   let need = null;
-  if (remaining <= 0) need = 0;
+  if (owedAtStart <= 0) need = 0;
   else if (end) {
     const today = new Date(date); today.setHours(0, 0, 0, 0);
     // Today counts as a sitting when it is one — otherwise the whole remainder
     // gets divided among the days after it and today is told to do nothing.
     const sittings = Math.max(1, workDaysBetween(today, end, plan.days));
-    need = Math.ceil(remaining / sittings);
+    need = Math.ceil(owedAtStart / sittings);
   } else if (Number(plan.perDay) > 0) need = Math.ceil(Number(plan.perDay));
   const met = need == null ? false : done >= need;
   return { iso, need, done, met, remaining, total, target, unit: (project && project.unit) || '' };
@@ -135,7 +213,7 @@ export function paceStatus(project, pace) {
 export function dueProjects(projects, date, { blockOrder } = {}) {
   const list = (projects || [])
     .filter((p) => !p.completedAt && worksOn(p, date))
-    .map((p) => ({ project: p, plan: normalizePlan(p), quota: todayQuota(p, date) }))
+    .map((p) => { const quota = todayQuota(p, date); return { project: p, plan: normalizePlan(p), quota, sittings: sittingsFor(p, quota) }; })
     .filter((x) => x.quota.need == null || x.quota.need > 0 || !x.quota.met);
   if (blockOrder) list.sort((a, b) => blockOrder(a.plan.block) - blockOrder(b.plan.block));
   return list;

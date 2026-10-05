@@ -26,6 +26,8 @@
 
 const memCache = {}; // fallback if localStorage is unavailable (private mode edge cases)
 
+import { SETTINGS_KEY, stampSettings } from '../shared/model.js';
+
 const hasLS = () => {
   try { const k = '__rhythm_probe__'; localStorage.setItem(k, '1'); localStorage.removeItem(k); return true; }
   catch { return false; }
@@ -91,10 +93,22 @@ let saveHook = null;
 export const setSaveHook = (fn) => { saveHook = fn; };
 
 /* The hook runs ONLY on a write that landed. Marking a refused write dirty is
-   what let a full device push its stale copy over a healthy one. */
+   what let a full device push its stale copy over a healthy one.
+
+   Settings are stamped field by field against what is stored (see
+   stampSettings in shared/model.js), and the hook is handed the same clock
+   reading so the sync meta and the stamp inside the value agree — that match
+   is how a merge knows the stamps can be trusted. */
 export const saveKey = async (k, o) => {
-  const ok = await rawSet(k, JSON.stringify(o));
-  if (ok) { try { saveHook && saveHook(k); } catch { /* observers must not break saves */ } }
+  const at = Date.now();
+  let value = o;
+  if (k === SETTINGS_KEY) {
+    let prev = null;
+    try { const r = await rawGet(k); prev = r == null ? null : JSON.parse(r); } catch { prev = null; }
+    value = stampSettings(prev, o, at);
+  }
+  const ok = await rawSet(k, JSON.stringify(value));
+  if (ok) { try { saveHook && saveHook(k, at); } catch { /* observers must not break saves */ } }
   return ok;
 };
 

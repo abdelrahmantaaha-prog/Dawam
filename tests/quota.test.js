@@ -3,7 +3,7 @@
    calendar days. Getting that wrong understates every quota by exactly the
    factor between them, and does it invisibly. */
 import { describe, it, expect } from 'vitest';
-import { normalizePlan, worksOn, workDaysBetween, loggedOn, todayQuota, dueProjects } from '../src/quota.js';
+import { normalizePlan, worksOn, workDaysBetween, loggedOn, todayQuota, dueProjects, splitShare, sittingsFor, owedNow, withSittings } from '../src/quota.js';
 
 const d = (iso) => new Date(`${iso}T00:00:00`);
 const proj = (over = {}) => ({
@@ -15,7 +15,8 @@ const proj = (over = {}) => ({
 
 describe('normalizePlan', () => {
   it('fills in the shape from nothing', () => {
-    expect(normalizePlan({})).toEqual({ on: false, days: [], block: 'morning', start: '', perDay: null });
+    expect(normalizePlan({})).toEqual({ on: false, days: [], block: 'morning', start: '', perDay: null,
+      sittings: [{ block: 'morning', start: '' }] });
   });
   it('drops weekdays outside 0..6 and sorts what is left', () => {
     expect(normalizePlan({ plan: { days: [6, 9, 1, -2, 1] } }).days).toEqual([1, 6]);
@@ -107,6 +108,11 @@ describe('todayQuota', () => {
     const p = proj({ deadline: '', plan: { on: true, days: [], perDay: 5 } });
     expect(todayQuota(p, d('2026-09-15')).need).toBe(5);
   });
+  it('keeps the day\'s share where it started while the day is logged', () => {
+    // 44 pages over 4 days is 11; logging 5 today must not turn it into 39 ÷ 4 = 10.
+    const p = proj({ target: 44, deadline: '2026-09-18', entries: [{ date: '2026-09-15', amount: 5 }] });
+    expect(todayQuota(p, d('2026-09-15')).need).toBe(11);
+  });
   it('has no opinion with neither a deadline nor a rate', () => {
     const p = proj({ deadline: '', plan: { on: true, days: [] } });
     expect(todayQuota(p, d('2026-09-15')).need).toBe(null);
@@ -142,5 +148,77 @@ describe('dueProjects', () => {
     const order = (b) => ['fajr', 'morning', 'dhuhr', 'asr', 'maghrib', 'isha'].indexOf(b);
     const list = dueProjects([evening, morning], d('2026-09-15'), { blockOrder: order });
     expect(list.map((x) => x.project.id)).toEqual(['m', 'e']);
+  });
+});
+
+/* Sittings cut the day's share into chunks. What matters: the pieces add up
+   to the share exactly, they are judged against the running total, and a
+   missed piece rolls forward instead of vanishing. */
+describe('splitShare', () => {
+  it('front-loads the remainder and always adds up', () => {
+    expect(splitShare(11, 3)).toEqual([4, 4, 3]);
+    expect(splitShare(12, 3)).toEqual([4, 4, 4]);
+    expect(splitShare(2, 3)).toEqual([1, 1, 0]);
+    expect(splitShare(7, 1)).toEqual([7]);
+  });
+  it('rounds a fractional share up first', () => {
+    expect(splitShare(2.5, 2)).toEqual([2, 1]);
+  });
+});
+
+describe('sittings', () => {
+  // 15th→18th is 4 days; 44 pages ÷ 4 = 11 today.
+  const split = (over = {}) => proj({
+    target: 44, deadline: '2026-09-18',
+    plan: { on: true, days: [], sittings: [{ block: 'isha' }, { block: 'fajr', start: '05:00' }, { block: 'dhuhr' }] },
+    ...over,
+  });
+  it('keeps the old single-period shape when none are given', () => {
+    expect(normalizePlan(proj({ plan: { on: true, block: 'asr', start: '16:00' } })).sittings)
+      .toEqual([{ block: 'asr', start: '16:00' }]);
+  });
+  it('sorts sittings by period and mirrors the first into block/start', () => {
+    const pl = normalizePlan(split());
+    expect(pl.sittings.map((s) => s.block)).toEqual(['fajr', 'dhuhr', 'isha']);
+    expect(pl.block).toBe('fajr');
+    expect(pl.start).toBe('05:00');
+    const stored = withSittings({ on: true }, [{ block: 'isha', start: '' }, { block: 'morning', start: '09:00' }]);
+    expect(stored.block).toBe('morning');
+    expect(stored.start).toBe('09:00');
+  });
+  it('gives each sitting its piece and a running total', () => {
+    const p = split();
+    const s = sittingsFor(p, todayQuota(p, d('2026-09-15')));
+    expect(s.map((x) => x.amount)).toEqual([4, 4, 3]);
+    expect(s.map((x) => x.upTo)).toEqual([4, 8, 11]);
+  });
+  it('judges pieces by the running total, not when they were logged', () => {
+    const p = split({ entries: [{ date: '2026-09-15', amount: 8 }] });
+    const s = sittingsFor(p, todayQuota(p, d('2026-09-15')));
+    expect(s.map((x) => x.met)).toEqual([true, true, false]);
+  });
+  it('rolls a missed sitting forward into the next one', () => {
+    const p = split();
+    const q = todayQuota(p, d('2026-09-15'));
+    // Dhuhr has arrived, nothing logged: both the Fajr and the Dhuhr pieces are owed.
+    const n = owedNow(p, q, (s) => s.block !== 'isha');
+    expect(n.sitting.block).toBe('dhuhr');
+    expect(n.owed).toBe(8);
+  });
+  it('asks for nothing before the first sitting arrives', () => {
+    const p = split();
+    expect(owedNow(p, todayQuota(p, d('2026-09-15')), () => false)).toBe(null);
+  });
+  it('goes quiet once the pieces so far are logged, even with the day unfinished', () => {
+    const p = split({ entries: [{ date: '2026-09-15', amount: 4 }] });
+    const n = owedNow(p, todayQuota(p, d('2026-09-15')), (s) => s.block === 'fajr');
+    expect(n.owed).toBe(0);
+  });
+  it('skips sittings left with nothing to do', () => {
+    // 2 pages over three sittings: the Isha one has no piece and is never named.
+    const p = split({ target: 8 });
+    const n = owedNow(p, todayQuota(p, d('2026-09-15')), () => true);
+    expect(n.sitting.block).toBe('dhuhr');
+    expect(n.owed).toBe(2);
   });
 });

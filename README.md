@@ -235,6 +235,15 @@ right for one person on a few devices, not for teams — and deleted keys carry
 tombstones so pruning an old week isn't undone by the next pull. Device clocks
 decide ties.
 
+**Settings merge field by field.** The settings key is the exception: it holds
+the preferences *and* the habit logs, project progress and focus tallies that
+change all day, so as one blob a device that had not yet heard "prayer times
+off" would tick a habit and push "on" back everywhere. Each save stamps the
+top-level fields that changed (`_at`, with `_w` matching the sync timestamp),
+and two stamped copies merge per field (`mergeSettingsEntries` in
+`shared/model.js`). A copy written by an older build has no trustworthy stamps,
+and merging with it falls back to whole-key last-write-wins as before.
+
 **Where it runs.** One Express function (`api/index.js`) on Vercel, Neon for
 Postgres. Four environment variables, all server-side:
 
@@ -570,6 +579,15 @@ hundred pages in ten days is ten a day only if you work all ten; someone who
 writes on Tuesdays and Thursdays has three sittings, and telling them "ten
 pages" every Tuesday sets them up to miss by a factor of three, invisibly. The
 number rounds up, because a third of a page is still a page you have to open.
+
+**Split into sittings.** One period is the default; *Split into another
+sitting* cuts the day's share across more of them — eleven pages as 4 at Fajr,
+4 at Dhuhr and 3 at Isha, larger pieces first. Now asks for what is owed by
+the latest sitting that has arrived ("8 pages now · sitting 2/3"), so a missed
+morning piece rolls into the afternoon rather than vanishing; Plan lists the
+pieces and ticks each once the day's running total covers it, whenever it was
+logged. The day's share itself is fixed by where the day started, so logging
+part of it does not reshuffle what is left.
 
 Effectively a habit with an end date, which is why it reads like one.
 

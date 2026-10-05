@@ -34,7 +34,7 @@ import { addProjectFocus } from './projectfocus.js';
 import { allNoteTags, loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, isEmptyNote, excerpt as noteExcerpt } from './notes.js';
 import { MeetingSheet } from './meetingsheet.jsx';
 import { nextMark, TINY, stackGate, isPrayerAnchor, anchorLabel, moveHabit, mergeHabits, dropInMerged, applyHabitOrder } from './habits.js';
-import { dueProjects, normalizePlan, paceStatus, todayQuota, worksOn } from './quota.js';
+import { dueProjects, owedNow, paceStatus, todayQuota, worksOn } from './quota.js';
 import { lockDue, lockEvery, lockOn, minutesToLock } from './nowlock.js';
 import { holdDevice, lockSupported, releaseDevice } from './applock.js';
 import { dueOn as recurDueOn, describeRepeat, isScheduled, normalizeRepeat } from './recur.js';
@@ -906,7 +906,7 @@ export default function Rhythm() {
      hook, never JSON.stringify. */
   const [localVersion, setLocalVersion] = useState(0);
   useEffect(() => {
-    setSaveHook((key) => { markDirty(key); setLocalVersion((n) => n + 1); });
+    setSaveHook((key, at) => { markDirty(key, at); setLocalVersion((n) => n + 1); });
     return () => setSaveHook(null);
   }, []);
 
@@ -3139,17 +3139,25 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     .filter((x) => x.verdict.key !== 'unknown' && x.verdict.key !== 'done');
   const quotasNow = todayInView
     ? dueProjects(settings.projects || [], todayMid, { blockOrder: blockIdx })
-        .filter((x) => {
-          if (x.quota.met) return false;
-          const pl = normalizePlan(x.project);
-          if (blockIdx(pl.block) > activeIdx) return false;
-          // An optional clock time narrows the period: a project you sit down
-          // to at nine should not be asking at half past six just because both
-          // are "the morning". Once past, it stays — a share you owe does not
-          // stop being owed because its hour went by.
-          const from = pl.start ? minutesOf(pl.start) : null;
-          return from == null || curMin >= from || blockIdx(pl.block) < activeIdx;
+        .map((x) => {
+          if (x.quota.met) return null;
+          // A sitting has arrived once its period has. An optional clock time
+          // narrows the period: a project you sit down to at nine should not
+          // be asking at half past six just because both are "the morning".
+          // Once past, it stays — a share you owe does not stop being owed
+          // because its hour went by. With the day split into sittings, what
+          // is asked for is the running total up to the latest one that has
+          // arrived, so a missed morning piece rolls into the afternoon.
+          const arrived = (s) => {
+            if (blockIdx(s.block) > activeIdx) return false;
+            const from = s.start ? minutesOf(s.start) : null;
+            return from == null || curMin >= from || blockIdx(s.block) < activeIdx;
+          };
+          const now = owedNow(x.project, x.quota, arrived);
+          if (!now || (now.owed != null && now.owed <= 0)) return null;
+          return { ...x, now };
         })
+        .filter(Boolean)
     : [];
   /* What being caught up is worth. Only what the balance actually covers: an
      offer you cannot take is not an offer, and listing it turns a reward into
@@ -3648,8 +3656,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             {todayInView && quotasNow.length > 0 && (
               <div className="now-quotas">
                 <div className="now-quotas-h"><Target size={13} /> {tx('Today\u2019s share', 'نصيب اليوم')}</div>
-                {quotasNow.map(({ project, quota }) => (
-                  <QuotaLine key={project.id} project={project} quota={quota} verdict={verdictOf(project)}
+                {quotasNow.map(({ project, quota, sittings, now }) => (
+                  <QuotaLine key={project.id} project={project} quota={quota} verdict={verdictOf(project)} sittings={sittings} now={now}
                     onLog={(n) => { logProgress(project.id, n); flash(`${project.name} +${n} ${project.unit || ''}`.trim()); }}
                     onOpen={() => { go('projects'); setBoardProject(null); }} />
                 ))}
@@ -3803,8 +3811,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               {due.length > 0 && (
                 <div className="plan-quotas">
                   <div className="plan-quotas-h"><Target size={12} /> {tx('Projects want, today', 'ما تطلبه المشاريع اليوم')}</div>
-                  {due.map(({ project, quota }) => (
-                    <QuotaLine key={project.id} project={project} quota={quota} compact verdict={verdictOf(project)}
+                  {due.map(({ project, quota, sittings }) => (
+                    <QuotaLine key={project.id} project={project} quota={quota} compact verdict={verdictOf(project)} sittings={sittings}
                       onLog={(n) => { logProgress(project.id, n); flash(`${project.name} +${n} ${project.unit || ''}`.trim()); }}
                       onOpen={() => { go('projects'); setBoardProject(null); }} />
                   ))}

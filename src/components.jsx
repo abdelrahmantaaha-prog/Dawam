@@ -266,11 +266,18 @@ function PaceStrip({ items, onOpen, title }) {
   );
 }
 
-function QuotaLine({ project, quota, onLog, onOpen, compact = false, verdict = null }) {
+/* `sittings` (from sittingsFor) are the day's share in chunks; with more than
+   one, the line lists the pieces under the bar. `now` (from owedNow) is what
+   the Now page passes: the sitting that has arrived and what is owed by it,
+   missed earlier pieces included. */
+function QuotaLine({ project, quota, onLog, onOpen, compact = false, verdict = null, sittings = null, now = null }) {
   const [n, setN] = useState('');
   const submit = () => { const v = Number(n); if (v > 0) { onLog(v); setN(''); } };
   const unit = project.unit || '';
   const pct = quota.need ? Math.min(1, quota.done / quota.need) : (quota.met ? 1 : 0);
+  const pieces = (sittings || []).filter((s) => s.amount == null || s.amount > 0);
+  const chunked = pieces.length > 1;
+  const owed = now && now.owed != null ? now.owed : null;
   return (
     <div className={`quota-line${quota.met ? ' met' : ''}${compact ? ' compact' : ''}`} style={{ '--qcolour': project.color }}>
       <button className="quota-main" onClick={onOpen}>
@@ -280,15 +287,26 @@ function QuotaLine({ project, quota, onLog, onOpen, compact = false, verdict = n
             ? `${quota.total}/${quota.target} ${unit}`.trim()
             : quota.met
               ? `${tx('done', 'تم')} · ${quota.done} ${unit}`.trim()
-              : `${quota.done}/${quota.need} ${unit} ${tx('today', 'اليوم')}`.trim()}
+              : owed != null && chunked
+                ? `${owed} ${unit} ${tx('now', 'الآن')} · ${tx('sitting', 'جلسة')} ${now.sitting.index + 1}/${pieces.length} · ${quota.done}/${quota.need} ${tx('today', 'اليوم')}`.trim()
+                : `${quota.done}/${quota.need} ${unit} ${tx('today', 'اليوم')}`.trim()}
         </span>
         <span className="quota-bar"><span style={{ width: `${pct * 100}%` }} /></span>
+        {chunked && (
+          <span className="quota-sits">
+            {pieces.map((s) => (
+              <span key={s.index} className={`quota-sit${s.met ? ' met' : ''}${now && now.sitting.index === s.index ? ' cur' : ''}`}>
+                {s.met ? <Check size={10} /> : null}{bName(blockById(s.block))}{s.start ? ` ${s.start}` : ''}{s.amount != null ? ` · ${s.amount}` : ''}
+              </span>
+            ))}
+          </span>
+        )}
       </button>
       {!quota.met && (
         <span className="quota-log">
           <input type="number" min="0" inputMode="numeric" value={n} onChange={(e) => setN(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
-            placeholder={quota.need != null ? String(Math.max(0, quota.need - quota.done)) : '0'}
+            placeholder={owed != null ? String(owed) : quota.need != null ? String(Math.max(0, quota.need - quota.done)) : '0'}
             aria-label={`${tx('Log progress on', 'سجّل تقدمًا في')} ${project.name}`} />
           <button className="ghost sm" onClick={submit} disabled={!(Number(n) > 0)}><Plus size={13} /></button>
         </span>

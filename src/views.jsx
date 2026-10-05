@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Timer, Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Rows3, Coins } from 'lucide-react';
 import { boardSummary, columnsOf } from './board.js';
 import { DAILY, WEEKLY, MONTHLY, normalizeRepeat } from './recur.js';
-import { normalizePlan, paceStatus, todayQuota } from './quota.js';
+import { normalizePlan, paceStatus, sittingsFor, todayQuota, withSittings } from './quota.js';
 import { fmtFocus, projectFocusBetween, projectFocusTotal } from './projectfocus.js';
 import { TINY, habitStats, isPrayerAnchor, stackShape, wouldCycle } from './habits.js';
 import { hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
@@ -324,6 +324,7 @@ function ProjectCard({ p, open, onOpen, onUpd, onDel, onLog, taskInfo, onToggleT
   // The work plan and what it asks for today — see src/quota.js.
   const plan = normalizePlan(p);
   const quota = todayQuota(p, new Date());
+  const sits = sittingsFor(p, quota);
   const submitLog = () => { const n = Number(amt); if (!n) return; onLog(n, note.trim()); setAmt(''); setNote(''); };
   const tasks = (taskInfo && taskInfo.tasks) || [];
   const lanes = boardSummary(tasks, columnsOf(p));
@@ -488,21 +489,48 @@ function ProjectCard({ p, open, onOpen, onUpd, onDel, onLog, taskInfo, onToggleT
                   when that is too broad — a project you sit down to at nine
                   should not be asking at half past six. Optional, and it
                   narrows the period rather than replacing it. */}
-              <label className="proj-plan-when">
-                <span>{tx('From', 'اعتبارًا من')}</span>
-                <select value={plan.block} onChange={(e) => onUpd({ plan: { ...plan, block: e.target.value } })}>
-                  {BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}
-                </select>
-                <input className="time-input" type="time" value={plan.start || ''} style={{ maxWidth: 120 }}
-                  title={tx('Not before this time (optional)', 'ليس قبل هذا الوقت (اختياري)')}
-                  onChange={(e) => onUpd({ plan: { ...plan, start: e.target.value } })} />
-                {plan.start && <button className="mini-del" onClick={() => onUpd({ plan: { ...plan, start: '' } })} aria-label={tx('Clear', 'مسح')}><X size={12} /></button>}
-              </label>
+              {/* Sittings: the day's share in chunks. One is the old "from the
+                  morning"; more cut the number across the day, each piece
+                  asked for in its own period. See sittingsFor in quota.js. */}
+              {plan.sittings.map((s, i) => {
+                const setSit = (patch) => onUpd({ plan: withSittings(plan, plan.sittings.map((x, j) => (j === i ? { ...x, ...patch } : x))) });
+                const piece = sits[i] && sits[i].amount;
+                return (
+                  <label key={i} className="proj-plan-when">
+                    <span>{plan.sittings.length > 1 ? `${i + 1}.` : tx('From', 'اعتبارًا من')}</span>
+                    <select value={s.block} onChange={(e) => setSit({ block: e.target.value })}>
+                      {BLOCKS.map((b) => <option key={b.id} value={b.id}>{bName(b)}</option>)}
+                    </select>
+                    <input className="time-input" type="time" value={s.start || ''} style={{ maxWidth: 120 }}
+                      title={tx('Not before this time (optional)', 'ليس قبل هذا الوقت (اختياري)')}
+                      onChange={(e) => setSit({ start: e.target.value })} />
+                    {s.start && <button className="mini-del" onClick={() => setSit({ start: '' })} aria-label={tx('Clear time', 'مسح الوقت')}><X size={12} /></button>}
+                    {plan.sittings.length > 1 && piece != null && <span className="proj-sit-amt">{piece} {unit}</span>}
+                    {plan.sittings.length > 1 && (
+                      <button className="mini-del" aria-label={tx('Remove this sitting', 'احذف هذه الجلسة')}
+                        onClick={() => onUpd({ plan: withSittings(plan, plan.sittings.filter((_, j) => j !== i)) })}><Trash2 size={12} /></button>
+                    )}
+                  </label>
+                );
+              })}
+              {plan.sittings.length < BLOCKS.length * 2 && (
+                <button className="ghost sm proj-sit-add" onClick={() => {
+                  // The period after the last sitting, so a new chunk lands
+                  // somewhere useful rather than on top of the one before it.
+                  const last = plan.sittings[plan.sittings.length - 1];
+                  const at = BLOCKS.findIndex((b) => b.id === last.block);
+                  const next = BLOCKS[Math.min(BLOCKS.length - 1, at + 1)].id;
+                  onUpd({ plan: withSittings(plan, [...plan.sittings, { block: next, start: '' }]) });
+                }}>
+                  <Plus size={12} /> {tx('Split into another sitting', 'قسّمه على جلسة أخرى')}
+                </button>
+              )}
               <p className="hint-text" style={{ margin: '4px 0 0' }}>
-                {!plan.days.length
-                  ? tx('No days picked — it will ask every day.', 'لم تختر أيامًا — سيطلب كل يوم.')
-                  : quota.need == null
-                    ? tx('Set a deadline above and it can work out today\u2019s share.', 'حدّد موعدًا نهائيًا أعلاه ليحسب نصيب اليوم.')
+                {!plan.days.length ? tx('No days picked — it will ask every day. ', 'لم تختر أيامًا — سيطلب كل يوم. ') : ''}
+                {quota.need == null
+                  ? tx('Set a deadline above and it can work out today’s share.', 'حدّد موعدًا نهائيًا أعلاه ليحسب نصيب اليوم.')
+                  : plan.sittings.length > 1
+                    ? `${tx('Today that is', 'نصيب اليوم')} ${quota.need} ${unit}: ${sits.map((x) => x.amount).join(' + ')}.`
                     : `${tx('Today that is', 'نصيب اليوم')} ${quota.need} ${unit}.`}
               </p>
             </>)}

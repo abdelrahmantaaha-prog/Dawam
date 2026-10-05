@@ -9,6 +9,21 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+- A project's daily share can be split into **sittings** — one period each,
+  with an optional time (Projects → Remind me to work on this → *Split into
+  another sitting*). Now asks for the piece that is due, with missed pieces
+  rolling forward; Plan shows every piece and ticks it off as the day's total
+  covers it.
+
+- The day's share no longer shrinks as you log it: it is worked out from where
+  the day started, not from what is left after today's own progress.
+
+- **Fixed: prayer times switching themselves back on.** Settings synced as one
+  last-write-wins object, so another device with a stale copy re-sent every
+  old preference the moment it ticked a habit or logged progress. Settings
+  now merge field by field once both devices run this build; the server
+  picks up the same merge on its next deploy.
+
 - The desktop shell answers an outside ask for a fresh snapshot: dropping a
   file named `export-request` into DocumentsRhythm backups makes the
   planner write today's snapshot within a second or two, while the app is
