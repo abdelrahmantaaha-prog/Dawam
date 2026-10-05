@@ -9,6 +9,11 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## [3.6] — 2026-10-05 · Desktop 1.11.0
+
+A project's day splits into sittings, and the prayer-times switch stays where
+you put it.
+
 - A project's daily share can be split into **sittings** — one period each,
   with an optional time (Projects → Remind me to work on this → *Split into
   another sitting*). Now asks for the piece that is due, with missed pieces
