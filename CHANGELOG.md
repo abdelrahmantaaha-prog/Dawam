@@ -9,6 +9,10 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## [3.7] — 2026-10-05 · Desktop 1.12.0
+
+Sittings become habits.
+
 - A project's sittings now behave like habits. Each one sits at the head of its
   period on Plan and joins the Now queue on its own, is kept with one tap
   (which logs its piece), and carries its own streak and flame. Unticking
