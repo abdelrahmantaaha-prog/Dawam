@@ -34,14 +34,14 @@ import { addProjectFocus } from './projectfocus.js';
 import { allNoteTags, loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, isEmptyNote, excerpt as noteExcerpt } from './notes.js';
 import { MeetingSheet } from './meetingsheet.jsx';
 import { nextMark, TINY, stackGate, isPrayerAnchor, anchorLabel, moveHabit, mergeHabits, dropInMerged, applyHabitOrder } from './habits.js';
-import { dueProjects, owedNow, paceStatus, todayQuota, worksOn } from './quota.js';
+import { dueProjects, dueSittings, paceStatus, sittingStreak, todayQuota, worksOn } from './quota.js';
 import { lockDue, lockEvery, lockOn, minutesToLock } from './nowlock.js';
 import { holdDevice, lockSupported, releaseDevice } from './applock.js';
 import { dueOn as recurDueOn, describeRepeat, isScheduled, normalizeRepeat } from './recur.js';
 import { TrelloCards } from './trelloview.jsx';
 import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
 
-import { AppIcon,BlockRow,PaceStrip,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,ProjectTag,QuickAdd,QuotaLine,SkyScene,SubtaskEditor,TaskEditor,TokenSuggest,pyramidPath } from './components.jsx';
+import { SittingLine,AppIcon,BlockRow,PaceStrip,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,ProjectTag,QuickAdd,QuotaLine,SkyScene,SubtaskEditor,TaskEditor,TokenSuggest,pyramidPath } from './components.jsx';
 import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
 
 /* The pool rejected this app's token. Said plainly, and pointing at the field
@@ -752,12 +752,28 @@ export default function Rhythm() {
   };
   const addProjectItem = () => { const np = newProject(); persistProjects((prev) => [...prev, np]); return np; };
   const delProjectItem = (id) => persistProjects((prev) => prev.filter((p) => p.id !== id));
-  const logProgress = (id, amount, note) => {
+  const logProgress = (id, amount, note, { date, sitting } = {}) => {
     const amt = Number(amount); if (!amt) return;
-    const entry = { id: uid(), date: fmtISO(new Date()), amount: amt, note: note || '' };
+    const entry = { id: uid(), date: date || fmtISO(new Date()), amount: amt, note: note || '', ...(sitting ? { sitting } : {}) };
     const proj = (settings.projects || []).find((p) => p.id === id);
     persistProjects((prev) => prev.map((p) => (p.id === id ? { ...p, entries: [...(p.entries || []), entry] } : p)));
     if (proj) awardGoal(proj, entry, projectProgress(proj));
+  };
+  /* A sitting is ticked like a habit. Ticking logs what is left of its piece,
+     marked as that sitting's; unticking removes exactly what its ticks logged,
+     and the points they paid with it (updProjectItem revokes them). A sitting
+     kept by progress logged on the project card has no tick of its own to undo. */
+  const toggleSitting = (project, s, iso) => {
+    if (s.met && s.ticked) {
+      const entries = (project.entries || []).filter((e) => !(e.date === iso && e.sitting === s.key));
+      updProjectItem(project.id, { entries });
+      return;
+    }
+    if (s.met) return;
+    const n = Math.max(0, s.amount - s.got);
+    if (!n) return;
+    logProgress(project.id, n, '', { date: iso, sitting: s.key });
+    flash(`${project.name} +${n} ${project.unit || ''}`.trim());
   };
   // Tasks linked to a project via task.projectRef, gathered across every week
   // held in the session cache plus the backlog. Returns concrete refs so the
@@ -2967,6 +2983,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
 
   const usedTpl = {}; week.tasks.forEach((t) => { if (t.day === selectedDay && t.templateId) usedTpl[t.templateId] = (usedTpl[t.templateId] || 0) + 1; });
   const isSelectedToday = sameDay(selectedDate, todayMid);
+  // The selected day's sittings, each with its chain, for the Plan timeline.
+  const planSittings = dueSittings(settings.projects || [], selectedDate)
+    .map((x) => ({ ...x, streak: sittingStreak(x.project, x.sitting.key, selectedDate) }));
   // Prayers as built-in habits: derived views over the existing prayer log, so
   // marking a prayer on Now and ticking it here are the same action. Not
   // stored in settings.habits — no duplicate state to drift.
@@ -3086,9 +3105,21 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     (pastByBlock[bid] = pastByBlock[bid] || []).push(m);
   }
   for (const bid of Object.keys(pastByBlock)) pastByBlock[bid].sort((a, b) => a.startMs - b.startMs);
+  /* A project's sittings join the queue as habits do, at the head of their
+     period. A sitting with a clock time waits for it while its period is the
+     current one: a project you sit down to at nine should not be asking at
+     half past six just because both are "the morning". Like a habit, one from
+     an earlier period stays until it is kept. */
+  const sittingTitle = (it) => `${it.project.name} · ${it.s.amount} ${it.project.unit || ''}`.trim();
+  const sittingsNow = dueSittings(settings.projects || [], todayMid);
+  const sittingWaits = (s) => blockIdx(s.block) === activeIdx && !!s.start && curMin < (minutesOf(s.start) ?? 0);
+  const waitingSittings = sittingsNow.filter((x) => !x.sitting.met && sittingWaits(x.sitting));
   const queue = [];
   for (const b of BLOCKS) {
     if (PRAYER_BLOCKS.includes(b.id) && blockIdx(b.id) === activeIdx && !prayersToday[b.id]) queue.push({ kind: 'prayer', block: b });
+    for (const x of sittingsNow) {
+      if (x.sitting.block === b.id && !x.sitting.met && !sittingWaits(x.sitting)) queue.push({ kind: 'sitting', block: b, project: x.project, s: x.sitting });
+    }
     // An ended, unchecked meeting takes its place among the tasks by clock
     // time — the same tucking rule the Plan timeline uses. Habits sit where
     // they were dragged to on the Plan (their slot among the period's tasks).
@@ -3108,8 +3139,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     while (mi < ms.length) queue.push({ kind: 'cal', block: b, m: ms[mi++] });
   }
   const startedPrayers = PRAYER_BLOCKS.filter((pid) => blockIdx(pid) <= activeIdx).length;
-  const totalN = nowList.length + (settings.habits || []).length + startedPrayers + startedOrDoneMeetings.length;
-  const doneN = totalN - queue.length - liveNow.length - soonNow.length - runningNow.length - liveMeetings.length - missedPrayers.length - waitingHabits.length;
+  const totalN = nowList.length + (settings.habits || []).length + sittingsNow.length + startedPrayers + startedOrDoneMeetings.length;
+  const doneN = totalN - queue.length - liveNow.length - soonNow.length - runningNow.length - liveMeetings.length - missedPrayers.length - waitingHabits.length - waitingSittings.length;
   const next = queue[0] || null;
   // Everything up to and through the current period is clear when the head of
   // the queue belongs to a LATER block. Then it stops being "do this now" and
@@ -3122,7 +3153,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   // days left to run. It does not hold back "caught up"; it just is not queued.
   const caughtUp = nextIsLater && liveNow.length === 0 && soonNow.length === 0 && missedPrayers.length === 0;
   const nothingLeft = !next && liveNow.length === 0 && soonNow.length === 0 && missedPrayers.length === 0
-    && liveMeetings.length === 0 && waitingHabits.length === 0;
+    && liveMeetings.length === 0 && waitingHabits.length === 0 && waitingSittings.length === 0;
 
   /* Projects that asked for a share of today, and have not had it yet. The
      block they chose decides when they appear: a project set to the morning
@@ -3139,25 +3170,17 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     .filter((x) => x.verdict.key !== 'unknown' && x.verdict.key !== 'done');
   const quotasNow = todayInView
     ? dueProjects(settings.projects || [], todayMid, { blockOrder: blockIdx })
-        .map((x) => {
-          if (x.quota.met) return null;
-          // A sitting has arrived once its period has. An optional clock time
-          // narrows the period: a project you sit down to at nine should not
-          // be asking at half past six just because both are "the morning".
-          // Once past, it stays — a share you owe does not stop being owed
-          // because its hour went by. With the day split into sittings, what
-          // is asked for is the running total up to the latest one that has
-          // arrived, so a missed morning piece rolls into the afternoon.
-          const arrived = (s) => {
-            if (blockIdx(s.block) > activeIdx) return false;
-            const from = s.start ? minutesOf(s.start) : null;
-            return from == null || curMin >= from || blockIdx(s.block) < activeIdx;
-          };
-          const now = owedNow(x.project, x.quota, arrived);
-          if (!now || (now.owed != null && now.owed <= 0)) return null;
-          return { ...x, now };
+        .filter((x) => {
+          // Projects with pieces are habits in the queue now. This box is left
+          // for the ones with no number to divide, which ask for the day whole.
+          if (x.quota.met || x.quota.need != null) return false;
+          const pl = x.plan;
+          if (blockIdx(pl.block) > activeIdx) return false;
+          // An optional clock time narrows the period. Once past, it stays: a
+          // share you owe does not stop being owed because its hour went by.
+          const from = pl.start ? minutesOf(pl.start) : null;
+          return from == null || curMin >= from || blockIdx(pl.block) < activeIdx;
         })
-        .filter(Boolean)
     : [];
   /* What being caught up is worth. Only what the balance actually covers: an
      offer you cannot take is not an offer, and listing it turns a reward into
@@ -3239,16 +3262,16 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     : soonNow.length > 0
     ? { title: soonNow[0].title, body: `${tx('Starts in', 'يبدأ خلال')} ${minsUntil(tStartMin(soonNow[0]))}${tx('m', 'د')} · ${timeLabel(soonNow[0])}` }
     : caughtUp
-      ? { title: tx("You're all caught up.", 'أنجزت كل ما عليك الآن.'), body: next ? `${tx('Next', 'التالي')}: ${next.kind === 'task' ? next.t.title : next.kind === 'habit' ? next.h.name : next.kind === 'cal' ? (next.m.summary || tx('Meeting', 'اجتماع')) : bName(next.block)} · ${bName(next.block)}` : '' }
+      ? { title: tx("You're all caught up.", 'أنجزت كل ما عليك الآن.'), body: next ? `${tx('Next', 'التالي')}: ${next.kind === 'task' ? next.t.title : next.kind === 'habit' ? next.h.name : next.kind === 'sitting' ? sittingTitle(next) : next.kind === 'cal' ? (next.m.summary || tx('Meeting', 'اجتماع')) : bName(next.block)} · ${bName(next.block)}` : '' }
       : next
-        ? { title: next.kind === 'task' ? next.t.title : next.kind === 'habit' ? next.h.name : next.kind === 'cal' ? (next.m.summary || tx('Meeting', 'اجتماع')) : tx(`${next.block.name} prayer`, `صلاة ${next.block.ar}`), body: `${bName(next.block)}${queue.length > 1 ? ` · ${queue.length - 1} ${tx('more today', 'أخرى اليوم')}` : ''}` }
+        ? { title: next.kind === 'task' ? next.t.title : next.kind === 'habit' ? next.h.name : next.kind === 'sitting' ? sittingTitle(next) : next.kind === 'cal' ? (next.m.summary || tx('Meeting', 'اجتماع')) : tx(`${next.block.name} prayer`, `صلاة ${next.block.ar}`), body: `${bName(next.block)}${queue.length > 1 ? ` · ${queue.length - 1} ${tx('more today', 'أخرى اليوم')}` : ''}` }
         : totalN > 0 ? { title: tx('All done for today. Rest easy.', 'أنجزت كل شيء اليوم. ارتَح.'), body: '' } : null;
   const ongoingKey = ongoingText ? `${ongoingText.title} ${ongoingText.body}` : '';
 
   /* Home-screen widget. Same headline as the ongoing notification, plus the
      next couple of items so the widget answers "and then what?" at a glance
      without becoming the full list the Now page deliberately refuses to be. */
-  const widgetLabel = (it) => (it.kind === 'task' ? it.t.title : it.kind === 'habit' ? it.h.name : it.kind === 'cal' ? (it.m.summary || tx('Meeting', 'اجتماع')) : tx(`${it.block.name} prayer`, `صلاة ${it.block.ar}`));
+  const widgetLabel = (it) => (it.kind === 'task' ? it.t.title : it.kind === 'habit' ? it.h.name : it.kind === 'sitting' ? sittingTitle(it) : it.kind === 'cal' ? (it.m.summary || tx('Meeting', 'اجتماع')) : tx(`${it.block.name} prayer`, `صلاة ${it.block.ar}`));
   const widgetUpcoming = queue.slice(1, 3).map(widgetLabel);
   const widgetPayload = ongoingText
     ? { title: ongoingText.title, body: ongoingText.body, upcoming: widgetUpcoming.length ? `${tx('then', 'ثم')}: ${widgetUpcoming.join(' · ')}` : '' }
@@ -3440,6 +3463,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           if (!it) return 'none';
           if (it.kind === 'prayer') return `p:${it.block.id}`;
           if (it.kind === 'habit') return `h:${it.h.id}`;
+          if (it.kind === 'sitting') return `s:${it.project.id}:${it.s.key}`;
           if (it.kind === 'cal') return `c:${it.m.key}`;
           const s = (it.t.subtasks || []).find((x) => !x.done);
           return `t:${it.t.id}:${s ? s.id : 'main'}`;
@@ -3458,6 +3482,12 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           if (it.kind === 'habit') return (
             <div key={k} className={`now-one-card ${cls}`}>
               <HabitLine h={it.h} iso={nowHabitISO} onToggle={(id, iso) => advanceNow(k, () => toggleHabitDay(id, iso))} />
+            </div>
+          );
+          if (it.kind === 'sitting') return (
+            <div key={k} className={`now-one-card ${cls}`}>
+              <SittingLine project={it.project} sitting={it.s} streak={sittingStreak(it.project, it.s.key, todayMid)}
+                onToggle={() => advanceNow(k, () => toggleSitting(it.project, it.s, nowHabitISO))} />
             </div>
           );
           if (it.kind === 'cal') { const m = it.m; return (
@@ -3656,8 +3686,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             {todayInView && quotasNow.length > 0 && (
               <div className="now-quotas">
                 <div className="now-quotas-h"><Target size={13} /> {tx('Today\u2019s share', 'نصيب اليوم')}</div>
-                {quotasNow.map(({ project, quota, sittings, now }) => (
-                  <QuotaLine key={project.id} project={project} quota={quota} verdict={verdictOf(project)} sittings={sittings} now={now}
+                {quotasNow.map(({ project, quota }) => (
+                  <QuotaLine key={project.id} project={project} quota={quota} verdict={verdictOf(project)}
                     onLog={(n) => { logProgress(project.id, n); flash(`${project.name} +${n} ${project.unit || ''}`.trim()); }}
                     onOpen={() => { go('projects'); setBoardProject(null); }} />
                 ))}
@@ -3803,7 +3833,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             Thursday's share. Met ones stay, greyed, so a day that is done
             reads as done rather than as a day nothing was asked of. */}
         {(() => {
-          const due = dueProjects(settings.projects || [], selectedDate, { blockOrder: blockIdx });
+          const due = dueProjects(settings.projects || [], selectedDate, { blockOrder: blockIdx }).filter((x) => x.quota.need == null);
           const others = paceOthers(new Set(due.map((x) => x.project.id)));
           if (!due.length && !others.length) return null;
           return (
@@ -3811,8 +3841,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               {due.length > 0 && (
                 <div className="plan-quotas">
                   <div className="plan-quotas-h"><Target size={12} /> {tx('Projects want, today', 'ما تطلبه المشاريع اليوم')}</div>
-                  {due.map(({ project, quota, sittings }) => (
-                    <QuotaLine key={project.id} project={project} quota={quota} compact verdict={verdictOf(project)} sittings={sittings}
+                  {due.map(({ project, quota }) => (
+                    <QuotaLine key={project.id} project={project} quota={quota} compact verdict={verdictOf(project)}
                       onLog={(n) => { logProgress(project.id, n); flash(`${project.name} +${n} ${project.unit || ''}`.trim()); }}
                       onOpen={() => { go('projects'); setBoardProject(null); }} />
                   ))}
@@ -3878,6 +3908,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                 onAddCard={addTrelloCard} addedCards={trelloAdded}
                 onToggleCalEvent={(key) => toggleMeeting(fmtISO(selectedDate), key)}
                 habits={settings.habits.filter((h) => (h.block || 'morning') === b.id)}
+                sittings={planSittings.filter((x) => x.sitting.block === b.id)}
+                sittingsTickable={selectedDate <= todayMid}
+                onToggleSitting={(project, s) => toggleSitting(project, s, fmtISO(selectedDate))}
                 habitDate={fmtISO(selectedDate)} onToggleHabit={toggleHabitDay}
                 current={isSelectedToday && b.id === activeId}
                 prayer={isSelectedToday && PRAYER_BLOCKS.includes(b.id) ? { done: !!(week.prayers?.[selectedDay]?.[b.id]) } : null}
@@ -4413,6 +4446,11 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                   if (it.kind === 'habit') return (
                     <button className="nowlock-do" onClick={() => { marked(); toggleHabitDay(it.h.id, nowHabitISO); }}>
                       <Circle size={20} /><span>{it.h.name}</span>
+                    </button>
+                  );
+                  if (it.kind === 'sitting') return (
+                    <button className="nowlock-do" onClick={() => { marked(); toggleSitting(it.project, it.s, nowHabitISO); }}>
+                      <Circle size={20} /><span>{sittingTitle(it)}</span>
                     </button>
                   );
                   if (it.kind === 'prayer') return (

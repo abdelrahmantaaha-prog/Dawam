@@ -70,40 +70,98 @@ export function splitShare(need, n) {
   return Array.from({ length: k }, (_, i) => base + (i < extra ? 1 : 0));
 }
 
-/* Each sitting with its piece of today's share.
+/* A sitting's identity: its period and its time. Stored on the progress a
+   tick logs, so the tick stays that sitting's even when the pieces are
+   recomputed — and two sittings in one period (Isha, and Isha at nine) are
+   still two. */
+export const sittingKey = (s) => `${(s && s.block) || 'morning'}@${(s && s.start) || ''}`;
+
+/* Each sitting with its piece of the day's share — the habit a sitting is.
  *
  *   amount   this sitting's piece.
- *   upTo     what the day should have reached by the end of this sitting.
- *   met      whether today's log already covers it.
+ *   got      how much of the day's log counts towards it.
+ *   met      whether it is kept.
+ *   ticked   whether it was kept by its own tick (so the tick can be undone).
  *
- * Judged against the running total, not per sitting: four pages written at
- * Fajr toward an eleven-page day cover the first sitting whenever they were
- * typed in, and eight written in one go cover the first two. With no number to
- * divide (no deadline, no rate) there are no pieces — the sittings still say
- * when, and each just reports progress. */
+ * A tick belongs to its own sitting: ticking Dhuhr first keeps Dhuhr, not
+ * Fajr, the way ticking one habit never ticks another. Progress logged by
+ * hand — from the project card, say — belongs to no sitting and fills them in
+ * order, so five pages typed in at noon still count as the Fajr piece. With no
+ * number to divide (no deadline, no rate) there are no pieces, and a sitting
+ * is kept when the day is. */
 export function sittingsFor(project, quota) {
   const plan = normalizePlan(project);
   const parts = quota && quota.need != null ? splitShare(quota.need, plan.sittings.length) : null;
-  let upTo = 0;
-  return plan.sittings.map((s, i) => {
-    const amount = parts ? parts[i] : null;
-    if (parts) upTo += amount;
-    return { ...s, index: i, count: plan.sittings.length, amount, upTo: parts ? upTo : null,
-      met: parts ? quota.done >= upTo : !!(quota && quota.met) };
+  const keys = plan.sittings.map(sittingKey);
+  const iso = quota && quota.iso;
+  const own = {};
+  let loose = 0;
+  for (const e of (project && project.entries) || []) {
+    if (e.date !== iso) continue;
+    const n = Number(e.amount) || 0;
+    if (e.sitting && keys.includes(e.sitting)) own[e.sitting] = (own[e.sitting] || 0) + n;
+    else loose += n;
+  }
+  // A sitting ticked past its piece passes the rest on, like any loose log.
+  const got = keys.map((k, i) => {
+    const mine = own[k] || 0;
+    const cap = parts ? parts[i] : Infinity;
+    if (mine > cap) { loose += mine - cap; return cap; }
+    return mine;
   });
+  if (parts) {
+    for (let i = 0; i < got.length && loose > 0; i++) {
+      const take = Math.min(loose, parts[i] - got[i]);
+      got[i] += take; loose -= take;
+    }
+  }
+  return plan.sittings.map((s, i) => ({
+    ...s, key: keys[i], index: i, count: plan.sittings.length,
+    amount: parts ? parts[i] : null,
+    got: got[i],
+    met: parts ? got[i] >= parts[i] : !!(quota && quota.met),
+    ticked: (own[keys[i]] || 0) > 0,
+  }));
 }
 
-/* What is owed by now, given which sittings have arrived (the caller knows the
-   clock and the period; this file does not). Missed sittings roll forward — a
-   share you owe does not stop being owed because its hour went by. Returns
-   null when nothing has arrived yet, and the sitting to name otherwise. */
-export function owedNow(project, quota, hasArrived) {
-  const sits = sittingsFor(project, quota).filter((s) => s.amount == null || s.amount > 0);
-  const arrived = sits.filter(hasArrived);
-  if (!arrived.length) return null;
-  const last = arrived[arrived.length - 1];
-  if (last.upTo == null) return { sitting: last, owed: null, sittings: sits };
-  return { sitting: last, owed: Math.max(0, last.upTo - quota.done), sittings: sits };
+/* How many working days in a row this sitting has been kept — the chain a
+   habit shows. Today counts once kept, and an open today does not break it:
+   the chain is judged from yesterday until today is done, the same way a
+   habit's streak reads. Days the project does not work on are stepped over,
+   not counted as misses, and the walk is capped. */
+export function sittingStreak(project, key, today, cap = 120) {
+  const at = (d) => {
+    if (!worksOn(project, d)) return null;
+    const s = sittingsFor(project, todayQuota(project, d)).find((x) => x.key === key);
+    if (!s || s.amount === 0) return null;   // nothing was asked of it that day
+    return s.met;
+  };
+  let n = 0;
+  const t = new Date(today); t.setHours(0, 0, 0, 0);
+  if (at(t) === true) n = 1;
+  for (let i = 1; i <= cap; i++) {
+    const d = addDays(t, -i);
+    if (project.startDate && d < parseISO(project.startDate)) break;
+    const kept = at(d);
+    if (kept === null) continue;
+    if (!kept) break;
+    n += 1;
+  }
+  return n;
+}
+
+/* The sittings a date asks for: one per project per sitting, each with a
+   piece to do. Projects with no number to divide have no pieces and are not
+   here — they still ask for the day as a whole (dueProjects). */
+export function dueSittings(projects, date) {
+  const out = [];
+  for (const p of projects || []) {
+    if (p.completedAt || !worksOn(p, date)) continue;
+    const quota = todayQuota(p, date);
+    if (quota.need == null || quota.need <= 0) continue;
+    for (const s of sittingsFor(p, quota)) if (s.amount > 0) out.push({ project: p, quota, sitting: s });
+  }
+  return out;
 }
 
 /* Does this project ask anything of this date? It has to have a number to
@@ -161,7 +219,9 @@ export function todayQuota(project, date) {
   const iso = fmtISO(date);
   const plan = normalizePlan(project);
   const target = Number(project && project.target) || 0;
-  const total = ((project && project.entries) || []).reduce((n, e) => n + (Number(e.amount) || 0), 0);
+  // Progress up to and including this date: a past day is judged as it stood
+  // then, which is what a streak walking backwards needs.
+  const total = ((project && project.entries) || []).filter((e) => !e.date || e.date <= iso).reduce((n, e) => n + (Number(e.amount) || 0), 0);
   const remaining = Math.max(0, target - total);
   const done = loggedOn(project, iso);
   const end = project && project.deadline ? parseISO(project.deadline) : null;

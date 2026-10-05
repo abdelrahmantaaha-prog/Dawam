@@ -9,6 +9,12 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+- A project's sittings now behave like habits. Each one sits at the head of its
+  period on Plan and joins the Now queue on its own, is kept with one tap
+  (which logs its piece), and carries its own streak and flame. Unticking
+  takes the logged pages and their points back. Missed sittings stay in the
+  queue until kept, as a habit does, instead of rolling into the next one.
+
 ## [3.6] — 2026-10-05 · Desktop 1.11.0
 
 A project's day splits into sittings, and the prayer-times switch stays where

@@ -580,14 +580,18 @@ writes on Tuesdays and Thursdays has three sittings, and telling them "ten
 pages" every Tuesday sets them up to miss by a factor of three, invisibly. The
 number rounds up, because a third of a page is still a page you have to open.
 
-**Split into sittings.** One period is the default; *Split into another
+**Sittings are habits.** One period is the default; *Split into another
 sitting* cuts the day's share across more of them — eleven pages as 4 at Fajr,
-4 at Dhuhr and 3 at Isha, larger pieces first. Now asks for what is owed by
-the latest sitting that has arrived ("8 pages now · sitting 2/3"), so a missed
-morning piece rolls into the afternoon rather than vanishing; Plan lists the
-pieces and ticks each once the day's running total covers it, whenever it was
-logged. The day's share itself is fixed by where the day started, so logging
-part of it does not reshuffle what is left.
+4 at Dhuhr and 3 at Isha, larger pieces first. Each sitting then behaves as a
+habit: a line at the head of its period on Plan, an item in the Now queue
+(waiting for its clock time, if it has one), one tap to keep it, and a chain
+and flame of its own. Ticking logs the sitting's piece as that sitting's, so
+ticking Dhuhr keeps Dhuhr and not Fajr; unticking takes back what the tick
+logged, points included. Progress logged on the project card belongs to no
+sitting and fills them in order. Days still to come cannot be ticked. The
+day's share is fixed by where the day started, so keeping one piece never
+reshuffles the others. A project with no deadline and no daily rate has no
+pieces to cut, and still asks for the day whole in the *Today's share* box.
 
 Effectively a habit with an end date, which is why it reads like one.
 

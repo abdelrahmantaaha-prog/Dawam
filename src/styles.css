@@ -1567,11 +1567,6 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .quota-log input{width:58px;border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--surface);
   color:var(--ink);font-family:inherit;font-size:13px;font-variant-numeric:tabular-nums;text-align:center}
 .quota-tick{color:var(--verdigris);flex-shrink:0}
-/* The day's share in sittings: one chip per piece, ticked once the running total covers it. */
-.quota-sits{display:flex;flex-wrap:wrap;gap:4px;margin-top:1px}
-.quota-sit{display:inline-flex;align-items:center;gap:3px;padding:1px 7px;border-radius:99px;border:1px solid var(--soft);font-size:10.5px;font-weight:700;color:var(--faint);font-variant-numeric:tabular-nums;white-space:nowrap}
-.quota-sit.cur{border-color:var(--qcolour);color:var(--ink)}
-.quota-sit.met{color:var(--verdigris);border-style:dashed}
 .rhythm.dark .quota-line{background:rgba(22,28,37,.85)}
 
 /* ---- what being caught up is worth ---- */

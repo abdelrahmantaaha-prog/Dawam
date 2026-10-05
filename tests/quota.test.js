@@ -3,7 +3,7 @@
    calendar days. Getting that wrong understates every quota by exactly the
    factor between them, and does it invisibly. */
 import { describe, it, expect } from 'vitest';
-import { normalizePlan, worksOn, workDaysBetween, loggedOn, todayQuota, dueProjects, splitShare, sittingsFor, owedNow, withSittings } from '../src/quota.js';
+import { normalizePlan, worksOn, workDaysBetween, loggedOn, todayQuota, dueProjects, splitShare, sittingsFor, sittingStreak, dueSittings, withSittings } from '../src/quota.js';
 
 const d = (iso) => new Date(`${iso}T00:00:00`);
 const proj = (over = {}) => ({
@@ -168,11 +168,15 @@ describe('splitShare', () => {
 
 describe('sittings', () => {
   // 15th→18th is 4 days; 44 pages ÷ 4 = 11 today.
+  const SITS = [{ block: 'isha' }, { block: 'fajr', start: '05:00' }, { block: 'dhuhr' }];
   const split = (over = {}) => proj({
     target: 44, deadline: '2026-09-18',
-    plan: { on: true, days: [], sittings: [{ block: 'isha' }, { block: 'fajr', start: '05:00' }, { block: 'dhuhr' }] },
+    plan: { on: true, days: [], sittings: SITS },
     ...over,
   });
+  const on15 = (p) => sittingsFor(p, todayQuota(p, d('2026-09-15')));
+  const log = (amount, sitting, date = '2026-09-15') => ({ id: `${date}-${sitting || 'free'}-${amount}`, date, amount, ...(sitting ? { sitting } : {}) });
+
   it('keeps the old single-period shape when none are given', () => {
     expect(normalizePlan(proj({ plan: { on: true, block: 'asr', start: '16:00' } })).sittings)
       .toEqual([{ block: 'asr', start: '16:00' }]);
@@ -186,39 +190,72 @@ describe('sittings', () => {
     expect(stored.block).toBe('morning');
     expect(stored.start).toBe('09:00');
   });
-  it('gives each sitting its piece and a running total', () => {
-    const p = split();
-    const s = sittingsFor(p, todayQuota(p, d('2026-09-15')));
+  it('gives each sitting its piece and a stable key', () => {
+    const s = on15(split());
     expect(s.map((x) => x.amount)).toEqual([4, 4, 3]);
-    expect(s.map((x) => x.upTo)).toEqual([4, 8, 11]);
+    expect(s.map((x) => x.key)).toEqual(['fajr@05:00', 'dhuhr@', 'isha@']);
+    expect(s.every((x) => !x.met && !x.ticked)).toBe(true);
   });
-  it('judges pieces by the running total, not when they were logged', () => {
-    const p = split({ entries: [{ date: '2026-09-15', amount: 8 }] });
-    const s = sittingsFor(p, todayQuota(p, d('2026-09-15')));
+  it('a tick keeps its own sitting, not the first one — like ticking one habit', () => {
+    const s = on15(split({ entries: [log(4, 'dhuhr@')] }));
+    expect(s.map((x) => x.met)).toEqual([false, true, false]);
+    expect(s[1].ticked).toBe(true);
+  });
+  it('progress logged by hand fills the sittings in order', () => {
+    const s = on15(split({ entries: [log(5)] }));
+    expect(s.map((x) => x.got)).toEqual([4, 1, 0]);
+    expect(s.map((x) => x.met)).toEqual([true, false, false]);
+    expect(s[0].ticked).toBe(false);   // kept, but there is no tick to undo
+  });
+  it('a sitting ticked past its piece passes the rest on', () => {
+    const s = on15(split({ entries: [log(9, 'isha@')] }));
+    expect(s.map((x) => x.got)).toEqual([4, 2, 3]);
+  });
+  it('the day\'s pieces do not move as they are ticked', () => {
+    const s = on15(split({ entries: [log(4, 'fajr@05:00'), log(4, 'dhuhr@')] }));
+    expect(s.map((x) => x.amount)).toEqual([4, 4, 3]);
     expect(s.map((x) => x.met)).toEqual([true, true, false]);
   });
-  it('rolls a missed sitting forward into the next one', () => {
-    const p = split();
-    const q = todayQuota(p, d('2026-09-15'));
-    // Dhuhr has arrived, nothing logged: both the Fajr and the Dhuhr pieces are owed.
-    const n = owedNow(p, q, (s) => s.block !== 'isha');
-    expect(n.sitting.block).toBe('dhuhr');
-    expect(n.owed).toBe(8);
+  it('lists what a date asks for, one line per sitting with a piece', () => {
+    const list = dueSittings([split(), split({ id: 'p2', target: 8 })], d('2026-09-15'));
+    // The second project asks 2 pages over three sittings: 1, 1, and nothing at Isha.
+    expect(list.map((x) => `${x.project.id}:${x.sitting.key}:${x.sitting.amount}`))
+      .toEqual(['p1:fajr@05:00:4', 'p1:dhuhr@:4', 'p1:isha@:3', 'p2:fajr@05:00:1', 'p2:dhuhr@:1']);
   });
-  it('asks for nothing before the first sitting arrives', () => {
-    const p = split();
-    expect(owedNow(p, todayQuota(p, d('2026-09-15')), () => false)).toBe(null);
+  it('leaves projects with no number to divide out of the habit lines', () => {
+    expect(dueSittings([split({ deadline: '' })], d('2026-09-15'))).toEqual([]);
   });
-  it('goes quiet once the pieces so far are logged, even with the day unfinished', () => {
-    const p = split({ entries: [{ date: '2026-09-15', amount: 4 }] });
-    const n = owedNow(p, todayQuota(p, d('2026-09-15')), (s) => s.block === 'fajr');
-    expect(n.owed).toBe(0);
+});
+
+describe('sittingStreak', () => {
+  // A page a day from `start` to the 30th, one sitting. Falling behind raises
+  // the next day's piece, so each kept day has to meet the piece it was given.
+  const daily = (entries, start) => proj({
+    target: 31 - Number(start.slice(8)), startDate: start, deadline: '2026-09-30', entries,
+    plan: { on: true, days: [], sittings: [{ block: 'fajr' }] },
   });
-  it('skips sittings left with nothing to do', () => {
-    // 2 pages over three sittings: the Isha one has no piece and is never named.
-    const p = split({ target: 8 });
-    const n = owedNow(p, todayQuota(p, d('2026-09-15')), () => true);
-    expect(n.sitting.block).toBe('dhuhr');
-    expect(n.owed).toBe(2);
+  const kept = (date, amount = 1) => ({ id: date, date, amount, sitting: 'fajr@' });
+  it('counts the days in a row the sitting was kept', () => {
+    const p = daily([kept('2026-09-12'), kept('2026-09-13'), kept('2026-09-14'), kept('2026-09-15')], '2026-09-12');
+    expect(sittingStreak(p, 'fajr@', d('2026-09-15'))).toBe(4);
+  });
+  it('does not break on an open today — the chain is judged from yesterday', () => {
+    const p = daily([kept('2026-09-13'), kept('2026-09-14')], '2026-09-13');
+    expect(sittingStreak(p, 'fajr@', d('2026-09-15'))).toBe(2);
+  });
+  it('a missed day ends the chain', () => {
+    // The 13th is missed, so the 14th asks for two.
+    const p = daily([kept('2026-09-11'), kept('2026-09-12'), kept('2026-09-14', 2)], '2026-09-11');
+    expect(sittingStreak(p, 'fajr@', d('2026-09-15'))).toBe(1);
+  });
+  it('steps over the days the project is not worked on', () => {
+    // Worked Tue and Thu: Thu 10th, Tue 15th — the Wed and the weekend between
+    // are not misses. 30 pages over the six sittings from the 10th is 5 each.
+    const p = proj({
+      target: 30, startDate: '2026-09-01', deadline: '2026-09-30',
+      entries: [{ id: 'a', date: '2026-09-10', amount: 5, sitting: 'fajr@' }, { id: 'b', date: '2026-09-15', amount: 5, sitting: 'fajr@' }],
+      plan: { on: true, days: [2, 4], sittings: [{ block: 'fajr' }] },
+    });
+    expect(sittingStreak(p, 'fajr@', d('2026-09-15'))).toBe(2);
   });
 });

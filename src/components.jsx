@@ -39,6 +39,37 @@ function HabitLine({ h, iso, onToggle }) {
   );
 }
 
+/* One sitting of a project's day, drawn as the habit it is: a tick, a flame
+   and a chain. Ticking logs the sitting's piece; unticking takes back what
+   that tick logged. A sitting kept by progress logged elsewhere shows as kept
+   but has no tick of its own to undo. `tickable` is false on days still to
+   come — progress cannot be logged in advance. */
+function SittingLine({ project, sitting: s, streak = 0, onToggle, tickable = true }) {
+  const glow = glowLevel(streak);
+  const unit = project.unit || '';
+  const canUndo = s.met && s.ticked;
+  const can = tickable && (!s.met || canUndo);
+  const left = Math.max(0, s.amount - s.got);
+  return (
+    <div className={`habit-line sitting-line glow-${glow} ${s.met ? 'on' : ''}`} style={{ '--hcolor': project.color }}>
+      <button className="tcheck" onClick={() => can && onToggle && onToggle()} disabled={!can}
+        aria-label={s.met ? tx('Undo this sitting', 'تراجع عن هذه الجلسة') : tx('Mark this sitting done', 'تمت هذه الجلسة')}
+        title={s.met && !s.ticked ? tx('Covered by progress logged on the project', 'غطّاه تقدّم مسجّل في المشروع') : undefined}>
+        {s.met ? <CheckCircle2 size={18} /> : <Circle size={18} />}
+      </button>
+      <div className="habit-line-col">
+        <span className="habit-line-title"><FlameGlyph level={glow} size={12} /> {project.name} · {s.amount} {unit}</span>
+        <span className="habit-line-meta">
+          {s.count > 1 ? `${tx('sitting', 'جلسة')} ${s.index + 1}/${s.count}` : tx('today’s share', 'نصيب اليوم')}
+          {s.start ? ` · ${fmtTime(s.start)}` : ''}
+          {!s.met && s.got > 0 ? ` · ${left} ${tx('to go', 'متبقٍ')}` : ''}
+          {streak > 0 ? ` · ${streak} ${tx('day streak', 'يوم متتالٍ')}` : ''}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Block row (drop target for tasks, pool items, templates)           */
 /* ------------------------------------------------------------------ */
@@ -266,18 +297,11 @@ function PaceStrip({ items, onOpen, title }) {
   );
 }
 
-/* `sittings` (from sittingsFor) are the day's share in chunks; with more than
-   one, the line lists the pieces under the bar. `now` (from owedNow) is what
-   the Now page passes: the sitting that has arrived and what is owed by it,
-   missed earlier pieces included. */
-function QuotaLine({ project, quota, onLog, onOpen, compact = false, verdict = null, sittings = null, now = null }) {
+function QuotaLine({ project, quota, onLog, onOpen, compact = false, verdict = null }) {
   const [n, setN] = useState('');
   const submit = () => { const v = Number(n); if (v > 0) { onLog(v); setN(''); } };
   const unit = project.unit || '';
   const pct = quota.need ? Math.min(1, quota.done / quota.need) : (quota.met ? 1 : 0);
-  const pieces = (sittings || []).filter((s) => s.amount == null || s.amount > 0);
-  const chunked = pieces.length > 1;
-  const owed = now && now.owed != null ? now.owed : null;
   return (
     <div className={`quota-line${quota.met ? ' met' : ''}${compact ? ' compact' : ''}`} style={{ '--qcolour': project.color }}>
       <button className="quota-main" onClick={onOpen}>
@@ -287,26 +311,15 @@ function QuotaLine({ project, quota, onLog, onOpen, compact = false, verdict = n
             ? `${quota.total}/${quota.target} ${unit}`.trim()
             : quota.met
               ? `${tx('done', 'تم')} · ${quota.done} ${unit}`.trim()
-              : owed != null && chunked
-                ? `${owed} ${unit} ${tx('now', 'الآن')} · ${tx('sitting', 'جلسة')} ${now.sitting.index + 1}/${pieces.length} · ${quota.done}/${quota.need} ${tx('today', 'اليوم')}`.trim()
-                : `${quota.done}/${quota.need} ${unit} ${tx('today', 'اليوم')}`.trim()}
+              : `${quota.done}/${quota.need} ${unit} ${tx('today', 'اليوم')}`.trim()}
         </span>
         <span className="quota-bar"><span style={{ width: `${pct * 100}%` }} /></span>
-        {chunked && (
-          <span className="quota-sits">
-            {pieces.map((s) => (
-              <span key={s.index} className={`quota-sit${s.met ? ' met' : ''}${now && now.sitting.index === s.index ? ' cur' : ''}`}>
-                {s.met ? <Check size={10} /> : null}{bName(blockById(s.block))}{s.start ? ` ${s.start}` : ''}{s.amount != null ? ` · ${s.amount}` : ''}
-              </span>
-            ))}
-          </span>
-        )}
       </button>
       {!quota.met && (
         <span className="quota-log">
           <input type="number" min="0" inputMode="numeric" value={n} onChange={(e) => setN(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
-            placeholder={owed != null ? String(owed) : quota.need != null ? String(Math.max(0, quota.need - quota.done)) : '0'}
+            placeholder={quota.need != null ? String(Math.max(0, quota.need - quota.done)) : '0'}
             aria-label={`${tx('Log progress on', 'سجّل تقدمًا في')} ${project.name}`} />
           <button className="ghost sm" onClick={submit} disabled={!(Number(n) > 0)}><Plus size={13} /></button>
         </span>
@@ -316,7 +329,7 @@ function QuotaLine({ project, quota, onLog, onOpen, compact = false, verdict = n
   );
 }
 
-function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHabit, labelById, projectById = () => null, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over, events = [], cards = [], onAddCard, addedCards, onToggleCalEvent, parseHint, onOpenSpan, suggestLabels = [], suggestProjects = [] }) {
+function BlockRow({ block, start, end, tasks, habits = [], sittings = [], onToggleSitting, sittingsTickable = true, habitDate, onToggleHabit, labelById, projectById = () => null, current, prayer, onPrayer, onToggle, onToggleSub, onOpen, onAdd, onDragStart, dragActive, dragOver, draggingId, over, events = [], cards = [], onAddCard, addedCards, onToggleCalEvent, parseHint, onOpenSpan, suggestLabels = [], suggestProjects = [] }) {
   const [folded, setFolded] = useState(() => new Set()); // collapsed subtask lists, per task id (session-local)
   const toggleFold = (id) => setFolded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const [quick, setQuick] = useState('');
@@ -361,7 +374,15 @@ function BlockRow({ block, start, end, tasks, habits = [], habitDate, onToggleHa
           <span className="prayer-title">{tx(`${block.name} prayer`, `صلاة ${block.ar}`)}</span>
         </div>
       )}
-      {tasks.length === 0 && habits.length === 0 && fixtures.length === 0 && !adding && <button className="empty" onClick={() => setAdding(true)}>{bHint(block)}</button>}
+      {/* A project's sittings open the period, the way a habit does until it
+          is dragged somewhere else. */}
+      {sittings.map(({ project, sitting, streak }) => (
+        <div key={`st-${project.id}-${sitting.key}`} className="block-habit block-sitting">
+          <SittingLine project={project} sitting={sitting} streak={streak} tickable={sittingsTickable}
+            onToggle={() => onToggleSitting && onToggleSitting(project, sitting)} />
+        </div>
+      ))}
+      {tasks.length === 0 && habits.length === 0 && sittings.length === 0 && fixtures.length === 0 && !adding && <button className="empty" onClick={() => setAdding(true)}>{bHint(block)}</button>}
       {rows.map((row, ri) => {
         if (row.kind === 'habit') { const h = row.h;
           const hBefore = taskDrop && taskDrop.habitId === h.id && !taskDrop.after;
@@ -1155,4 +1176,4 @@ function PointsPanel({ balance, ledger, rewards, penalties = [], onClose, onAddR
 /* ------------------------------------------------------------------ */
 /*  Habits — daily commitments; streaks glow brighter up to seven days */
 /* ------------------------------------------------------------------ */
-export { AppIcon,BlockRow,DurationInput,PaceChip,PaceStrip,ProjectTag,QuickAdd,QuotaLine,TokenSuggest,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };
+export { SittingLine,AppIcon,BlockRow,DurationInput,PaceChip,PaceStrip,ProjectTag,QuickAdd,QuotaLine,TokenSuggest,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath };
