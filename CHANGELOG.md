@@ -9,6 +9,8 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## [3.8] — 2026-10-12 · Desktop 1.13.0
+
 Focus becomes **Bubbles** (desktop).
 
 - A bubble is made by dragging things onto it: a program or its shortcut, a
