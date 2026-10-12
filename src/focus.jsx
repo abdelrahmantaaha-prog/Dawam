@@ -943,8 +943,8 @@ function FocusSettings({ api, settings, templates, onSaved }) {
           <option value="brave">{tx('Brave', 'Brave')}</option>
         </select>
         <small className="hint-text">{tx(
-          'The bubble browser never loads a page outside the bubble. Brave is held to the bubble by the Rhythm extension (below); without it, a Brave window on another site is minimized instead.',
-          'متصفح الفقاعة لا يحمّل أبدًا صفحة خارج الفقاعة. أما Brave فتمسكه إضافة ريذم (أدناه) داخل الفقاعة؛ ومن دونها تُصغَّر نافذة Brave على أي موقع آخر.')}</small>
+          'The bubble browser never loads a page outside the bubble. During a round, links you click in other apps open there too — the Rhythm extension (below) moves them out of Brave; the rest of the time they open in Brave as always. Brave stays one click away: “Open in Brave” in the bubble browser’s toolbar and right-click menu.',
+          'متصفح الفقاعة لا يحمّل أبدًا صفحة خارج الفقاعة. أثناء الجولة تُفتح فيه أيضًا الروابط التي تنقرها في التطبيقات الأخرى — تنقلها إضافة ريذم (أدناه) من Brave؛ وفي بقية الوقت تُفتح في Brave كالمعتاد. ويبقى Brave على بُعد نقرة: «افتح في Brave» في شريط أدوات متصفح الفقاعة وقائمة النقر بالزر الأيمن.')}</small>
       </label>
       {num('settleSec', tx('Settling seconds', 'ثواني الاستقرار'), 0, 30, tx('Browser pages only: a page that is still loading is not judged by its loading title. Apps are judged the moment they are in front.', 'صفحات المتصفح فقط: الصفحة أثناء التحميل لا تُحاكم بعنوانها المؤقت. التطبيقات تُحاكم لحظة ظهورها.'))}
       <BraveCompanion api={api} />

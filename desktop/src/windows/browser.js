@@ -54,6 +54,9 @@ $('back').addEventListener('click', () => b.back());
 $('forward').addEventListener('click', () => b.forward());
 $('reload').addEventListener('click', () => b.reload());
 $('newtab').addEventListener('click', () => b.newTab());
+// Brave, when this browser will not do — shown only if Brave is installed.
+$('brave').addEventListener('click', () => b.openInBrave());
+b.hasBrave().then((yes) => { $('brave').hidden = !yes; });
 
 b.onTabs(renderTabs);
 b.onExtensions(renderExtensions);

@@ -111,7 +111,12 @@ async function loop() {
 
 // Workers sleep. Every way this one wakes up re-opens the question.
 chrome.runtime.onInstalled.addListener(() => { chrome.alarms.create('rhythm', { periodInMinutes: 0.5 }); loop(); });
-chrome.runtime.onStartup.addListener(() => { chrome.alarms.create('rhythm', { periodInMinutes: 0.5 }); loop(); });
+chrome.runtime.onStartup.addListener(() => {
+  // Brave just started: the tabs it brings back are not links from other apps.
+  chrome.storage.session.set({ startedAt: Date.now() });
+  chrome.alarms.create('rhythm', { periodInMinutes: 0.5 });
+  loop();
+});
 chrome.alarms.onAlarm.addListener(() => loop());
 /* "Let this site in" from blocked.html. Only this worker talks to Rhythm, and
    Rhythm only accepts it from an extension, with the header below. */
@@ -126,6 +131,46 @@ async function letIn(url) {
     return await r.json();
   } catch { return { ok: false }; }
 }
+
+/* Links from other apps, during a round.
+
+   A link clicked in Corpus, Claude, an email or a PDF opens in Brave, the
+   default browser. While a bubble runs, Rhythm would rather it opened in the
+   bubble browser — so the tab is offered to Rhythm, and closed here if Rhythm
+   took it. The rest of the time Brave is left to be Brave.
+
+   What counts as "a link from another app": a page Brave opened because a
+   program asked it to — Brave marks that navigation "start_page" (seen on
+   this machine; Chromium documents "auto_toplevel" for the same thing, so
+   both count) — in an ordinary window. Not a bookmark, not an address typed here, not a
+   link followed inside Brave, not an app window (Corpus shows itself in
+   one), not the tabs Brave brings back when it starts, and not a page Rhythm
+   itself sent to Brave (Rhythm turns those down). */
+async function offer(details) {
+  if (details.frameId !== 0 || !['start_page', 'auto_toplevel'].includes(details.transitionType)) return;
+  const { bubble, startedAt } = await chrome.storage.session.get(['bubble', 'startedAt']);
+  if (!bubble || !bubble.active) return;
+  if (startedAt && Date.now() - startedAt < 10000) return;
+  let url = details.url;
+  if (url.startsWith(BLOCKED)) url = decodeURIComponent(url.slice(BLOCKED.length + 1));
+  if (!/^https?:/.test(url)) return;
+  try {
+    const tab = await chrome.tabs.get(details.tabId);
+    const win = await chrome.windows.get(tab.windowId);
+    if (win.type !== 'normal') return;
+  } catch { return; }
+  if (!base) base = await findRhythm();
+  if (!base) return;
+  try {
+    const r = await fetch(`${base}/bubble/take`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Rhythm': '1' },
+      body: JSON.stringify({ url }), signal: AbortSignal.timeout(4000)
+    });
+    const { taken } = await r.json();
+    if (taken) await chrome.tabs.remove(details.tabId);
+  } catch { /* Rhythm away: the tab stays in Brave */ }
+}
+chrome.webNavigation.onCommitted.addListener((d) => { offer(d); });
 
 chrome.runtime.onMessage.addListener((m, _sender, reply) => {
   if (m && m.type === 'wake') loop();

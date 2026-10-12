@@ -555,6 +555,7 @@ if (!app.requestSingleInstanceLock()) {
     bubbles.wire();
     bubbles.startBridge();
     bubbles.restoreTaskbar();
+    bubbles.refreshIcons().then(() => broadcast('data-changed')).catch(() => {});
 
     // Free times: scheduled windows when the hard-block list is ignored.
     // Lines like "20:00-23:00" (daily) or "fri,sat 14:00-02:00" (24h clock;

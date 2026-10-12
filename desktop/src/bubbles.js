@@ -246,10 +246,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
      window, or the bubble browser on its new-tab page (which lists the
      bubble's sites). */
   function openBrowserHome() {
-    if (store.data.settings.bubbleSites === 'brave') {
-      const exe = braveExe();
-      if (exe) { spawn(exe, ['--new-window'], { detached: true, stdio: 'ignore' }).unref(); return; }
-    }
+    if (store.data.settings.bubbleSites === 'brave' && toBrave(null)) return;
     openBrowser();
   }
 
@@ -275,14 +272,34 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     menu.popup({ window: win, x: Math.round(at && at.x || 0), y: Math.round(at && at.y || 0) });
   }
 
+  /* Sending a page to Brave on purpose. During a round the Rhythm extension
+     moves links that arrive in Brave from other apps into the bubble browser
+     (see takeLink); a page Rhythm itself just sent must not be moved straight
+     back, so it is remembered for a few seconds. In a bubble, Brave is still
+     held to the bubble's sites by the extension. */
+  const sentToBrave = new Map();   // url -> when
+  function toBrave(url) {
+    const exe = braveExe();
+    if (!exe) return false;
+    if (url) sentToBrave.set(url, Date.now());
+    spawn(exe, url ? [url] : ['--new-window'], { detached: true, stdio: 'ignore' }).unref();
+    return true;
+  }
+
+  /* A link that arrived in Brave from another app, offered by the extension.
+     Taken into the bubble browser only while a bubble runs — the rest of the
+     time Brave is simply where links go. */
+  function takeLink(url) {
+    const s = sessions.getState();
+    if (s.phase !== 'work' || !s.strict || !/^https?:\/\//i.test(url || '')) return false;
+    for (const [u, at] of sentToBrave) if (Date.now() - at > 15000) sentToBrave.delete(u);
+    if (sentToBrave.has(url)) return false;
+    openBrowser(url);
+    return true;
+  }
+
   function openSite(url) {
-    if (store.data.settings.bubbleSites === 'brave') {
-      const exe = braveExe();
-      if (exe) {
-        spawn(exe, [url], { detached: true, stdio: 'ignore' }).unref();
-        return { ok: true, how: 'brave' };
-      }
-    }
+    if (store.data.settings.bubbleSites === 'brave' && toBrave(url)) return { ok: true, how: 'brave' };
     openBrowser(url);
     return { ok: true, how: 'rhythm' };
   }
@@ -290,11 +307,39 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
   /* ------------------------------------------------------------------ */
   /*  Drops                                                             */
   /* ------------------------------------------------------------------ */
+  /* A program's icon. A shortcut can name an icon of its own — Corpus's does
+     (launcher\corpus.ico), because Corpus.exe carries none and Windows would
+     show the blank "program" picture for it. So a shortcut's own icon comes
+     first, then the icon of whatever it points at. */
   async function iconOf(file) {
     try {
+      if (/\.lnk$/i.test(file)) {
+        const link = shell.readShortcutLink(file);
+        const own = link && link.icon;
+        if (own && fs.existsSync(own)) {
+          const img = /\.(ico|png)$/i.test(own) ? nativeImage.createFromPath(own) : await app.getFileIcon(own, { size: 'large' });
+          if (!img.isEmpty()) return img.resize({ width: 48, height: 48, quality: 'best' }).toDataURL();
+        }
+        if (link && link.target) file = link.target;
+      }
       const img = await app.getFileIcon(file, { size: 'large' });
       return img.isEmpty() ? null : img.toDataURL();
     } catch { return null; }
+  }
+
+  /* Bubbles saved before an icon could be read properly keep the picture
+     they were saved with. On launch, each app that was dropped as a shortcut
+     has its icon read again, and the bubble is saved if any changed. */
+  async function refreshIcons() {
+    let changed = false;
+    for (const t of store.data.templates || []) {
+      for (const it of t.items || []) {
+        if (it.kind !== 'app' || !/\.lnk$/i.test(it.launch || '')) continue;
+        const icon = await iconOf(it.launch);
+        if (icon && icon !== it.icon) { it.icon = icon; changed = true; }
+      }
+    }
+    if (changed) store.save();
   }
 
   const prettyName = (file) => path.win32.basename(file).replace(/\.(exe|lnk|url)$/i, '');
@@ -526,6 +571,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     const items = [];
     if (p.linkURL) {
       items.push({ label: 'Open link in new tab', click: () => newTab(p.linkURL) });
+      if (braveExe()) items.push({ label: 'Open link in Brave', click: () => toBrave(p.linkURL) });
       items.push({ label: 'Copy link address', click: () => clipboard.writeText(p.linkURL) });
       items.push({ type: 'separator' });
     }
@@ -540,6 +586,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
       { label: 'Forward', enabled: wc.navigationHistory.canGoForward(), click: () => wc.navigationHistory.goForward() },
       { label: 'Reload', click: () => wc.reload() }
     );
+    if (braveExe()) items.push({ type: 'separator' }, { label: 'Open this page in Brave', click: () => toBrave(tabInfo(t).url) });
     Menu.buildFromTemplate(items).popup({ window: browserWin });
   }
 
@@ -823,7 +870,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
        from an extension page and carry a custom header. A web page can do
        neither (the header forces a CORS preflight this server never
        answers), so no site can widen your bubble on its own. */
-    function add(req, res) {
+    function fromExtension(req, res, then) {
       const origin = String(req.headers.origin || '');
       if (!origin.startsWith('chrome-extension://') || req.headers['x-rhythm'] !== '1') {
         res.writeHead(403); res.end(); return;
@@ -831,11 +878,26 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
       let body = '';
       req.on('data', (c) => { body += c; if (body.length > 4096) req.destroy(); });
       req.on('end', () => {
-        let site = null;
-        try { site = addSite(JSON.parse(body).url); } catch { /* bad body */ }
-        res.writeHead(site ? 200 : 409, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: !!site, domain: site ? site.domain : null }));
+        let msg = {};
+        try { msg = JSON.parse(body) || {}; } catch { /* bad body */ }
+        const out = then(msg);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(out));
       });
+    }
+
+    function add(req, res) {
+      fromExtension(req, res, (msg) => {
+        const site = addSite(msg.url);
+        return { ok: !!site, domain: site ? site.domain : null };
+      });
+    }
+
+    /* POST /bubble/take {url}: a link that just arrived in Brave from another
+       app. { taken: true } means it is open in the bubble browser now and the
+       extension closes Brave's tab. Same guard as /bubble/add. */
+    function take(req, res) {
+      fromExtension(req, res, (msg) => ({ taken: takeLink(msg.url) }));
     }
 
     /* GET /bubble?since=N holds the request open (up to 20 s) until the bubble
@@ -843,6 +905,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     function handle(req, res) {
       const url = new URL(req.url, 'http://127.0.0.1');
       if (req.method === 'POST' && url.pathname === '/bubble/add') { add(req, res); return; }
+      if (req.method === 'POST' && url.pathname === '/bubble/take') { take(req, res); return; }
       if (req.method !== 'GET' || url.pathname !== '/bubble') { res.writeHead(404); res.end(); return; }
       lastSeen = Date.now();
       const since = Number(url.searchParams.get('since'));
@@ -928,6 +991,9 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     ipcMain.handle('bb-back', () => { const t = active(); if (t) t.view.webContents.navigationHistory.goBack(); });
     ipcMain.handle('bb-forward', () => { const t = active(); if (t) t.view.webContents.navigationHistory.goForward(); });
     ipcMain.handle('bb-reload', () => { const t = active(); if (t) t.view.webContents.reload(); });
+    // The page in front, handed to Brave (a refused page hands over the page it stands for).
+    ipcMain.handle('bb-open-in-brave', () => { const t = active(); if (t) toBrave(tabInfo(t).url); });
+    ipcMain.handle('bb-has-brave', () => !!braveExe());
     ipcMain.handle('bb-ext-popup', (_e, id) => extensionPopup(id));
     ipcMain.handle('bb-ready', () => { sendTabs(); sendExtensions(); });
   }
@@ -939,10 +1005,12 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     startRound,
     handOffToBrave,
     openBrowser,
+    braveExe,
     setBraveExtensions,
     addSite,
     startBridge: () => { bridge.start(); companionFolder(); },
     restoreTaskbar,
+    refreshIcons,
     stop: () => { bridge.stop(); hideWall(); if (barWins.length) hideBar(); },
   };
 }

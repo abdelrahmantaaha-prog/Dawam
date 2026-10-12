@@ -9,6 +9,15 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+Links follow the round (desktop 1.17.0, Brave extension 1.3.0).
+
+- During a round, a link clicked in another app opens in the bubble browser
+  instead of Brave; the rest of the time Brave is where links go, as before.
+  The Rhythm extension does the moving, so Brave stays the default browser.
+- "Open in Brave" sits in the bubble browser's toolbar and right-click menu,
+  for the pages that need Brave.
+- Apps dropped as a shortcut show the shortcut's own icon (Corpus has one).
+
 One browser button, and local apps in a bubble (desktop 1.16.0).
 
 - A bubble's sites no longer take a slot each on the bubble bar, the wall or

@@ -97,6 +97,8 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
     forward: () => ipcRenderer.invoke('bb-forward'),
     reload: () => ipcRenderer.invoke('bb-reload'),
     extensionPopup: (id) => ipcRenderer.invoke('bb-ext-popup', id),
+    openInBrave: () => ipcRenderer.invoke('bb-open-in-brave'),
+    hasBrave: () => ipcRenderer.invoke('bb-has-brave'),
     onTabs: (cb) => sub('bb-tabs', (_e, tabs) => cb(tabs)),
     onExtensions: (cb) => sub('bb-extensions', (_e, list) => cb(list)),
     onFocusAddress: (cb) => sub('bb-focus-address', () => cb()),
