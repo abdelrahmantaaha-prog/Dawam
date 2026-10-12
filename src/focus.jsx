@@ -15,7 +15,7 @@
 /* ------------------------------------------------------------------ */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Play, Pause, Square, SkipForward, Timer, ShieldCheck, AlertTriangle, Check, X, Trash2, Save, Settings as SettingsIcon, Flame, Eye } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Pause, Square, SkipForward, Timer, ShieldCheck, AlertTriangle, Check, X, Trash2, Save, Settings as SettingsIcon, Flame, Eye, Plus, RefreshCw, Globe, AppWindow, FolderOpen } from 'lucide-react';
 import { tx, fmtTime } from './core.jsx';
 import { fmtFocus } from './projectfocus.js';
 import { modeKey } from './focusmode.js';
@@ -31,6 +31,35 @@ const mmss = (sec) => {
 const asMin = (sec) => Math.round((Number(sec) || 0) / 60);
 const listToText = (a) => (Array.isArray(a) ? a.join('\n') : '');
 const textToList = (s) => String(s || '').split(/[\n,]/).map((x) => x.trim()).filter(Boolean);
+
+/* ------------------------------------------------------------------ */
+/*  Bubble items, as the planner holds them.                           */
+/*                                                                     */
+/*  The shell (desktop/src/bubble.js) is the authority on what an item  */
+/*  lets through; the planner only needs to show items, add to a list   */
+/*  without doubles, and read the words a bubble saved before bubbles   */
+/*  existed. An item is { kind: 'app', exe, name, icon } or             */
+/*  { kind: 'site', domain, name } or { kind: 'word', text }.           */
+/* ------------------------------------------------------------------ */
+const BROWSER_EXES = ['chrome', 'msedge', 'brave', 'firefox', 'opera', 'vivaldi', 'arc', 'zen', 'iron', 'librewolf'];
+const exeBase = (p) => String(p || '').toLowerCase().split(/[\\/]/).pop().replace(/\.exe$/, '');
+export const itemKey = (it) => (it.kind === 'app' ? `app:${exeBase(it.exe)}` : it.kind === 'site' ? `site:${it.domain}` : `word:${it.text}`);
+export const isBrowserItem = (it) => it.kind === 'app' && BROWSER_EXES.includes(exeBase(it.exe));
+export function mergeItems(list, more) {
+  const out = [...(list || [])];
+  const seen = new Set(out.map(itemKey));
+  for (const it of more || []) {
+    if (!it || seen.has(itemKey(it))) continue;
+    seen.add(itemKey(it));
+    out.push(it);
+  }
+  return out;
+}
+// A bubble saved before bubbles holds only words.
+export const itemsOf = (tpl) => (tpl && Array.isArray(tpl.items) ? tpl.items
+  : ((tpl && tpl.allowed) || []).map((w) => ({ kind: 'word', text: String(w).toLowerCase() })));
+const wordsOf = (items) => (items || []).map((it) => (it.kind === 'app' ? exeBase(it.exe) : it.kind === 'site' ? it.domain : it.text));
+const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
 
 /* Live session state + the store's data, kept in step with the main process.
    Every listener the bridge hands out returns its own unsubscribe, so a
@@ -124,7 +153,8 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
   const [taskId, setTaskId] = useState('');
   const [title, setTitle] = useState('');
   const [minutes, setMinutes] = useState(50);
-  const [cleared, setCleared] = useState('');
+  // What is inside this round's bubble: apps, sites, and words.
+  const [items, setItems] = useState([]);
   /* Where the minutes go. Picking a task fills it from the task's project (or
      its tag's); a round on a typed title can name one by hand; a rest round
      has none. */
@@ -171,9 +201,9 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
        for the previous task is lifted. */
     const tpl = t.mode ? templates.find((x) => modeKey(x.id) === t.mode.id) : null;
     if (tpl) {
-      setTplId(tpl.id); setTplName(tpl.name); setCleared(listToText(tpl.allowed)); setTplAuto(true);
+      setTplId(tpl.id); setTplName(tpl.name); setItems(itemsOf(tpl)); setTplAuto(true);
     } else if (tplAuto) {
-      setTplId(''); setCleared(''); setTplAuto(false);
+      setTplId(''); setItems([]); setTplAuto(false);
     }
     // The task's own length beats the mode's: a 20-minute task under a
     // 90-minute mode is still a 20-minute task.
@@ -182,11 +212,11 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
 
   const useTemplate = (tpl) => {
     setTplAuto(false);
-    if (tplId === tpl.id) { setTplId(''); setCleared(''); return; }  // tap again to lift it
+    if (tplId === tpl.id) { setTplId(''); setItems([]); return; }  // tap again to lift it
     setTplId(tpl.id);
     setTplName(tpl.name);
     setMinutes(clamp(Number(tpl.workMin) || 50, 1, 240));
-    setCleared(listToText(tpl.allowed));
+    setItems(itemsOf(tpl));
   };
 
   useEffect(() => {
@@ -196,11 +226,11 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
   const start = async () => {
     const task = title.trim();
     if (!task) return;
-    const allowed = textToList(cleared);
+    const allowed = wordsOf(items);
     let useId = tplId || null;
     if (saveTpl) {
       const name = (tplName.trim() || task).trim();
-      const list = await api.saveTemplate({ id: tplId || null, name, workMin: minutes, allowed });
+      const list = await api.saveTemplate({ id: tplId || null, name, workMin: minutes, items, allowed });
       const saved = (list || []).find((t) => String(t.name).toLowerCase() === name.toLowerCase());
       if (saved) useId = saved.id;
     }
@@ -210,7 +240,7 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
     const realTask = taskId && !String(taskId).startsWith('reward:') ? taskId : null;
     const resting = String(taskId || '').startsWith('reward:');
     const pid = !resting && projects.some((p) => p.id === projectId) ? projectId : null;
-    await api.startWork({ task, workMin: minutes, allowed, taskId: realTask, templateId: useId, projectId: pid });
+    await api.startWork({ task, workMin: minutes, items, allowed, taskId: realTask, templateId: useId, projectId: pid });
     if (remember && canRemember && onRememberMode) {
       onRememberMode({ kind: remember, task: picked, modeId: useId == null ? null : modeKey(useId) });
       setRemember('');
@@ -223,9 +253,9 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
   return (
     <div className="view focus-view">
       <div className="focus-tabs">
-        <button className={tab === 'focus' ? 'on' : ''} onClick={() => setTab('focus')}><Timer size={15} /> {tx('Focus', 'تركيز')}</button>
+        <button className={tab === 'focus' ? 'on' : ''} onClick={() => setTab('focus')}><Timer size={15} /> {tx('Bubbles', 'الفقاعات')}</button>
         <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}><Flame size={15} /> {tx('Tally', 'الحصيلة')}</button>
-        <button className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}><SettingsIcon size={15} /> {tx('Focus settings', 'إعدادات التركيز')}</button>
+        <button className={tab === 'settings' ? 'on' : ''} onClick={() => setTab('settings')}><SettingsIcon size={15} /> {tx('Bubble settings', 'إعدادات الفقاعات')}</button>
       </div>
 
       {pendingRound && (
@@ -323,20 +353,35 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
               </div>
             </div>
 
-            <label className="field">
-              <span>{tplId ? `${tx('Allowed by', 'مسموح حسب')} “${tplName}”` : tx('Allowed in this round', 'المسموح في هذه الجولة')}</span>
-              <textarea rows={2} value={cleared} onChange={(e) => setCleared(e.target.value)}
-                placeholder={tx('one site or app per line, e.g. docs.google.com or code', 'موقع أو تطبيق في كل سطر، مثل docs.google.com أو code')} />
-            </label>
-            <p className="hint-text">
-              {textToList(cleared).length
-                ? tx('Only these are open. Every other site and app is closed the moment it comes to the front.', 'هذه وحدها مفتوحة. أي موقع أو تطبيق آخر يُغلق فور ظهوره في المقدمة.')
-                : tx('No allow list: nothing is blocked this round.', 'لا قائمة سماح: لا شيء محظور في هذه الجولة.')}
-            </p>
+            {/* Your bubbles, first: picking one fills the board below. */}
+            {templates.length > 0 && (
+              <div className="bubble-picks">
+                <span className="bubble-picks-label">{tx('Your bubbles', 'فقاعاتك')}</span>
+                {templates.map((tpl) => {
+                  const its = itemsOf(tpl);
+                  return (
+                    <span key={tpl.id} className={`bubble-pick${tplId === tpl.id ? ' on' : ''}`}>
+                      <button className="bubble-pick-name" onClick={() => useTemplate(tpl)} title={tx('Tap again to lift it', 'انقر مرة أخرى لرفعها')}>
+                        <span className="bubble-pick-dots">{its.filter((i) => i.kind !== 'word').slice(0, 4).map((i) => (
+                          i.icon ? <img key={itemKey(i)} src={i.icon} alt="" /> : <span key={itemKey(i)} style={{ background: `hsl(${hue(i.domain || i.name || i.text)} 45% 42%)` }} />
+                        ))}</span>
+                        {tpl.name}
+                        <span className="ttime">{tpl.workMin}m</span>
+                      </button>
+                      <button className="bubble-pick-del" onClick={async () => { if (tplId === tpl.id) { setTplId(''); setItems([]); } await api.deleteTemplate(tpl.id); reload(); }}
+                        aria-label={tx('Delete bubble', 'حذف الفقاعة')}><Trash2 size={12} /></button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+
+            <BubbleBoard api={api} items={items} onChange={setItems}
+              title={tplId ? `${tx('Inside', 'داخل')} “${tplName}”` : tx('Inside this bubble', 'داخل هذه الفقاعة')} />
             {tplAuto && tplId && picked && picked.mode && (
               <p className="hint-text focus-modeauto">
-                {tx(`“${tplName}” loaded — remembered for this ${picked.mode.from === 'task' ? 'task' : picked.mode.from === 'tag' ? 'tag' : 'project'}. Pick another mode or tap it to lift it for this round.`,
-                  `حُمّل «${tplName}» — محفوظ لهذه ${picked.mode.from === 'task' ? 'المهمة' : picked.mode.from === 'tag' ? 'الوسم' : 'المشروع'}. اختر نمطًا آخر أو انقر عليه لرفعه في هذه الجولة.`)}
+                {tx(`“${tplName}” loaded — remembered for this ${picked.mode.from === 'task' ? 'task' : picked.mode.from === 'tag' ? 'tag' : 'project'}. Pick another bubble or tap it to lift it for this round.`,
+                  `حُمّلت «${tplName}» — محفوظة لهذه ${picked.mode.from === 'task' ? 'المهمة' : picked.mode.from === 'tag' ? 'الوسم' : 'المشروع'}. اختر فقاعة أخرى أو انقر عليها لرفعها في هذه الجولة.`)}
               </p>
             )}
 
@@ -345,7 +390,7 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
                 applied or about to be saved — or to forget. */}
             {canRemember && !tplAuto && (tplId || saveTpl || pickedMode) && (
               <label className="field focus-remember">
-                <span>{tplId || saveTpl ? tx('Load this mode automatically for', 'حمّل هذا النمط تلقائيًا لـ') : tx('Stop loading a mode for', 'أوقف تحميل نمط لـ')}</span>
+                <span>{tplId || saveTpl ? tx('Load this bubble automatically for', 'حمّل هذه الفقاعة تلقائيًا لـ') : tx('Stop loading a bubble for', 'أوقف تحميل فقاعة لـ')}</span>
                 <select value={remember} onChange={(e) => setRemember(e.target.value)}>
                   <option value="">{tx('— just this round —', '— هذه الجولة فقط —')}</option>
                   <option value="task">{tx('this task', 'هذه المهمة')} · {picked.title}</option>
@@ -357,39 +402,20 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
 
             <label className="check">
               <input type="checkbox" checked={saveTpl} onChange={(e) => { setSaveTpl(e.target.checked); if (e.target.checked && !tplName) setTplName(title.trim()); }} />
-              <span>{tplId ? tx('Update this focus mode', 'حدّث نمط التركيز هذا') : tx('Save this allow list as a focus mode', 'احفظ قائمة السماح هذه كنمط تركيز')}</span>
+              <span>{tplId ? tx('Update this bubble', 'حدّث هذه الفقاعة') : tx('Save this as a bubble', 'احفظها فقاعة')}</span>
             </label>
             {saveTpl && (
               <label className="field">
-                <span>{tx('Name it', 'سمِّه')}</span>
+                <span>{tx('Name it', 'سمِّها')}</span>
                 <input value={tplName} onChange={(e) => setTplName(e.target.value)}
                   placeholder={tx('Deep work, Admin, Reading…', 'عمل عميق، إداري، قراءة…')} />
-                <span className="hint-text">{tx('A focus mode is an allow list, not a task — you can use it with any task.', 'نمط التركيز قائمة سماح لا مهمة — يمكنك استخدامه مع أي مهمة.')}</span>
+                <span className="hint-text">{tx('A bubble is a place, not a task — you can use it with any task.', 'الفقاعة مكان لا مهمة — يمكنك استخدامها مع أي مهمة.')}</span>
               </label>
             )}
 
             <button className="primary focus-block" onClick={start} disabled={!title.trim()}>
-              <Play size={16} /> {tx('Start focusing', 'ابدأ التركيز')}
+              <Play size={16} /> {items.length ? tx('Enter the bubble', 'ادخل الفقاعة') : tx('Start focusing', 'ابدأ التركيز')}
             </button>
-
-            {templates.length > 0 && (
-              <div className="focus-templates">
-                <h4 className="focus-h4">{tx('Focus modes', 'أنماط التركيز')}</h4>
-                <p className="hint-text">{tx('Allow lists you can apply to any task. Under one, anything not on the list is blocked.', 'قوائم سماح يمكن تطبيقها على أي مهمة. تحتها، يُحظر كل ما ليس في القائمة.')}</p>
-                {templates.map((tpl) => (
-                  <div key={tpl.id} className={`focus-tplrow${tplId === tpl.id ? ' on' : ''}`}>
-                    <button className="focus-tplname" onClick={() => useTemplate(tpl)}>
-                      <span>{tpl.name}</span>
-                      <span className="ttime">{tpl.workMin}m</span>
-                      {tpl.allowed?.length ? <span className="focus-strict"><ShieldCheck size={12} /> {tpl.allowed.length} {tx('allowed', 'مسموح')}</span> : null}
-                      {tplId === tpl.id ? <span className="focus-applied">{tx('applied', 'مطبّق')}</span> : null}
-                    </button>
-                    <button className="ghost sm" onClick={async () => { if (tplId === tpl.id) { setTplId(''); } await api.deleteTemplate(tpl.id); reload(); }}
-                      aria-label={tx('Delete focus mode', 'حذف نمط التركيز')}><Trash2 size={14} /></button>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         ))}
 
@@ -413,7 +439,7 @@ function LiveSession({ api, state, projects = [] }) {
     <div className={`focus-card focus-live ${cls}`}>
       <span className="focus-phase">
         {breakPhase ? tx('Break', 'استراحة') : s.paused ? tx('Paused', 'موقوف') : tx('Focusing', 'تركيز')}
-        {!breakPhase && s.strict ? <span className="focus-strict"><ShieldCheck size={12} /> {tx('allow list', 'قائمة سماح')}</span> : null}
+        {!breakPhase && s.strict ? <span className="focus-strict"><ShieldCheck size={12} /> {s.bubbleName ? `${tx('bubble', 'فقاعة')} · ${s.bubbleName}` : tx('bubble', 'فقاعة')}</span> : null}
       </span>
       <h3 className="focus-task">{breakPhase ? tx('Stand up. Walk. Hydrate.', 'قف. امشِ. اشرب ماء.') : s.task}</h3>
       {!breakPhase && s.projectId && (() => {
@@ -434,6 +460,10 @@ function LiveSession({ api, state, projects = [] }) {
         <p className="hint-text focus-current">{tx('In front of you:', 'أمامك:')} {s.current.title}</p>
       )}
 
+      {/* The bubble's own dock, the same one the wall shows: one tap opens
+          the app (or brings it forward) or the site. */}
+      {!breakPhase && s.strict && <LiveDock api={api} state={s} />}
+
       <div className="focus-actions">
         {breakPhase ? (
           <button className="ghost" onClick={() => api.skipBreak()}><SkipForward size={15} /> {tx('End break', 'إنهاء الاستراحة')}</button>
@@ -444,6 +474,177 @@ function LiveSession({ api, state, projects = [] }) {
         )}
         <button className="ghost danger" onClick={() => api.stop()}><Square size={14} /> {tx('Stop', 'إنهاء')}</button>
       </div>
+    </div>
+  );
+}
+
+function LiveDock({ api, state }) {
+  const [items, setItems] = useState([]);
+  const key = JSON.stringify((state.items || []).map(itemKey));
+  useEffect(() => {
+    let alive = true;
+    api.bubble.items().then((full) => { if (alive) setItems(full && full.length ? full : state.items || []); }).catch(() => {});
+    return () => { alive = false; };
+  }, [key]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const shown = items.filter((i) => i.kind !== 'word');
+  if (!shown.length) return null;
+  return (
+    <div className="bubble-tiles live">
+      {shown.map((it) => <BubbleTile key={itemKey(it)} item={it} onOpen={() => api.bubble.open(it)} />)}
+      <button className="bubble-tile ghosted" onClick={() => api.bubble.browser()}>
+        <span className="bubble-ico"><Globe size={18} /></span>
+        <span className="bubble-name">{tx('Bubble browser', 'متصفح الفقاعة')}</span>
+      </button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  One item, as a tile                                                */
+/* ------------------------------------------------------------------ */
+function BubbleTile({ item, onOpen, onRemove }) {
+  const label = item.kind === 'site' ? item.domain : item.kind === 'word' ? tx('keyword', 'كلمة') : isBrowserItem(item) ? tx('any site', 'أي موقع') : tx('app', 'تطبيق');
+  const name = item.kind === 'word' ? `“${item.text}”` : (item.name || item.domain);
+  const Tag = onOpen ? 'button' : 'div';
+  return (
+    <Tag className={`bubble-tile ${item.kind}${isBrowserItem(item) ? ' wide-open' : ''}`} onClick={onOpen}
+      title={item.kind === 'app' ? item.exe : item.kind === 'site' ? item.domain : item.text}>
+      {item.icon
+        ? <img className="bubble-ico" src={item.icon} alt="" />
+        : <span className="bubble-ico letter" style={{ '--h': hue(item.domain || item.name || item.text) }}>
+          {item.kind === 'word' ? '“' : String(name).replace(/^“/, '').charAt(0).toUpperCase()}
+        </span>}
+      <span className="bubble-name">{name}</span>
+      <span className="bubble-sub">{label}</span>
+      {onRemove && (
+        <button className="bubble-x" onClick={(e) => { e.stopPropagation(); onRemove(); }} aria-label={tx('Take it out', 'أخرجه')}><X size={12} /></button>
+      )}
+    </Tag>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  The board: what is inside the bubble, and how things get in.        */
+/*                                                                     */
+/*  Four ways in, all ending in the same tiles:                        */
+/*   - drop a program or its shortcut (from the desktop, Explorer, the */
+/*     Start menu's folder) — it is followed to the program it runs;    */
+/*   - drop a link (from a browser's address bar or any page) — the    */
+/*     site is what goes in, not the one page;                          */
+/*   - drag (or tap) one of the windows open right now;                */
+/*   - type a site, or a keyword the way focus modes used to work.      */
+/* ------------------------------------------------------------------ */
+const DRAG_TYPE = 'application/x-rhythm-item';
+
+function BubbleBoard({ api, items, onChange, title }) {
+  const [over, setOver] = useState(false);
+  const [note, setNote] = useState('');
+  const [typed, setTyped] = useState('');
+  const [open, setOpen] = useState(null);       // the windows open now, once asked for
+  const [loadingOpen, setLoadingOpen] = useState(false);
+
+  const add = (more) => { if (more && more.length) onChange(mergeItems(items, more)); };
+  const remove = (it) => onChange(items.filter((x) => itemKey(x) !== itemKey(it)));
+
+  const loadOpen = async () => {
+    setLoadingOpen(true);
+    try { setOpen(await api.bubble.running()); } catch { setOpen([]); }
+    setLoadingOpen(false);
+  };
+
+  const onDrop = async (e) => {
+    e.preventDefault();
+    setOver(false);
+    setNote('');
+    const dt = e.dataTransfer;
+    const inner = dt.getData(DRAG_TYPE);
+    if (inner) { try { add([JSON.parse(inner)]); } catch { /* not ours after all */ } return; }
+    const files = [...(dt.files || [])];
+    if (files.length) {
+      const paths = files.map((f) => api.bubble.pathFor(f)).filter(Boolean);
+      const { items: got = [], skipped = [] } = (await api.bubble.resolvePaths(paths)) || {};
+      add(got);
+      if (skipped.length) setNote(tx(`Not a program or a link: ${skipped.join(', ')}`, `ليس برنامجًا ولا رابطًا: ${skipped.join('، ')}`));
+      return;
+    }
+    const text = dt.getData('text/uri-list') || dt.getData('text/plain');
+    const site = text ? await api.bubble.resolveUrl(text) : null;
+    if (site) add([site]);
+    else setNote(tx('That did not carry a program or a site.', 'لم يحمل ذلك برنامجًا ولا موقعًا.'));
+  };
+
+  const addTyped = async (e) => {
+    e.preventDefault();
+    const v = typed.trim();
+    if (!v) return;
+    const site = /[./]/.test(v) ? await api.bubble.resolveUrl(v) : null;
+    add([site || { kind: 'word', text: v.toLowerCase() }]);
+    setTyped('');
+  };
+
+  const shownOpen = (open || []).filter((w) => !items.some((it) => itemKey(it) === itemKey(w)));
+  const wideOpen = items.filter(isBrowserItem);
+
+  return (
+    <div className="bubble-board">
+      <div className="bubble-board-head">
+        <span>{title}</span>
+        <span className="hint-text">{items.length ? tx(`${items.length} inside`, `${items.length} في الداخل`) : ''}</span>
+      </div>
+
+      <div className={`bubble-drop${over ? ' over' : ''}${items.length ? '' : ' empty'}`}
+        onDragEnter={(e) => { e.preventDefault(); setOver(true); }}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(false); }}
+        onDrop={onDrop}>
+        {items.length
+          ? <div className="bubble-tiles">{items.map((it) => <BubbleTile key={itemKey(it)} item={it} onRemove={() => remove(it)} />)}</div>
+          : <p className="bubble-drop-hint">
+            {tx('Drop apps and links here — a program or its shortcut from the desktop or Explorer, a link from your browser’s address bar — or drag in one of the windows open now.',
+              'أفلت التطبيقات والروابط هنا — برنامجًا أو اختصاره من سطح المكتب أو المستكشف، أو رابطًا من شريط عنوان المتصفح — أو اسحب إحدى النوافذ المفتوحة الآن.')}
+          </p>}
+      </div>
+
+      <form className="bubble-type" onSubmit={addTyped}>
+        <input value={typed} onChange={(e) => setTyped(e.target.value)}
+          placeholder={tx('Or type a site (docs.google.com) or a keyword', 'أو اكتب موقعًا (docs.google.com) أو كلمة')} />
+        <button className="ghost sm" type="submit" disabled={!typed.trim()}><Plus size={14} /> {tx('Add', 'أضف')}</button>
+      </form>
+
+      <div className="bubble-open">
+        <button className="ghost sm" onClick={loadOpen} disabled={loadingOpen}>
+          {open ? <RefreshCw size={13} className={loadingOpen ? 'spin' : ''} /> : <AppWindow size={13} />}
+          {' '}{open ? tx('Open now', 'المفتوح الآن') : tx('Show the windows open now', 'اعرض النوافذ المفتوحة الآن')}
+        </button>
+        {open && (
+          <div className="bubble-palette">
+            {shownOpen.length === 0 && <span className="hint-text">{tx('Nothing else open.', 'لا شيء آخر مفتوح.')}</span>}
+            {shownOpen.map((w) => (
+              <button key={itemKey(w)} className={`bubble-chip${w.browser ? ' browser' : ''}`} draggable
+                onDragStart={(e) => { e.dataTransfer.setData(DRAG_TYPE, JSON.stringify(w)); e.dataTransfer.effectAllowed = 'copy'; }}
+                onClick={() => add([w])}
+                title={w.browser ? tx('A browser as an app lets in every site. Drop sites instead to allow only those.', 'المتصفح كتطبيق يسمح بكل المواقع. أفلت مواقع بدلًا منه لتسمح بها وحدها.') : w.exe}>
+                {w.icon ? <img src={w.icon} alt="" /> : <AppWindow size={14} />}
+                <span>{w.name}</span>
+                <Plus size={12} />
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {note && <p className="hint-text bubble-note">{note}</p>}
+      {wideOpen.length > 0 && (
+        <p className="hint-text bubble-warn"><AlertTriangle size={12} /> {tx(
+          `${wideOpen.map((i) => i.name).join(', ')} is in as an app, so every site in it is open. To allow only some sites, take it out and drop the sites instead.`,
+          `${wideOpen.map((i) => i.name).join('، ')} في الداخل كتطبيق، فكل المواقع فيه مفتوحة. لتسمح ببعض المواقع فقط، أخرجه وأفلت المواقع بدلًا منه.`)}</p>
+      )}
+      <p className="hint-text">
+        {items.length
+          ? tx('Only these can be in front of you. Anything else is put away the moment it comes forward, and the bubble’s wall covers the rest of the screen.',
+            'هذه وحدها يمكن أن تكون أمامك. أي شيء آخر يُبعَد فور ظهوره، ويغطي جدار الفقاعة بقية الشاشة.')
+          : tx('An empty bubble blocks nothing — the round is just a timer.', 'الفقاعة الفارغة لا تحظر شيئًا — الجولة مجرد مؤقّت.')}
+      </p>
     </div>
   );
 }
@@ -657,8 +858,23 @@ function FocusSettings({ api, settings, templates, onSaved }) {
         {num('breakMin', tx('Break minutes', 'دقائق الاستراحة'), 1, 60)}
       </div>
 
-      <h4 className="focus-h4">{tx('Blocking', 'الحظر')}</h4>
-      {num('settleSec', tx('Settling seconds', 'ثواني الاستقرار'), 0, 30, tx('A page that is still loading is not judged by its loading title. Under a focus mode, anything not allowed is closed once these pass.', 'الصفحة أثناء التحميل لا تُحاكم بعنوانها المؤقت. تحت نمط تركيز، يُغلق غير المسموح بعد مرورها.'))}
+      <h4 className="focus-h4">{tx('Bubbles', 'الفقاعات')}</h4>
+      {toggle('bubbleWall', tx('Cover the screens while a bubble runs', 'غطِّ الشاشات أثناء الفقاعة'),
+        tx('A calm wall behind the things in your bubble, with each of them on it to open. Off, the bubble still puts away everything else — you just see your desktop behind it.',
+          'جدار هادئ خلف ما في فقاعتك، وعليه كل منها لتفتحه. عند إيقافه تظل الفقاعة تُبعد كل ما سواها — لكنك ترى سطح المكتب خلفها.'))}
+      <label className="field">
+        <span>{tx('Sites in a bubble open in', 'تُفتح مواقع الفقاعة في')}</span>
+        <select value={draft.bubbleSites || 'rhythm'} onChange={(e) => save({ bubbleSites: e.target.value })}>
+          <option value="rhythm">{tx('Rhythm’s bubble browser', 'متصفح الفقاعة في ريذم')}</option>
+          <option value="brave">{tx('Brave', 'Brave')}</option>
+        </select>
+        <small className="hint-text">{tx(
+          'The bubble browser never loads a page outside the bubble. Brave is held to the bubble by the Rhythm extension (below); without it, a Brave window on another site is minimized instead.',
+          'متصفح الفقاعة لا يحمّل أبدًا صفحة خارج الفقاعة. أما Brave فتمسكه إضافة ريذم (أدناه) داخل الفقاعة؛ ومن دونها تُصغَّر نافذة Brave على أي موقع آخر.')}</small>
+      </label>
+      {num('settleSec', tx('Settling seconds', 'ثواني الاستقرار'), 0, 30, tx('Browser pages only: a page that is still loading is not judged by its loading title. Apps are judged the moment they are in front.', 'صفحات المتصفح فقط: الصفحة أثناء التحميل لا تُحاكم بعنوانها المؤقت. التطبيقات تُحاكم لحظة ظهورها.'))}
+      <BraveCompanion api={api} />
+      <BraveExtensions api={api} />
 
       <h4 className="focus-h4">{tx('Breaks and the chair', 'الاستراحات والكرسي')}</h4>
       {toggle('breakScreen', tx('Black out the screen on breaks', 'إظلام الشاشة أثناء الاستراحة'))}
@@ -671,8 +887,8 @@ function FocusSettings({ api, settings, templates, onSaved }) {
           'تُغطى كل الشاشات حتى تبدأ جولة بشيء محدّد ومدة. لم يعد هناك خروج مؤقت: الراحة إجابة مقبولة — اختر مكافأة من الأسفل وركّز عليها — أما فتح الجهاز دون تحديد أي شيء فلا.'))}
 
       <h4 className="focus-h4">{tx('Lists', 'القوائم')}</h4>
-      {list('alwaysAllowed', tx('Always allowed', 'مسموح دائمًا'), tx('Added to every focus mode’s allow list — the docs, dictionary or tools you always work from. A round without a focus mode still blocks nothing.', 'تُضاف إلى قائمة المسموح في كل نمط تركيز — المراجع والقاموس والأدوات التي تعمل بها دائمًا. الجولة بلا نمط تركيز لا تحظر شيئًا.'))}
-      {list('blocklist', tx('Always blocked', 'محظور دائمًا'), tx('Minimized on sight, round or not, focus mode or not. Matched against the window title, the app name and the address-bar domain.', 'تُصغَّر فور ظهورها، بجولة أو بدونها، وبنمط تركيز أو بدونه. تُطابق عنوان النافذة واسم التطبيق ونطاق شريط العنوان.'))}
+      {list('alwaysAllowed', tx('Always allowed', 'مسموح دائمًا'), tx('Inside every bubble — the docs, dictionary or tools you always work from. Matched as keywords against the window title, the app name and the site. A round without a bubble still blocks nothing.', 'داخل كل فقاعة — المراجع والقاموس والأدوات التي تعمل بها دائمًا. تُطابق ككلمات مع عنوان النافذة واسم التطبيق والموقع. الجولة بلا فقاعة لا تحظر شيئًا.'))}
+      {list('blocklist', tx('Always blocked', 'محظور دائمًا'), tx('Minimized on sight, round or not, bubble or not. Matched against the window title, the app name and the address-bar domain.', 'تُصغَّر فور ظهورها، بجولة أو بدونها، وبفقاعة أو بدونها. تُطابق عنوان النافذة واسم التطبيق ونطاق شريط العنوان.'))}
       {list('freeTimes', tx('Free times', 'أوقات حرة'), tx('20:00-23:00 — or fri,sat 14:00-02:00. The hard block is off inside these.', '20:00-23:00 — أو fri,sat 14:00-02:00. الحظر التام معطّل خلالها.'))}
 
       <h4 className="focus-h4">{tx('This app', 'هذا التطبيق')}</h4>
@@ -694,8 +910,80 @@ function FocusSettings({ api, settings, templates, onSaved }) {
   );
 }
 
-/* The focus modes the shell holds, for the planner's own editors (a task can
-   name the mode it starts with). Empty everywhere but the desktop. */
+/* ------------------------------------------------------------------ */
+/*  Brave: the extension that holds it to the bubble, and the          */
+/*  extensions of yours the bubble browser carries.                    */
+/* ------------------------------------------------------------------ */
+function BraveCompanion({ api }) {
+  const [c, setC] = useState(null);
+  const load = useCallback(() => api.bubble.companion().then(setC).catch(() => {}), [api]);
+  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [load]);
+  if (!c) return null;
+  return (
+    <div className="bubble-brave">
+      <div className="bubble-brave-head">
+        <strong>{tx('The Rhythm extension for Brave', 'إضافة ريذم لـ Brave')}</strong>
+        <span className={`bubble-status ${c.connected ? 'ok' : ''}`}>{c.connected ? tx('connected', 'متصلة') : tx('not connected', 'غير متصلة')}</span>
+      </div>
+      {c.connected
+        ? <p className="hint-text">{tx('Brave is listening. While a bubble runs, a site outside it is swapped for a “not in this bubble” page instead of the whole window being minimized, and tabs go back to their page when the round ends.',
+          'Brave يستمع. أثناء الفقاعة يُستبدل أي موقع خارجها بصفحة «ليس في هذه الفقاعة» بدل تصغير النافذة كلها، وتعود الألسنة إلى صفحاتها حين تنتهي الجولة.')}</p>
+        : (
+          <ol className="bubble-steps">
+            <li>{tx('In Brave, open', 'في Brave، افتح')} <code>brave://extensions</code></li>
+            <li>{tx('Turn on Developer mode (top right).', 'شغّل وضع المطوّر (أعلى اليمين).')}</li>
+            <li>{tx('Click “Load unpacked” and choose the folder below.', 'انقر «تحميل غير مضغوط» واختر المجلد أدناه.')}</li>
+          </ol>
+        )}
+      <button className="ghost sm" onClick={() => api.bubble.openCompanionFolder()}><FolderOpen size={13} /> {tx('Show the extension folder', 'اعرض مجلد الإضافة')}</button>
+      {!c.connected && c.folder && <small className="hint-text bubble-path">{c.folder}</small>}
+    </div>
+  );
+}
+
+function BraveExtensions({ api }) {
+  const [list, setList] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.bubble.braveExtensions().then(setList).catch(() => setList([])); }, [api]);
+  if (!list) return null;
+  const flip = async (id) => {
+    const on = list.filter((x) => x.on).map((x) => x.id);
+    const next = on.includes(id) ? on.filter((x) => x !== id) : [...on, id];
+    setBusy(true);
+    try { setList(await api.bubble.setBraveExtensions(next)); } finally { setBusy(false); }
+  };
+  return (
+    <div className="bubble-brave">
+      <div className="bubble-brave-head">
+        <strong>{tx('Your Brave extensions, in the bubble browser', 'إضافات Brave في متصفح الفقاعة')}</strong>
+        <button className="ghost sm" onClick={() => api.bubble.browser()}><Globe size={13} /> {tx('Open it', 'افتحه')}</button>
+      </div>
+      {list.length === 0
+        ? <p className="hint-text">{tx('No Brave extensions found on this computer.', 'لم تُعثر على إضافات Brave في هذا الجهاز.')}</p>
+        : (
+          <>
+            <p className="hint-text">{tx(
+              'Loaded straight from Brave’s own folder. Most extensions that work on the page itself (spelling, grammar, dark mode, password fill) work here; ones that need parts of Brave this browser does not have may not. Their buttons sit at the end of the address bar.',
+              'تُحمّل مباشرة من مجلد Brave. أغلب الإضافات التي تعمل على الصفحة نفسها (الإملاء، القواعد، الوضع الداكن، تعبئة كلمات المرور) تعمل هنا؛ أما التي تحتاج أجزاء من Brave ليست في هذا المتصفح فقد لا تعمل. أزرارها في آخر شريط العنوان.')}</p>
+            {list.map((x) => (
+              <label key={x.id} className="check">
+                <input type="checkbox" checked={x.on} disabled={busy} onChange={() => flip(x.id)} />
+                <span>{x.name} <small className="hint-text">v{x.version}{
+                  x.on && x.error ? ` · ${tx('could not load', 'تعذّر تحميلها')}: ${x.error}`
+                    : x.on && x.partial ? ` · ${tx('only partly works here — its background part would not start', 'تعمل هنا جزئيًا فقط — جزؤها الخلفي لم يبدأ')}`
+                      : x.on && x.loaded ? ` · ${tx('loaded', 'محمّلة')}`
+                        : x.on ? ` · ${tx('loads when the bubble browser opens', 'تُحمّل حين يُفتح متصفح الفقاعة')}` : ''}</small></span>
+              </label>
+            ))}
+          </>
+        )}
+    </div>
+  );
+}
+
+/* The bubbles (the shell still calls them focus modes / templates) the shell
+   holds, for the planner's own editors (a task can name the bubble it starts
+   with). Empty everywhere but the desktop. */
 export function useFocusModes() {
   const api = desktopFocus();
   const [modes, setModes] = useState([]);

@@ -41,8 +41,11 @@ npm run desktop:dev         # in this folder (or `npm run desktop:dev` from the 
 | --- | --- |
 | `src/main.js` | App bootstrap, tray, every window, all the IPC |
 | `src/session.js` | The session state machine and drift accounting — Anchor's, plus the planner task id it now carries |
-| `src/poller.js` + `src/active-window.ps1` | Foreground-window polling through a PowerShell sidecar, so there are no native modules to build |
-| `src/enforcer.ps1` | Minimize-the-offender / refocus-your-work window commands for blocking |
+| `src/bubble.js` | What a bubble's items (apps, sites, old keywords) let through. Pure; tested in `tests/bubble.test.js` |
+| `src/bubbles.js` | Everything around a bubble: the wall, the dock, drops, the bubble browser, Brave's extensions, the bridge to the Brave extension |
+| `src/poller.js` + `src/active-window.ps1` | The foreground-window watcher, a PowerShell sidecar so there are no native modules to build. Event-driven (Windows says when the window in front changes) with a 1.5 s heartbeat |
+| `src/enforcer.ps1` | Minimize-the-offender / refocus-your-work window commands, plus `activate` and `list` for the dock and the drag palette |
+| `../brave-extension/` | The Rhythm extension for Brave (loaded unpacked; copied to `%APPDATA%/Rhythm/brave-extension` on launch) |
 | `src/store.js` | Settings, templates and history in `%APPDATA%/Rhythm/rhythm-focus-data.json` |
 | `src/preload.js` | The one bridge, `window.rhythmFocus`, shared by every window |
 | `src/windows/` | Overlay, break blackout, away blackout, and the hidden presence worker |
@@ -149,18 +152,50 @@ binary:
 RHYTHM_SMOKE_BIN=desktop/release/win-unpacked/Rhythm.exe node desktop/smoke.mjs
 ```
 
+## Bubbles
+
+A bubble (what a focus mode became) is the set of things that may be in front
+of you during a round, made by dropping them onto the board on the Bubbles
+page: a program or its shortcut, a link, one of the windows open now — or a
+typed site or keyword.
+
+- **What an item lets through** (`src/bubble.js`). An *app* is known by its
+  program's file name, so a window that merely mentions it is not it, and an
+  app that updates itself into a new folder is still the same app. A *site*
+  allows that domain and everything under it, nothing beside it. A browser put
+  in as an app means that browser with any site. *Words* are the old keywords,
+  matched the old way (`title + process + domain`), so focus modes saved before
+  bubbles keep working exactly as they did — they load as word items.
+- **Judging** is immediate for apps. Browser windows still get the settling
+  seconds, because a page wears the wrong title and address while it loads.
+  Store apps are seen through ApplicationFrameHost to the app inside it.
+- **The wall** covers each screen's work area while a bubble runs (Bubble
+  settings → Cover the screens). It is a normal window, not always-on-top: the
+  bubble's things sit above it, everything else is minimized behind it. The
+  main screen's wall is the dock — tap an app to bring it forward (or start it),
+  a site to open it.
+- **The bubble browser** (`persist:bubble` session) refuses a page outside the
+  bubble before it is fetched (`webRequest`, main frames only; sign-in hosts are
+  let through). It can load the extensions installed in Brave, straight from
+  Brave's folder; ones whose background half needs Chrome APIs Electron lacks
+  are reported as only partly working.
+- **Brave** is held to the bubble by `brave-extension/`. Rhythm serves the
+  running bubble on `127.0.0.1:47615` (47616, 47617 if taken), read-only; the
+  extension long-polls it and turns it into `declarativeNetRequest` rules that
+  swap an outside page for its own "not in this bubble" page. When it is
+  listening, a Brave window on an outside site is left to the extension for a
+  few seconds instead of being minimized whole.
+
 ## Notes
 
-- A focus mode is an allow list and nothing else. Under one, any window not on
-  the list is minimized the moment it comes to the front and you are put back
-  on the last allowed window; allowed windows are simply open. There is no
-  distraction list, grace period, nudge or "work or distraction?" question any
-  more. A round without a focus mode blocks nothing. Rhythm itself, the Windows
-  shell, Task Manager and a blank browser tab are never blocked.
-- Matching is substring-based on `title + process name + address-bar domain`,
-  case-insensitive, so browser tabs are covered with no extension.
-- **Always allowed** (Focus settings → Lists) is added to every focus mode's
-  allow list. It never makes a round without a mode block anything.
+- Under a bubble, any window not in it is minimized the moment it comes to the
+  front and you are put back on the last allowed window; allowed windows are
+  simply open. There is no distraction list, grace period, nudge or "work or
+  distraction?" question. A round without a bubble blocks nothing. Rhythm
+  itself, the Windows shell, Task Manager and a blank browser tab are never
+  blocked.
+- **Always allowed** (Bubble settings → Lists) is inside every bubble, matched
+  as keywords. It never makes a round without a bubble block anything.
 - A round can carry a `projectId` (picked on the focus page or carried from
   the task); it rides into the history entry and the `round-ended` event, and
   the planner tallies the minutes on that project.

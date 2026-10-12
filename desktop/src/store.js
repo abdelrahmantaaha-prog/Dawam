@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
+const { itemsOfMode } = require('./bubble');
 
 /* Settings for the focus half of the desktop app. These came over from Anchor
    unchanged — the machinery that reads them is the same machinery — plus the
@@ -33,7 +34,16 @@ const DEFAULTS = {
        ordinary way in. `unlockMin` is left out rather than left unused: a
        setting nothing reads is a promise the app is not keeping. Old data
        files carrying it are harmless; the spread below simply ignores it. */
-    commitmentMode: false
+    commitmentMode: false,
+    /* Bubbles. The wall is the backdrop that covers every screen while a
+       bubble runs, with the bubble's apps and sites on it to open. */
+    bubbleWall: true,
+    // Where a site on the wall opens: 'rhythm' (the bubble browser, which
+    // never loads a page outside the bubble) or 'brave' (the real Brave, held
+    // to the bubble by the Rhythm extension).
+    bubbleSites: 'rhythm',
+    // Brave extensions the bubble browser loads, by id.
+    braveExtensions: []
   },
   templates: [],
   history: []
@@ -71,9 +81,11 @@ class Store {
       /* A template used to BE a task: it was keyed by task name, and applying
          one renamed whatever you were doing. It is a named set of restrictions
          now, usable with any task, so the old `task` field becomes its name. */
+      /* A focus mode became a bubble: its keywords became items (word items,
+         which match exactly as the keywords did — see bubble.js). */
       templates: (Array.isArray(raw.templates) ? raw.templates : []).map((t) => {
         const { verdicts, ...rest } = t || {};   // learned "work/distraction" answers: gone
-        return { ...rest, name: String((t && (t.name || t.task)) || '').trim() || 'Focus' };
+        return { ...rest, name: String((t && (t.name || t.task)) || '').trim() || 'Focus', items: itemsOfMode(t) };
       }),
       history: Array.isArray(raw.history) ? raw.history : []
     };

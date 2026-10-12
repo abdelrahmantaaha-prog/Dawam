@@ -1,0 +1,45 @@
+/* The bubble browser's chrome: 36px of tabs and 42px of toolbar — 78px, the
+   CHROME_H the tab views are laid out under in bubbles.js. Change one, change
+   the other. */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: #0E1A17; color: #E7ECF3;
+  font: 13px 'Segoe UI', system-ui, sans-serif;
+  user-select: none;
+}
+.tabs { height: 36px; display: flex; align-items: flex-end; padding: 0 8px; gap: 4px; background: #0B0F14; }
+.tablist { display: flex; gap: 4px; min-width: 0; flex: 0 1 auto; overflow: hidden; }
+.tab {
+  height: 30px; width: 200px; min-width: 60px; flex: 0 1 200px;
+  display: flex; align-items: center; gap: 8px; padding: 0 8px 0 10px;
+  border-radius: 8px 8px 0 0; background: transparent; color: #8A97A8; cursor: default;
+}
+.tab:hover { background: rgba(255,255,255,.05); }
+.tab.on { background: #16241F; color: #E7ECF3; }
+.tab img, .tab .dot { width: 16px; height: 16px; flex: none; border-radius: 3px; }
+.tab .dot { background: rgba(255,255,255,.12); }
+.tab.loading .dot { background: #3E8A6C; animation: pulse 1s infinite alternate; }
+@keyframes pulse { from { opacity: .4; } to { opacity: 1; } }
+.tab .t { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tab .x { flex: none; width: 18px; height: 18px; border: 0; border-radius: 4px; background: none; color: inherit; cursor: pointer; font-size: 14px; line-height: 1; }
+.tab .x:hover { background: rgba(255,255,255,.12); }
+.tab-new { width: 28px; height: 28px; margin-bottom: 2px; border: 0; border-radius: 6px; background: none; color: #8A97A8; font-size: 18px; cursor: pointer; flex: none; }
+.tab-new:hover { background: rgba(255,255,255,.08); color: #E7ECF3; }
+
+.bar { height: 42px; display: flex; align-items: center; gap: 4px; padding: 0 8px; background: #16241F; border-bottom: 1px solid #22332D; }
+.nav { width: 30px; height: 30px; border: 0; border-radius: 6px; background: none; color: #A3AFBF; font-size: 16px; cursor: pointer; }
+.nav:hover:not(:disabled) { background: rgba(255,255,255,.08); color: #E7ECF3; }
+.nav:disabled { opacity: .35; cursor: default; }
+.address { flex: 1; }
+.address input {
+  width: 100%; height: 30px; padding: 0 12px; border-radius: 15px;
+  border: 1px solid transparent; background: #0B0F14; color: #E7ECF3;
+  font: inherit; outline: none; user-select: text;
+}
+.address input:focus { border-color: #3E8A6C; }
+.exts { display: flex; gap: 2px; }
+.ext { width: 30px; height: 30px; border: 0; border-radius: 6px; background: none; cursor: pointer; display: grid; place-items: center; }
+.ext:hover { background: rgba(255,255,255,.08); }
+.ext img { width: 18px; height: 18px; }
+.ext .letter { width: 18px; height: 18px; border-radius: 4px; background: #2F6F51; color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; }

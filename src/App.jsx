@@ -1825,11 +1825,11 @@ export default function Rhythm() {
       // Today's tasks count even when another week is on screen: the time lock
       // lifts by this id, so dropping it would leave the cover up mid-round.
       const known = (weekRef.current.tasks || []).some((x) => x.id === task.id) || nowList.some((x) => x.id === task.id);
-      // Its remembered focus mode comes along — the allow list, not the
+      // Its remembered bubble comes along — what is inside it, not its
       // length: the length was just chosen here.
       const mode = known ? focusModeFor(task, settings.labels, settings.projects, focusModes) : null;
       const tpl = mode ? focusModes.find((m) => modeKey(m.id) === mode.id) : null;
-      window.rhythmFocus.startWork({ task: task.title || 'Focus', workMin: mins, allowed: (tpl && tpl.allowed) || [], taskId: known ? task.id : null,
+      window.rhythmFocus.startWork({ task: task.title || 'Focus', workMin: mins, items: (tpl && tpl.items) || [], allowed: (tpl && tpl.allowed) || [], taskId: known ? task.id : null,
         templateId: tpl ? tpl.id : null, projectId: known ? projectOfTask(task, settings.labels, settings.projects) : null });
       setView('focus');
       return true;
@@ -2511,7 +2511,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     } else if (kind === 'project' && task && task.project) {
       persistProjects((prev) => prev.map((p) => (p.id === task.project ? { ...p, focusMode: id } : p)));
     } else return;
-    flash(id ? tx('Focus mode remembered.', 'حُفظ نمط التركيز.') : tx('Focus mode forgotten.', 'أُزيل نمط التركيز.'));
+    flash(id ? tx('Bubble remembered.', 'حُفظت الفقاعة.') : tx('Bubble forgotten.', 'أُزيلت الفقاعة.'));
   };
   // The planner's day, Fajr to Fajr, for anything the focus page files by day.
   const focusDayISO = (ms) => fmtISO(logicalDayMid(ms));
@@ -2920,7 +2920,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       case 'open_view':
         // The focus screen is the desktop shell's; on a phone there is nothing
         // behind that door, and opening a blank one is worse than saying so.
-        if (p.view === 'focus' && !isDesktop()) { flash(tx('Focus mode is on the desktop app.', 'وضع التركيز في تطبيق سطح المكتب.')); return false; }
+        if (p.view === 'focus' && !isDesktop()) { flash(tx('Bubbles are on the desktop app.', 'الفقاعات في تطبيق سطح المكتب.')); return false; }
         setView(p.view);
         return true;
       case 'set_language': changeLang(p.lang); return true;
@@ -4540,8 +4540,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           <Flame size={20} /><span className="navlabel">{tx('Habits', 'عادات')}</span>
         </button>
         {isDesktop() && (
-          <button className={`navbtn ${view === 'focus' ? 'on' : ''}`} onClick={() => go('focus')} aria-label={tx('Focus', 'تركيز')}>
-            <AlarmClock size={20} /><span className="navlabel">{tx('Focus', 'تركيز')}</span>
+          <button className={`navbtn ${view === 'focus' ? 'on' : ''}`} onClick={() => go('focus')} aria-label={tx('Bubbles', 'الفقاعات')}>
+            <AlarmClock size={20} /><span className="navlabel">{tx('Bubbles', 'الفقاعات')}</span>
             {pendingRound && <span className="navbadge">1</span>}
           </button>
         )}

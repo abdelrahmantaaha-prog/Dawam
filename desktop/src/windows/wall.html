@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Rhythm bubble</title>
+  <link rel="stylesheet" href="wall.css" />
+</head>
+<body>
+  <!-- The wall is the inside of the bubble: it covers every screen while a
+       bubble runs, under the things in the bubble and over everything else.
+       It is not on top — open something from the dock and that thing sits
+       above it. Only the main screen carries the dock; the others just say
+       where you are. -->
+  <main class="wall">
+    <div class="wall-head">
+      <span class="wall-mark">&#9711;</span>
+      <span id="bubble" class="wall-bubble"></span>
+    </div>
+    <h1 id="task" class="wall-task"></h1>
+    <div id="clock" class="wall-clock">00:00</div>
+    <div class="wall-bar"><span id="bar"></span></div>
+
+    <section id="dock" class="wall-dock" hidden></section>
+    <p id="words" class="wall-words" hidden></p>
+
+    <div id="actions" class="wall-actions" hidden>
+      <button id="planner" class="wall-btn">Open Rhythm</button>
+      <button id="browser" class="wall-btn">Bubble browser</button>
+    </div>
+    <p id="note" class="wall-note" hidden>Anything outside this bubble is put away until the round ends.</p>
+  </main>
+  <script src="wall.js"></script>
+</body>
+</html>

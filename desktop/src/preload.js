@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 /* The one bridge, shared by the planner window and the focus windows.
 
@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
   desktop: true,
   getState: () => ipcRenderer.invoke('get-state'),
   getData: () => ipcRenderer.invoke('get-data'),
-  // req: { task, workMin, allowed, taskId, templateId, projectId }
+  // req: { task, workMin, items, allowed, taskId, templateId, projectId }
   startWork: (req) => ipcRenderer.invoke('start-work', req),
   saveTemplate: (tpl) => ipcRenderer.invoke('save-template', tpl),
   deleteTemplate: (id) => ipcRenderer.invoke('delete-template', id),
@@ -55,6 +55,40 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
     listCalendars: () => ipcRenderer.invoke('cal-list'),
     listEvents: (calendarId, fromMs, toMs) => ipcRenderer.invoke('cal-events', calendarId, fromMs, toMs),
   },
+  /* Bubbles: what is in the running one, opening an item, and turning a drop
+     into an item. See bubbles.js. A dropped File carries no path of its own
+     in a page; pathFor asks Electron for it. */
+  bubble: {
+    items: () => ipcRenderer.invoke('bubble-items'),
+    open: (item) => ipcRenderer.invoke('bubble-open', item),
+    pathFor: (file) => { try { return webUtils.getPathForFile(file) || ''; } catch { return ''; } },
+    resolvePaths: (paths) => ipcRenderer.invoke('bubble-resolve-paths', paths),
+    resolveUrl: (text) => ipcRenderer.invoke('bubble-resolve-url', text),
+    running: () => ipcRenderer.invoke('bubble-running'),
+    browser: (url) => ipcRenderer.invoke('bubble-browser', url),
+    braveExtensions: () => ipcRenderer.invoke('bubble-brave-extensions'),
+    setBraveExtensions: (ids) => ipcRenderer.invoke('bubble-set-brave-extensions', ids),
+    companion: () => ipcRenderer.invoke('bubble-companion'),
+    openCompanionFolder: () => ipcRenderer.invoke('bubble-companion-open'),
+  },
+
+  /* The bubble browser's own toolbar. Only its window uses these; the pages
+     inside its tabs get no bridge at all. */
+  browser: {
+    ready: () => ipcRenderer.invoke('bb-ready'),
+    navigate: (url) => ipcRenderer.invoke('bb-navigate', url),
+    newTab: (url) => ipcRenderer.invoke('bb-new-tab', url),
+    closeTab: (id) => ipcRenderer.invoke('bb-close-tab', id),
+    activate: (id) => ipcRenderer.invoke('bb-activate', id),
+    back: () => ipcRenderer.invoke('bb-back'),
+    forward: () => ipcRenderer.invoke('bb-forward'),
+    reload: () => ipcRenderer.invoke('bb-reload'),
+    extensionPopup: (id) => ipcRenderer.invoke('bb-ext-popup', id),
+    onTabs: (cb) => sub('bb-tabs', (_e, tabs) => cb(tabs)),
+    onExtensions: (cb) => sub('bb-extensions', (_e, list) => cb(list)),
+    onFocusAddress: (cb) => sub('bb-focus-address', () => cb()),
+  },
+
   // Listeners return their own unsubscribe — React effects need to clean up,
   // and a planner that re-renders must not stack duplicate handlers.
   onState: (cb) => sub('state', (_e, s) => cb(s)),

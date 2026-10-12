@@ -1,0 +1,64 @@
+/* The bubble's wall. The same dark family as the lock and break screens, with
+   the green of the brand pulled up into a soft glow — calm enough to sit
+   behind work for an hour, distinct enough that you know you are inside. */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body {
+  background:
+    radial-gradient(ellipse 70% 60% at 50% 38%, rgba(62, 138, 108, .22), transparent 70%),
+    linear-gradient(180deg, #0E1A17 0%, #0B0F14 100%);
+  color: #E7ECF3;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  user-select: none;
+  cursor: default;
+  overflow: hidden;
+}
+.wall {
+  height: 100%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 32px; text-align: center;
+}
+.wall-head { display: flex; align-items: center; gap: 10px; color: #7FBFA4; font-size: 14px; letter-spacing: .4px; text-transform: uppercase; }
+.wall-mark { font-size: 18px; }
+.wall-task { font-size: 30px; font-weight: 600; margin-top: 14px; max-width: 760px; line-height: 1.25; }
+.wall-clock { font-size: 64px; font-weight: 300; font-variant-numeric: tabular-nums; margin-top: 10px; letter-spacing: 1px; }
+.wall-bar { width: 260px; height: 4px; border-radius: 4px; background: rgba(255,255,255,.08); margin-top: 14px; overflow: hidden; }
+.wall-bar span { display: block; height: 100%; width: 0; background: #3E8A6C; transition: width 1s linear; }
+body.paused .wall-clock { color: #C9A85B; }
+body.paused .wall-bar span { background: #C9A85B; }
+
+.wall-dock {
+  margin-top: 46px;
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 14px;
+  max-width: 880px;
+}
+.tile {
+  width: 112px; padding: 16px 8px 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  border-radius: 16px; border: 1px solid rgba(255,255,255,.07);
+  background: rgba(255,255,255,.04);
+  color: inherit; font: inherit; cursor: pointer;
+  transition: background .15s, transform .15s, border-color .15s;
+}
+.tile:hover { background: rgba(255,255,255,.09); border-color: rgba(127,191,164,.45); transform: translateY(-2px); }
+.tile:active { transform: translateY(0); }
+.tile img, .tile .letter { width: 44px; height: 44px; border-radius: 12px; }
+.tile img { object-fit: contain; }
+.tile .letter { display: grid; place-items: center; font-size: 20px; font-weight: 700; color: #fff; }
+.tile .name { font-size: 12.5px; line-height: 1.25; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .kind { font-size: 10.5px; color: #7C8899; margin-top: -6px; }
+.tile.busy { opacity: .55; }
+
+.wall-words { margin-top: 18px; font-size: 12.5px; color: #8A97A8; }
+.wall-actions { margin-top: 40px; display: flex; gap: 10px; }
+.wall-btn {
+  padding: 10px 18px; border-radius: 10px;
+  border: 1px solid #2A323E; background: rgba(255,255,255,.04);
+  color: #A3AFBF; font: 600 13.5px 'Segoe UI', system-ui, sans-serif; cursor: pointer;
+}
+.wall-btn:hover { background: rgba(255,255,255,.09); color: #E7ECF3; }
+.wall-note { margin-top: 22px; font-size: 12px; color: #55606E; }
+
+/* The other screens: the same place, quieter. */
+body.side .wall-task { font-size: 22px; color: #A3AFBF; }
+body.side .wall-clock { font-size: 40px; color: #8A97A8; }

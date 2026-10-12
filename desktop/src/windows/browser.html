@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Bubble browser — Rhythm</title>
+  <link rel="stylesheet" href="browser.css" />
+</head>
+<body>
+  <!-- Only the browser's own controls live in this page. The tabs are separate
+       views laid over the space below it (bubbles.js), so the pages in them
+       never share a document — or a bridge — with these controls. -->
+  <div id="tabs" class="tabs">
+    <div id="tablist" class="tablist"></div>
+    <button id="newtab" class="tab-new" title="New tab (Ctrl+T)">+</button>
+  </div>
+  <div class="bar">
+    <button id="back" class="nav" title="Back (Alt+←)">&#8592;</button>
+    <button id="forward" class="nav" title="Forward (Alt+→)">&#8594;</button>
+    <button id="reload" class="nav" title="Reload (Ctrl+R)">&#8635;</button>
+    <form id="go" class="address">
+      <input id="address" spellcheck="false" autocomplete="off" placeholder="Search or type an address" />
+    </form>
+    <div id="exts" class="exts"></div>
+  </div>
+  <script src="browser.js"></script>
+</body>
+</html>

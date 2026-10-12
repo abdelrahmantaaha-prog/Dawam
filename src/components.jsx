@@ -881,7 +881,7 @@ function TaskEditor({ task, projects, allProjects = [], focusModes = [], weekSta
             return (
               <label className="worth-row focus-mode-row">
                 <Timer size={13} />
-                <span className="worth-label">{tx('Focus mode', 'نمط التركيز')}</span>
+                <span className="worth-label">{tx('Bubble', 'الفقاعة')}</span>
                 <select value={own && focusModes.some((m) => modeKey(m.id) === own) ? own : ''} onChange={(e) => setField('focusMode', e.target.value || null)}>
                   <option value="">{inherited
                     ? `${inhName} (${inherited.from === 'tag' ? tx('from its tag', 'من وسمها') : tx('from its project', 'من مشروعها')})`

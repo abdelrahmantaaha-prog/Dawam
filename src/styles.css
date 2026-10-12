@@ -946,7 +946,7 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 
 .focus-view .field{display:flex;flex-direction:column;gap:5px;margin-top:11px;flex:1;min-width:0}
 .focus-view .field>span{font-size:11.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
-.focus-view .field input,.focus-view .field textarea{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:13.5px;font-family:inherit;line-height:1.5;color:var(--ink);background:var(--surface);resize:vertical}
+.focus-view .field input,.focus-view .field textarea,.focus-view .bubble-type input{width:100%;border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:13.5px;font-family:inherit;line-height:1.5;color:var(--ink);background:var(--surface);resize:vertical}
 .focus-view .check{display:flex;align-items:flex-start;gap:8px;margin-top:11px;font-size:13px;color:var(--ink);cursor:pointer}
 .focus-view .check input{margin-top:2px;accent-color:var(--verdigris)}
 .focus-view .check small{display:block}
@@ -1837,3 +1837,60 @@ select{border:1px solid var(--line);border-radius:8px;padding:7px 8px;background
 .block-habit.dragging,.habit-stack.dragging{opacity:.35}
 .block-habit.drop-before,.habit-stack.drop-before{box-shadow:inset 0 2px 0 -0.5px var(--verdigris)}
 .block-habit.drop-after,.habit-stack.drop-after{box-shadow:inset 0 -2px 0 -0.5px var(--verdigris)}
+/* Bubbles (the focus page): your bubbles, the board things are dropped on, its tiles */
+.bubble-picks{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:12px 0 4px}
+.bubble-picks-label{font-size:11.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-inline-end:4px}
+.bubble-pick{display:inline-flex;align-items:center;border:1px solid var(--line);border-radius:999px;background:var(--surface);overflow:hidden}
+.bubble-pick.on{border-color:var(--verdigris);background:var(--soft)}
+.bubble-pick-name{display:inline-flex;align-items:center;gap:7px;padding:5px 6px 5px 8px;border:0;background:none;color:var(--ink);font-family:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+.bubble-pick-dots{display:inline-flex}
+.bubble-pick-dots>*{width:16px;height:16px;border-radius:50%;margin-inline-end:-5px;border:1.5px solid var(--panel);object-fit:contain;background:var(--panel)}
+.bubble-pick-dots:empty{display:none}
+.bubble-pick-dots:not(:empty){margin-inline-end:5px}
+.bubble-pick-del{border:0;background:none;color:var(--faint);padding:5px 8px 5px 2px;cursor:pointer;display:inline-flex}
+.bubble-pick-del:hover{color:var(--ink)}
+.bubble-board{margin:12px 0 8px}
+.bubble-board-head{display:flex;justify-content:space-between;align-items:baseline;font-size:12.5px;font-weight:600;color:var(--muted);margin-bottom:6px}
+.bubble-board-head .hint-text{margin:0}
+.bubble-drop{border:1.5px dashed var(--line);border-radius:16px;padding:12px;background:radial-gradient(ellipse 80% 90% at 50% 0%,var(--soft),transparent 75%);transition:border-color .15s ease,background-color .15s ease,box-shadow .15s ease;min-height:96px}
+.bubble-drop.empty{display:grid;place-items:center}
+.bubble-drop.over{border-color:var(--verdigris);border-style:solid;box-shadow:0 0 0 4px var(--soft)}
+.bubble-drop-hint{font-size:12.5px;color:var(--faint);text-align:center;max-width:440px;line-height:1.5;margin:0}
+.bubble-tiles{display:flex;flex-wrap:wrap;gap:8px}
+.bubble-tiles.live{margin-top:14px;justify-content:center}
+.bubble-tile{position:relative;width:96px;display:flex;flex-direction:column;align-items:center;gap:4px;padding:11px 6px 9px;border-radius:13px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:inherit;text-align:center}
+button.bubble-tile{cursor:pointer}
+button.bubble-tile:hover{border-color:var(--verdigris);background:var(--soft)}
+.bubble-tile.word{border-style:dashed}
+.bubble-tile.wide-open{border-color:#C9A85B}
+.bubble-tile.ghosted{border-style:dashed;color:var(--muted)}
+.bubble-ico{width:34px;height:34px;border-radius:9px;object-fit:contain;display:grid;place-items:center}
+.bubble-ico.letter{background:hsl(var(--h,150) 42% 42%);color:#fff;font-weight:700;font-size:16px}
+.bubble-name{font-size:12px;font-weight:600;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bubble-sub{font-size:10.5px;color:var(--faint);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:-2px}
+.bubble-x{position:absolute;top:4px;inset-inline-end:4px;width:20px;height:20px;border-radius:50%;border:0;background:transparent;color:var(--faint);display:grid;place-items:center;cursor:pointer;opacity:0}
+.bubble-tile:hover .bubble-x,.bubble-x:focus-visible{opacity:1}
+.bubble-x:hover{background:var(--soft);color:var(--ink)}
+@media (hover:none){.bubble-x{opacity:1}}
+.bubble-type{display:flex;gap:6px;margin-top:8px}
+.bubble-type input{flex:1;min-width:0}
+.bubble-open{margin-top:8px}
+.bubble-palette{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.bubble-chip{display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-family:inherit;font-size:12.5px;font-weight:500;cursor:grab}
+.bubble-chip:hover{border-color:var(--verdigris);background:var(--soft)}
+.bubble-chip:active{cursor:grabbing}
+.bubble-chip img{width:16px;height:16px;object-fit:contain}
+.bubble-chip.browser{border-style:dashed}
+.bubble-chip svg:last-child{color:var(--faint)}
+.bubble-note{color:var(--muted)}
+.bubble-warn{display:flex;gap:6px;align-items:flex-start;color:#A07A2C}
+.bubble-warn svg{flex:none;margin-top:2px}
+.bubble-brave{margin:12px 0;padding:11px 12px;border:1px solid var(--line);border-radius:12px;background:var(--soft)}
+.bubble-brave-head{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px}
+.bubble-brave .check{margin-top:6px}
+.bubble-brave>.ghost{margin-top:8px}
+.bubble-status{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.bubble-status.ok{color:var(--verdigris)}
+.bubble-steps{margin:8px 0 0;padding-inline-start:20px;font-size:12.5px;color:var(--muted);line-height:1.7}
+.bubble-steps code{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;background:var(--panel);padding:1px 5px;border-radius:4px}
+.bubble-path{display:block;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,monospace}

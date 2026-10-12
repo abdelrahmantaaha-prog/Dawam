@@ -120,11 +120,25 @@ try {
   await ev('window.rhythmFocus.saveSettings({ chairDetect: false, breakScreen: false, blocklist: [] })');
   await sleep(800);
 
-  check('the focus tab exists', await ev('[...document.querySelectorAll(".navbtn")].some((b) => /Focus|تركيز/.test(b.textContent))'));
-  await ev('[...document.querySelectorAll(".navbtn")].find((b) => /Focus|تركيز/.test(b.textContent)).click()');
+  check('the bubbles tab exists', await ev('[...document.querySelectorAll(".navbtn")].some((b) => /Bubbles|الفقاعات/.test(b.textContent))'));
+  await ev('[...document.querySelectorAll(".navbtn")].find((b) => /Bubbles|الفقاعات/.test(b.textContent)).click()');
   await sleep(600);
-  check('the focus view renders', await ev('!!document.querySelector(".focus-view")'));
+  check('the bubbles view renders', await ev('!!document.querySelector(".focus-view")'));
   check('the start form is there when idle', await ev('document.querySelectorAll(".focus-view .field input").length > 0'));
+
+  /* Bubbles. No bubble round is started here — a real one would put away
+     whatever the person running the test has open. What is checked is the
+     seam: the board, drops becoming items, a saved bubble keeping them, and
+     the local bridge the Brave extension listens to. */
+  check('the bubble board renders', await ev('!!document.querySelector(".bubble-drop")'));
+  check('a dropped link becomes its site', await ev('(await window.rhythmFocus.bubble.resolveUrl("https://www.github.com/anthropics")).domain === "github.com"'));
+  check('the open windows can be listed', await ev('Array.isArray(await window.rhythmFocus.bubble.running())'));
+  await ev('window.rhythmFocus.saveTemplate({ name: "Smoke bubble", workMin: 25, items: [{ kind: "site", domain: "example.org", name: "example.org" }] })');
+  check('a saved bubble keeps its items', await ev('(await window.rhythmFocus.getData()).templates.some((t) => t.name === "Smoke bubble" && t.items[0].domain === "example.org" && t.allowed.includes("example.org"))'));
+  try {
+    const b = await (await fetch('http://127.0.0.1:47615/bubble?since=-1')).json();
+    check('Brave can hear about bubbles', typeof b.v === 'number' && b.active === false);
+  } catch (err) { check('Brave can hear about bubbles', err.message); }
 
   await ev('window.rhythmFocus.startWork({ task: "Smoke test round", workMin: 1, allowed: [], taskId: "smoke-1" })');
   await sleep(1500);

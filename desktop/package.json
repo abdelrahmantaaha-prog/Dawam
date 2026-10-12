@@ -76,6 +76,13 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "../brave-extension",
+        "to": "brave-extension",
+        "filter": [
+          "**/*"
+        ]
       }
     ]
   }

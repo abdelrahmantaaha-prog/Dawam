@@ -9,6 +9,22 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+Focus becomes **Bubbles** (desktop).
+
+- A bubble is made by dragging things onto it: a program or its shortcut, a
+  link from the browser, or one of the windows open right now. Sites can also
+  be typed. Apps are recognised by the program itself and sites by their exact
+  address, so a video that merely mentions your work no longer slips through.
+  Focus modes made before keep working as they did.
+- While a bubble runs, a calm wall covers the screens, with the bubble's apps
+  and sites on it to open. Anything else is put away the moment it comes
+  forward — now almost instantly for apps, instead of up to a few seconds.
+- Rhythm has its own bubble browser that never opens a page outside the
+  bubble, and it can carry the extensions you use in Brave.
+- A Rhythm extension for Brave holds Brave to the bubble: an outside site is
+  swapped for a "not in this bubble" page instead of the whole window being
+  minimized, and tabs go back to their page when the round ends.
+
 ## [3.7] — 2026-10-05 · Desktop 1.12.0
 
 Sittings become habits.

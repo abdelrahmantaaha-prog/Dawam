@@ -1,12 +1,13 @@
 const { EventEmitter } = require('events');
+const { BROWSERS, normalizeItems, inBubble, siteRules, isBrowserProcess } = require('./bubble');
 
-const BROWSERS = ['chrome', 'msedge', 'brave', 'firefox', 'opera', 'vivaldi', 'arc', 'zen', 'iron', 'librewolf'];
+/* A bubble (what a focus mode became) is an allow list and nothing else.
 
-/* A focus mode is an allow list and nothing else.
-
-   Under one, a window is either on the list — and then it is simply open — or
-   it is not, and then it is minimized the moment it comes to the front and
-   you are put back on the last allowed window. There is no grace period, no
+   Its items are apps, sites and — for modes made before bubbles — keywords;
+   bubble.js says what each one lets through. Under a bubble, a window is
+   either inside it — and then it is simply open — or it is not, and then it is
+   minimized the moment it comes to the front and you are put back on the last
+   allowed window. There is no grace period, no
    nudge, no "work or distraction?" question and no distraction list: that
    middle ground was where rounds leaked. A round started without a focus mode
    blocks nothing.
@@ -92,6 +93,8 @@ class SessionManager extends EventEmitter {
     this.blockedCount = 0;     // windows closed off this round
     this.lastBlocked = null;   // { hwnd, at } — so one window is counted once
     this.allowed = [];
+    this.items = [];           // the bubble's apps, sites and words (see bubble.js)
+    this.bubbleName = '';
     this.homeHwnd = 0; // last allowed window — where a block sends you back to
     this.stableKey = undefined; // identity of the current foreground window
     this.stableSince = 0; // when that identity last changed — drives the settling hold
@@ -110,13 +113,23 @@ class SessionManager extends EventEmitter {
   }
 
   strict() {
-    return this.allowed.length > 0;
+    return this.items.length > 0;
+  }
+
+  /* What a browser that enforces the bubble itself (Rhythm's bubble browser,
+     the Brave extension) may open right now. Null: no limit. */
+  siteRules() {
+    if (this.phase !== 'work' || !this.strict()) return null;
+    return siteRules(this.items, alwaysAllowed(this.settings()));
   }
 
   getState() {
     return {
       strict: this.strict(),
       allowed: this.allowed,
+      // Icons stay out: this goes to every window once a second.
+      items: this.items.map(({ icon, ...rest }) => rest),
+      bubbleName: this.bubbleName,
       phase: this.phase,
       paused: this.paused,
       pauseAuto: this.pauseAuto,
@@ -144,7 +157,7 @@ class SessionManager extends EventEmitter {
   }
 
   startWork(req) {
-    const { task, workMin, allowed, taskId, templateId, projectId } = req || {};
+    const { task, workMin, allowed, items, taskId, templateId, projectId } = req || {};
     const min = Math.max(1, Math.min(240, Number(workMin) || this.settings().workMin));
     const newTask = String(task || 'Deep work').trim() || 'Deep work';
     /* The focus mode is found by id, not by the task's name: "what is allowed"
@@ -163,6 +176,13 @@ class SessionManager extends EventEmitter {
     this.allowed = (Array.isArray(allowed) ? allowed : [])
       .map((k) => String(k).toLowerCase().trim())
       .filter(Boolean);
+    /* A caller that speaks bubbles sends items; one that still speaks keywords
+       (an older planner, the tests) sends `allowed`, and each keyword becomes
+       a word item that matches exactly as it always did. */
+    this.items = Array.isArray(items)
+      ? normalizeItems(items)
+      : this.allowed.map((text) => ({ kind: 'word', text }));
+    this.bubbleName = tpl ? String(tpl.name || '') : '';
     this.plannedMin = min;
     this.totalSec = min * 60;
     this.endsAt = Date.now() + this.totalSec * 1000;
@@ -247,6 +267,8 @@ class SessionManager extends EventEmitter {
     this.taskId = null;
     this.projectId = null;
     this.allowed = [];
+    this.items = [];
+    this.bubbleName = '';
     this.homeHwnd = 0;
     this.lastBlocked = null;
     this.emitState();
@@ -257,25 +279,24 @@ class SessionManager extends EventEmitter {
     const process = sample.process || '';
     const host = (sample.host || '').toLowerCase();
     const hwnd = Number(sample.hwnd) || 0;
-    // The allow list matches the address-bar domain too, so "docs.google.com"
-    // clears the site even when the page title never says so.
-    const hay = `${title} ${process} ${host}`.toLowerCase();
     const neutral = isNeutral(title, process, host);
-    // The always-allowed list (Focus settings → Lists) is added to every focus
-    // mode's allow list — a dictionary, the docs you always work from. It never
-    // turns a round without a mode into a blocking one.
-    const allowed = (this.allowed || []).some((k) => hay.includes(k))
-      || alwaysAllowed(this.settings()).some((k) => hay.includes(k));
+    // The always-allowed list (Focus settings → Lists) is added to every
+    // bubble — a dictionary, the docs you always work from. It never turns a
+    // round without a bubble into a blocking one.
+    const allowed = inBubble({ title, process, path: sample.path, host }, this.items, alwaysAllowed(this.settings()));
 
-    // Slow pages briefly wear the wrong title while loading — hold judgment
-    // for a few seconds after the window's identity changes.
+    /* Slow pages briefly wear the wrong title and address while loading, so a
+       browser window is given a few seconds after it changes before it is
+       judged. Nothing else is: an app is known by its program file, which is
+       right from its first frame, so it is judged the moment it is in front. */
     const identity = neutral ? '(neutral)' : `${process.toLowerCase()}|${host || title}`;
     if (identity !== this.stableKey) {
       this.stableKey = identity;
       this.stableSince = Date.now();
     }
+    const browser = isBrowserProcess(process);
     const settleMs = Math.max(0, Number(this.settings().settleSec) || 0) * 1000;
-    const settling = !neutral && Date.now() - this.stableSince < settleMs;
+    const settling = !neutral && browser && Date.now() - this.stableSince < settleMs;
 
     const judged = this.phase === 'work' && this.strict() && !neutral;
     const blocked = judged && !allowed && !settling;
@@ -290,11 +311,13 @@ class SessionManager extends EventEmitter {
         offender: hwnd,
         target: this.homeHwnd,
         task: this.task,
-        label: blockLabel(title, process, host)
+        label: blockLabel(title, process, host),
+        browser,
+        host
       });
     }
 
-    this.lastSample = { title, process, host, hwnd, blocked };
+    this.lastSample = { title, process, host, hwnd, blocked, path: sample.path || '' };
     this.emitState();
   }
 
@@ -358,3 +381,4 @@ class SessionManager extends EventEmitter {
 module.exports = SessionManager;
 module.exports.alwaysAllowed = alwaysAllowed;
 module.exports.isNeutral = isNeutral;
+module.exports.BROWSERS = BROWSERS;

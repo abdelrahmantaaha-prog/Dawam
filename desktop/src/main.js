@@ -18,6 +18,8 @@ const SessionManager = require('./session');
 const { startPoller, startEnforcer } = require('./poller');
 const { fitRect } = require('./fit');
 const calendar = require('./calendar');
+const { createBubbles } = require('./bubbles');
+const { normalizeItems, wordsOfItems } = require('./bubble');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
@@ -105,6 +107,7 @@ if (!app.requestSingleInstanceLock()) {
 
   const store = new Store();
   let sessions = null;
+  let bubbles = null;   // the wall, the dock, the bubble browser, the bridge to Brave
 
   const iconPath = path.join(__dirname, '..', 'assets', 'icon.png');
   const icon = () => nativeImage.createFromPath(iconPath);
@@ -345,6 +348,7 @@ if (!app.requestSingleInstanceLock()) {
   let refitTimer = null;
   function onDisplaysChanged() {
     keepOnScreen();
+    if (bubbles) bubbles.refit();
     clearTimeout(refitTimer);
     refitTimer = setTimeout(keepOnScreen, 1500);
   }
@@ -467,6 +471,7 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true;
     if (poller) poller.stop();
     if (enforcer) enforcer.stop();
+    if (bubbles) bubbles.stop();
     hideBreakScreens();
     hideAwayScreens();
     hideLockScreens();
@@ -542,6 +547,12 @@ if (!app.requestSingleInstanceLock()) {
 
     poller = startPoller();
     enforcer = startEnforcer();
+    bubbles = createBubbles({
+      store, sessions, enforcer, icon, preload, winFile, notify, showPlanner,
+      isQuitting: () => quitting
+    });
+    bubbles.wire();
+    bubbles.startBridge();
 
     // Free times: scheduled windows when the hard-block list is ignored.
     // Lines like "20:00-23:00" (daily) or "fri,sat 14:00-02:00" (24h clock;
@@ -612,6 +623,7 @@ if (!app.requestSingleInstanceLock()) {
       }
       ensurePresenceWindow(s);
       updateLock();
+      bubbles.onState(s);
     });
 
     // The lock's clock: catches the step-out expiring and the app booting
@@ -639,14 +651,17 @@ if (!app.requestSingleInstanceLock()) {
     // on the last allowed window. One notification per half minute at most —
     // the block itself is the message; a stream of toasts would be noise.
     let lastModeNotifyAt = 0;
-    sessions.on('block', ({ offender, target, label }) => {
+    sessions.on('block', (b) => {
+      const { offender, target, label } = b;
+      // Brave with the Rhythm extension swaps the tab itself; see bubbles.js.
+      if (bubbles.handOffToBrave(b, sessions.getState().current)) return;
       if (offender) enforcer.send(`minimize ${offender}`);
       if (target && target !== offender) {
         setTimeout(() => enforcer.send(`focus ${target}`), 300);
       }
       if (Date.now() - lastModeNotifyAt > 30000) {
         lastModeNotifyAt = Date.now();
-        notify('Not allowed', `${label} is not in this focus mode.`);
+        notify('Outside the bubble', `${label} is not in this bubble.`);
       }
     });
     sessions.on('history-changed', () => broadcast('history-changed'));
@@ -663,7 +678,15 @@ if (!app.requestSingleInstanceLock()) {
       templates: store.data.templates,
       history: store.data.history
     }));
-    ipcMain.handle('start-work', (_e, req) => {
+    ipcMain.handle('start-work', (_e, raw) => {
+      /* A planner that names a saved bubble but sends no items (an older
+         build) still gets the bubble's apps and sites, not just its words. */
+      const req = { ...(raw || {}) };
+      if (!Array.isArray(req.items) && req.templateId) {
+        const tpl = store.data.templates.find((t) => t.id === req.templateId);
+        if (tpl && Array.isArray(tpl.items) && tpl.items.length) req.items = tpl.items;
+      }
+      bubbles.startRound(Array.isArray(req.items) ? req.items : []);
       sessions.startWork(req);
       updateTray(sessions.getState());
       return sessions.getState();
@@ -676,13 +699,18 @@ if (!app.requestSingleInstanceLock()) {
       const existing = tpl.id
         ? store.data.templates.find((t) => t.id === tpl.id)
         : store.data.templates.find((t) => String(t.name).toLowerCase() === name.toLowerCase());
+      /* A bubble is saved as items; `allowed` is kept beside them as plain
+         words, for anything that still reads a focus mode the old way. */
+      const items = Array.isArray(tpl.items)
+        ? normalizeItems(tpl.items)
+        : (Array.isArray(tpl.allowed) ? tpl.allowed : []).map((k) => String(k).trim()).filter(Boolean)
+          .map((text) => ({ kind: 'word', text: text.toLowerCase() }));
       const entry = {
         id: (existing && existing.id) || Date.now(),
         name,
         workMin: Math.max(1, Math.min(240, Number(tpl.workMin) || 50)),
-        allowed: (Array.isArray(tpl.allowed) ? tpl.allowed : [])
-          .map((k) => String(k).trim())
-          .filter(Boolean)
+        items,
+        allowed: wordsOfItems(items)
       };
       store.data.templates = store.data.templates.filter((t) => t.id !== entry.id);
       store.data.templates.unshift(entry);

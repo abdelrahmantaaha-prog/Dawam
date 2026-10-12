@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Rhythm Bubbles",
+  "version": "1.0.0",
+  "description": "Holds Brave to the bubble Rhythm is running: while a bubble runs, only its sites open. Talks only to Rhythm on this computer.",
+  "permissions": ["declarativeNetRequest", "tabs", "alarms", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_title": "Rhythm bubble",
+    "default_popup": "popup.html",
+    "default_icon": { "16": "icons/icon.png", "32": "icons/icon.png" }
+  },
+  "icons": { "16": "icons/icon.png", "48": "icons/icon.png", "128": "icons/icon.png" },
+  "web_accessible_resources": [
+    { "resources": ["blocked.html", "blocked.js", "pages.css"], "matches": ["<all_urls>"] }
+  ]
+}

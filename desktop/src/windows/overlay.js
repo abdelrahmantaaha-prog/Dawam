@@ -33,7 +33,7 @@ function render(s) {
   } else {
     taskEl.textContent = s.task;
     subEl.textContent = s.strict
-      ? `Focusing · round ${s.rounds + 1} · only allowed windows`
+      ? `Focusing · round ${s.rounds + 1} · ${s.bubbleName ? `in the ${s.bubbleName} bubble` : 'in a bubble'}`
       : `Focusing · round ${s.rounds + 1}`;
   }
 }
