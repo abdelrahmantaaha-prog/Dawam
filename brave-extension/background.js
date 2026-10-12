@@ -44,10 +44,19 @@ async function installRules(rules) {
       action: { type: 'redirect', redirect: { regexSubstitution: `${BLOCKED}#\\0` } },
       condition: { regexFilter: '^https?://.*', resourceTypes: ['main_frame'] }
     });
-    const domains = [...(rules.domains || []), ...(rules.signIn || [])];
+    /* Public sites by domain. Local ones (this computer's address, port and
+       all) cannot be said as a domain, so each gets a rule of its own that
+       allows exactly that address — in both of its spellings. */
+    const all = [...(rules.domains || []), ...(rules.signIn || [])];
+    const domains = all.filter((d) => splitHost(d).name !== '127.0.0.1');
     if (domains.length) {
       add.push({ id: 2, priority: 2, action: { type: 'allow' }, condition: { requestDomains: domains, resourceTypes: ['main_frame'] } });
     }
+    all.filter((d) => splitHost(d).name === '127.0.0.1').forEach((d, i) => {
+      const { port } = splitHost(d);
+      const at = port ? `:${port}` : '(:\\d+)?';
+      add.push({ id: 500 + i, priority: 2, action: { type: 'allow' }, condition: { regexFilter: `^https?://(127\\.0\\.0\\.1|localhost)${at}(/|$)`, resourceTypes: ['main_frame'] } });
+    });
     (rules.keywords || []).map((k) => String(k).replace(/[*|^]/g, '').trim()).filter(Boolean).forEach((k, i) => {
       add.push({ id: 10 + i, priority: 2, action: { type: 'allow' }, condition: { urlFilter: k, resourceTypes: ['main_frame'] } });
     });

@@ -487,16 +487,30 @@ function LiveDock({ api, state }) {
     api.bubble.items().then((full) => { if (alive) setItems(full && full.length ? full : state.items || []); }).catch(() => {});
     return () => { alive = false; };
   }, [key]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const shown = items.filter((i) => i.kind !== 'word');
-  if (!shown.length) return null;
+  // Apps get tiles; the sites share one Browser tile and are listed under it.
+  const apps = items.filter((i) => i.kind === 'app');
+  const sites = items.filter((i) => i.kind === 'site');
+  if (!apps.length && !sites.length) return null;
   return (
-    <div className="bubble-tiles live">
-      {shown.map((it) => <BubbleTile key={itemKey(it)} item={it} onOpen={() => api.bubble.open(it)} />)}
-      <button className="bubble-tile ghosted" onClick={() => api.bubble.browser()}>
-        <span className="bubble-ico"><Globe size={18} /></span>
-        <span className="bubble-name">{tx('Bubble browser', 'متصفح الفقاعة')}</span>
-      </button>
-    </div>
+    <>
+      <div className="bubble-tiles live">
+        {apps.map((it) => <BubbleTile key={itemKey(it)} item={it} onOpen={() => api.bubble.open(it)} />)}
+        <button className="bubble-tile" onClick={() => api.bubble.openBrowserHome()}>
+          <span className="bubble-ico letter" style={{ '--h': 155 }}><Globe size={18} /></span>
+          <span className="bubble-name">{tx('Browser', 'المتصفح')}</span>
+          <span className="bubble-sub">{sites.length ? tx(`${sites.length} sites`, `${sites.length} مواقع`) : tx('open to work', 'افتحه للعمل')}</span>
+        </button>
+      </div>
+      {sites.length > 0 && (
+        <div className="bubble-site-row">
+          {sites.map((it) => (
+            <button key={itemKey(it)} className="bubble-chip" onClick={() => api.bubble.open(it)} title={it.domain}>
+              {it.name && it.name !== it.domain ? it.name : it.domain}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -631,7 +645,7 @@ function BubbleBoard({ api, items, onChange, title }) {
     e.preventDefault();
     const v = typed.trim();
     if (!v) return;
-    const site = /[./]/.test(v) ? await api.bubble.resolveUrl(v) : null;
+    const site = /[./:]/.test(v) ? await api.bubble.resolveUrl(v) : null;
     add([site || { kind: 'word', text: v.toLowerCase() }]);
     setTyped('');
   };

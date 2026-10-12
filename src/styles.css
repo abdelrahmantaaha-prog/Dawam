@@ -1898,3 +1898,5 @@ button.bubble-tile:hover{border-color:var(--verdigris);background:var(--soft)}
 .bubble-added{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 .bubble-src{margin-inline-start:6px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--verdigris)}
 .bubble-brave .bubble-pick-del{padding:0 4px;vertical-align:middle}
+.bubble-site-row{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:8px}
+.bubble-site-row .bubble-chip{cursor:pointer}

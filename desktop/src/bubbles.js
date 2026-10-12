@@ -28,7 +28,7 @@ const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
-const { normalizeItems, domainOf, exeBase, isBrowserProcess, urlAllowed } = require('./bubble');
+const { normalizeItems, domainOf, isLocalSite, exeBase, isBrowserProcess, urlAllowed } = require('./bubble');
 
 const BRIDGE_PORTS = [47615, 47616, 47617];
 const BROWSER_PARTITION = 'persist:bubble';
@@ -215,7 +215,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
   async function openItem(raw) {
     const [item] = normalizeItems([raw]);
     if (!item) return { ok: false, error: 'unknown' };
-    if (item.kind === 'site') return openSite(item.url || `https://${item.domain}`);
+    if (item.kind === 'site') return openSite(item.url || `${isLocalSite(item.domain) ? 'http' : 'https'}://${item.domain}`);
     if (item.kind !== 'app') return { ok: false, error: 'unknown' };
 
     // Running already: bring it forward rather than starting a second copy.
@@ -240,6 +240,39 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
       return { ok: false, error: err };
     }
     return { ok: true, how: 'started' };
+  }
+
+  /* The browser the bubble's sites open in, opened to work in: Brave in a new
+     window, or the bubble browser on its new-tab page (which lists the
+     bubble's sites). */
+  function openBrowserHome() {
+    if (store.data.settings.bubbleSites === 'brave') {
+      const exe = braveExe();
+      if (exe) { spawn(exe, ['--new-window'], { detached: true, stdio: 'ignore' }).unref(); return; }
+    }
+    openBrowser();
+  }
+
+  async function browserIcon() {
+    const exe = store.data.settings.bubbleSites === 'brave' ? braveExe() : null;
+    return exe ? iconOf(exe) : null;
+  }
+
+  /* The sites, as a menu off the browser button: hovering the button opens
+     it. A native menu, so it can rise above a 40-pixel bar, and Windows puts
+     it above the button by itself when there is no room below. */
+  function siteMenu(win, at) {
+    const sites = (roundItems.length ? roundItems : sessions.getState().items || []).filter((it) => it.kind === 'site');
+    const label = store.data.settings.bubbleSites === 'brave' ? 'Open Brave' : 'Open the bubble browser';
+    const menu = Menu.buildFromTemplate([
+      { label, click: openBrowserHome },
+      ...(sites.length ? [{ type: 'separator' }] : []),
+      ...sites.map((it) => ({
+        label: it.name && it.name !== it.domain ? `${it.name}  —  ${it.domain}` : it.domain,
+        click: () => openSite(it.url || `${isLocalSite(it.domain) ? 'http' : 'https'}://${it.domain}`)
+      }))
+    ]);
+    menu.popup({ window: win, x: Math.round(at && at.x || 0), y: Math.round(at && at.y || 0) });
   }
 
   function openSite(url) {
@@ -311,7 +344,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     const first = String(text || '').split(/\r?\n/).map((l) => l.trim()).find((l) => l && !l.startsWith('#'));
     const domain = first && domainOf(first);
     if (!domain) return null;
-    const url = /^https?:\/\//i.test(first) ? first : `https://${domain}`;
+    const url = /^https?:\/\//i.test(first) ? first : `${isLocalSite(domain) ? 'http' : 'https'}://${domain}`;
     return { kind: 'site', domain, url, name: domain };
   }
 
@@ -439,13 +472,13 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
 
   function siteItemsForNewTab() {
     return (roundItems.length ? roundItems : sessions.getState().items || [])
-      .filter((it) => it.kind === 'site').map((it) => ({ name: it.name, url: it.url || `https://${it.domain}` }));
+      .filter((it) => it.kind === 'site').map((it) => ({ name: it.name, url: it.url || `${isLocalSite(it.domain) ? 'http' : 'https'}://${it.domain}` }));
   }
 
   function normalizeUrl(input) {
     const s = String(input || '').trim();
     if (/^(https?|file|chrome-extension):/i.test(s)) return s;
-    if (domainOf(s) && !/\s/.test(s)) return `https://${s}`;
+    if (domainOf(s) && !/\s/.test(s)) return `${isLocalSite(domainOf(s)) ? 'http' : 'https'}://${s}`;
     return `https://duckduckgo.com/?q=${encodeURIComponent(s)}`;
   }
 
@@ -876,7 +909,10 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     ipcMain.handle('bubble-running', () => running());
     ipcMain.handle('bubble-add-site', (_e, input) => addSite(input));
     // File Explorer, from the bubble bar — never judged, so always openable.
-    ipcMain.handle('bubble-open-files', () => { spawn('explorer.exe', [], { detached: true, stdio: 'ignore' }).unref(); });
+    ipcMain.handle('bubble-browser-home', () => openBrowserHome());
+    ipcMain.handle('bubble-browser-icon', () => browserIcon());
+    ipcMain.handle('bubble-site-menu', (e, at) => siteMenu(BrowserWindow.fromWebContents(e.sender), at));
+    ipcMain.handle('bubble-open-files',() => { spawn('explorer.exe', [], { detached: true, stdio: 'ignore' }).unref(); });
     ipcMain.handle('bubble-browser', (_e, url) => { openBrowser(url); });
     ipcMain.handle('bubble-brave-extensions', () => listBraveExtensions());
     ipcMain.handle('bubble-set-brave-extensions', (_e, ids) => setBraveExtensions(ids));

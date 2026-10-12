@@ -46,6 +46,17 @@ function tile(item) {
   return b;
 }
 
+function browserTile(sites) {
+  const b = document.createElement('button');
+  b.className = 'tile';
+  b.title = sites.map((s) => s.domain).join(', ');
+  b.innerHTML = '<span class="letter browser"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="#fff" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg></span>';
+  b.appendChild(Object.assign(document.createElement('span'), { className: 'name', textContent: 'Browser' }));
+  b.appendChild(Object.assign(document.createElement('span'), { className: 'kind', textContent: `${sites.length} site${sites.length === 1 ? '' : 's'}` }));
+  b.addEventListener('click', () => api.bubble.openBrowserHome());
+  return b;
+}
+
 let shownKey = '';
 async function renderDock(state) {
   if (!main) return;
@@ -56,8 +67,20 @@ async function renderDock(state) {
   const key = JSON.stringify(items.map((i) => [i.kind, i.exe || i.domain || i.text, !!i.icon]));
   if (key === shownKey) return;
   shownKey = key;
+  /* Apps get tiles; the sites share one Browser tile (opens the browser to
+     work in), and are listed under the dock to open directly. */
   const dock = $('dock');
-  dock.replaceChildren(...items.filter((i) => i.kind !== 'word').map(tile));
+  const sites = items.filter((i) => i.kind === 'site');
+  dock.replaceChildren(...items.filter((i) => i.kind === 'app').map(tile), ...(sites.length ? [browserTile(sites)] : []));
+  $('sites').hidden = !sites.length;
+  $('sites').replaceChildren(...sites.map((s) => {
+    const a = document.createElement('button');
+    a.className = 'site';
+    a.textContent = s.name && s.name !== s.domain ? s.name : s.domain;
+    a.title = s.domain;
+    a.addEventListener('click', () => api.bubble.open(s));
+    return a;
+  }));
   const words = items.filter((i) => i.kind === 'word').map((i) => i.text);
   $('words').hidden = !words.length;
   $('words').textContent = words.length ? `Also open: anything that mentions ${words.join(', ')}` : '';
@@ -87,7 +110,6 @@ $('add').addEventListener('submit', async (e) => {
 });
 
 $('planner').addEventListener('click', () => api.openPlanner());
-$('browser').addEventListener('click', () => api.bubble.browser());
 
 api.onState(render);
 api.getState().then(render);

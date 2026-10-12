@@ -69,6 +69,10 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
     // site item, or null when no bubble is running or there is no site in it.
     addSite: (text) => ipcRenderer.invoke('bubble-add-site', text),
     openFiles: () => ipcRenderer.invoke('bubble-open-files'),
+    // One browser button stands for all of a bubble's sites.
+    openBrowserHome: () => ipcRenderer.invoke('bubble-browser-home'),
+    browserIcon: () => ipcRenderer.invoke('bubble-browser-icon'),
+    siteMenu: (at) => ipcRenderer.invoke('bubble-site-menu', at),
     // The bubble bar: which programs have a window open, every few seconds.
     onRunning: (cb) => sub('bar-running', (_e, list) => cb(list)),
     browser: (url) => ipcRenderer.invoke('bubble-browser', url),

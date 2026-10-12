@@ -4,6 +4,23 @@
    sign-in pages always load, and a keyword allows any address that says it. */
 
 const bare = (h) => String(h || '').toLowerCase().replace(/^(www|m)\./, '');
+const LOCAL = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\])$/;
+
+/* A site as { name, port }. Local sites (this computer's own address) keep
+   their port: 127.0.0.1:5400 is one app and 127.0.0.1:3000 another. */
+function splitHost(h) {
+  const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(String(h || '').toLowerCase());
+  if (!m) return { name: '', port: '' };
+  const name = bare(m[1]);
+  return { name: LOCAL.test(name) ? '127.0.0.1' : name, port: m[2] || '' };
+}
+
+function siteMatches(domain, host) {
+  const d = splitHost(domain), h = splitHost(host);
+  if (!h.name) return false;
+  if (d.name === '127.0.0.1') return h.name === '127.0.0.1' && (!d.port || d.port === h.port);
+  return h.name === d.name || h.name.endsWith(`.${d.name}`);
+}
 
 function urlAllowed(url, rules) {
   if (!rules) return true;
@@ -12,7 +29,7 @@ function urlAllowed(url, rules) {
   if (!/^https?:$/.test(u.protocol)) return true;
   const host = bare(u.hostname);
   const under = (d) => host === d || host.endsWith(`.${d}`);
-  if ((rules.domains || []).some(under)) return true;
+  if ((rules.domains || []).some((d) => siteMatches(d, u.host))) return true;
   if ((rules.signIn || []).some(under)) return true;
   const hay = String(url).toLowerCase();
   return (rules.keywords || []).some((k) => k && hay.includes(k));

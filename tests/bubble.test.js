@@ -16,7 +16,7 @@ describe('domainOf', () => {
   it('takes the site out of whatever was dropped or typed', () => {
     expect(B.domainOf('https://www.github.com/anthropics/x?y=1#z')).toBe('github.com');
     expect(B.domainOf('docs.google.com/document/d/1')).toBe('docs.google.com');
-    expect(B.domainOf('http://localhost:5173/')).toBeNull();
+    expect(B.domainOf('http://localhost:5173/')).toBe('127.0.0.1:5173');   // a local app is a site too
     expect(B.domainOf('just words')).toBeNull();
   });
 });
@@ -73,6 +73,37 @@ describe('inBubble', () => {
   it('keeps old keywords working exactly as before', () => {
     expect(B.inBubble({ title: 'Some lecture - YouTube', process: 'brave', host: 'youtube.com' }, [{ kind: 'word', text: 'youtube' }])).toBe(true);
     expect(B.inBubble({ title: 'Notes', process: 'obsidian' }, [], ['obsidian'])).toBe(true);
+  });
+});
+
+describe("this computer's own addresses (local apps like Corpus)", () => {
+  const CORPUS_SITE = { kind: 'site', domain: '127.0.0.1:5400', name: 'Corpus' };
+  const CORPUS_APP = { kind: 'app', exe: 'E:\\Claude\\projects\\corpus\\Corpus.exe', name: 'Corpus' };
+
+  it('keeps the port, and treats localhost and 127.0.0.1 as one place', () => {
+    expect(B.domainOf('http://127.0.0.1:5400/inbox?x=1')).toBe('127.0.0.1:5400');
+    expect(B.domainOf('localhost:5400')).toBe('127.0.0.1:5400');
+    expect(B.domainOf('https://github.com:443/x')).toBe('github.com');
+  });
+
+  it('lets in that app and not the one on the next port', () => {
+    const rules = B.siteRules([CORPUS_SITE]);
+    expect(B.urlAllowed('http://127.0.0.1:5400/inbox', rules)).toBe(true);
+    expect(B.urlAllowed('http://localhost:5400/', rules)).toBe(true);
+    expect(B.urlAllowed('http://127.0.0.1:3000/', rules)).toBe(false);
+  });
+
+  it('knows the app window a local program opens in a browser, by its title', () => {
+    const appWindow = { title: 'Corpus', process: 'brave', host: '' };
+    expect(B.inBubble(appWindow, [CORPUS_APP])).toBe(true);
+    expect(B.inBubble(appWindow, [CORPUS_SITE])).toBe(true);
+    expect(B.inBubble({ title: 'Corpuscle facts - YouTube', process: 'brave', host: '' }, [CORPUS_APP])).toBe(false);
+    // a tab whose address can be read is judged by the address, not the title
+    expect(B.inBubble({ title: 'Corpus', process: 'brave', host: 'youtube.com' }, [CORPUS_APP])).toBe(false);
+  });
+
+  it('never lets a local site match a window by a stray digit', () => {
+    expect(B.inBubble({ title: 'Top 10 videos', process: 'brave', host: '' }, [CORPUS_SITE])).toBe(false);
   });
 });
 

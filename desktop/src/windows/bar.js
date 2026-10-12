@@ -31,6 +31,34 @@ function button(item) {
   return b;
 }
 
+/* One button for every site in the bubble: a click opens the browser to work
+   in, and resting on it opens a menu of the sites (bubbles.js, siteMenu). The
+   sites are places inside the browser, not programs, so they do not each get
+   a slot of their own. */
+let browserIcon = null;
+function browserButton(sites) {
+  const b = document.createElement('button');
+  b.className = 'item browser';
+  b.title = `Browser — ${sites.map((s) => s.name || s.domain).join(', ')}`;
+  b.innerHTML = browserIcon
+    ? `<img src="${browserIcon}" alt="" />`
+    : '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="#7FBFA4" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>';
+  const count = document.createElement('span');
+  count.className = 'count';
+  count.textContent = sites.length;
+  b.appendChild(count);
+  let hover = null;
+  const menu = () => {
+    const r = b.getBoundingClientRect();
+    api.bubble.siteMenu(document.body.classList.contains('vertical') ? { x: r.right, y: r.top } : { x: r.left, y: r.top });
+  };
+  b.addEventListener('mouseenter', () => { hover = setTimeout(menu, 350); });
+  b.addEventListener('mouseleave', () => clearTimeout(hover));
+  b.addEventListener('click', () => { clearTimeout(hover); api.bubble.openBrowserHome(); });
+  b.addEventListener('contextmenu', (e) => { e.preventDefault(); clearTimeout(hover); menu(); });
+  return b;
+}
+
 let shownKey = '';
 async function renderItems(state) {
   let list = await api.bubble.items();
@@ -40,10 +68,15 @@ async function renderItems(state) {
   if (key !== shownKey) {
     shownKey = key;
     items = list;
-    $('items').replaceChildren(...items.map(button));
+    const apps = items.filter((i) => i.kind === 'app');
+    const sites = items.filter((i) => i.kind === 'site');
+    $('items').replaceChildren(...apps.map(button), ...(sites.length ? [browserButton(sites)] : []));
   }
   marks();
 }
+
+let lastState = null;
+api.bubble.browserIcon().then((icon) => { browserIcon = icon; shownKey = ''; renderItems(lastState); }).catch(() => {});
 
 // Which of the bubble's apps are open, and which is in front.
 function marks() {
@@ -56,6 +89,7 @@ function marks() {
 
 function render(s) {
   if (!s) return;
+  lastState = s;
   $('name').textContent = s.bubbleName || s.task || '';
   $('left').textContent = s.phase === 'work' ? `${mmss(s.remainingSec)} left` : '';
   document.body.classList.toggle('paused', !!s.paused);

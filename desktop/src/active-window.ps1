@@ -133,6 +133,9 @@ function Get-BrowserDomain($hwnd) {
       # Only accept something that actually looks like a domain — while the
       # user is typing a search, the bar holds arbitrary text.
       if ($domain -match '^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$') { return $domain }
+      # This computer's own address, port kept: a local app (Corpus, on
+      # 127.0.0.1:5400) is told apart from another by its port alone.
+      if ($domain -match '^(localhost|127(\.\d{1,3}){3})(:\d+)?$') { return $domain }
     }
     return ''
   } catch { return '' }

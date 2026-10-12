@@ -33,15 +33,32 @@ const lc = (s) => String(s == null ? '' : s).toLowerCase().trim();
 const bare = (host) => lc(host).replace(/^(www|m)\./, '');
 const exeBase = (p) => lc(path.win32.basename(lc(p))).replace(/\.exe$/, '');
 
-/* A domain out of whatever was dropped or typed: a full URL, a bare host,
-   "www." and a path included. Null when there is no domain in it. */
+/* This computer's own addresses. Local apps (Corpus, for one) serve their
+   pages here, and "localhost" and 127.0.0.1 are the same place. */
+const LOCAL = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\])$/;
+
+/* A host as { name, port }: "www." dropped, every local spelling made one. */
+function splitHost(h) {
+  const m = /^(\[[^\]]+\]|[^:]+)(?::(\d+))?$/.exec(lc(h));
+  if (!m) return { name: '', port: '' };
+  const name = bare(m[1]);
+  return { name: LOCAL.test(name) ? '127.0.0.1' : name, port: m[2] || '' };
+}
+const isLocalSite = (domain) => splitHost(domain).name === '127.0.0.1';
+
+/* A site out of whatever was dropped or typed: a full URL, a bare host,
+   "www." and a path included. Null when there is no site in it.
+
+   A public site is its domain, and its port is dropped. A local one keeps
+   its port — 127.0.0.1:5400 is Corpus and 127.0.0.1:3000 is whatever else
+   happens to be running, and letting one in must not let in the other. */
 function domainOf(input) {
   let s = lc(input);
   if (!s) return null;
   s = s.replace(/^[a-z][a-z0-9+.-]*:\/\//, '');
-  s = s.split(/[/?#\s]/)[0].replace(/:\d+$/, '');
-  s = bare(s);
-  return /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(s) ? s : null;
+  const { name, port } = splitHost(s.split(/[/?#\s]/)[0]);
+  if (name === '127.0.0.1') return port ? `127.0.0.1:${port}` : '127.0.0.1';
+  return /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(name) ? name : null;
 }
 
 function isBrowserProcess(proc) {
@@ -118,8 +135,17 @@ function wordsOfItems(items) {
 }
 
 function siteMatches(domain, host) {
-  const h = bare(host);
-  return !!h && (h === domain || h.endsWith(`.${domain}`));
+  const d = splitHost(domain), h = splitHost(host);
+  if (!h.name) return false;
+  if (d.name === '127.0.0.1') return h.name === '127.0.0.1' && (!d.port || d.port === h.port);
+  return h.name === d.name || h.name.endsWith(`.${d.name}`);
+}
+
+/* Is this the window called `name`? Its title starts with the name as a
+   whole word — "Corpus" and "Corpus — Inbox", not "Corpuscle". */
+function titled(title, name) {
+  const t = lc(title), n = lc(name);
+  return n.length >= 3 && t.startsWith(n) && !/[a-z0-9؀-ۿ]/i.test(t.charAt(n.length));
 }
 
 function signingIn(host) {
@@ -135,9 +161,14 @@ function signingIn(host) {
 
    A browser window is judged by its site. Its program only counts when the
    browser itself was put in the bubble — "Brave, any site". When the address
-   cannot be read (rare; an internal page, a browser that hides it) the site
-   items fall back to being looked for in the title, which is the old rule
-   and the only evidence there is. */
+   cannot be read the title is the only evidence there is, and it is used:
+
+     - a site is looked for by its name (what it was called when it went in)
+       or, for a public site, by its main word (github for github.com);
+     - an app is looked for by its name. This is the app window a local
+       program opens in a browser — Corpus's launcher shows Corpus in a Brave
+       window with no address bar, titled "Corpus". That window IS the app in
+       the bubble, and the browser's name on the process must not hide it. */
 function inBubble(sample, items, words = []) {
   const title = String(sample.title || '');
   const proc = lc(sample.process);
@@ -154,11 +185,16 @@ function inBubble(sample, items, words = []) {
        week, and the item dropped last month must still be the same app. */
     if (it.kind === 'app') {
       if (exeBase(exe || proc) === exeBase(it.exe)) return true;
+      if (browser && !host && titled(title, it.name)) return true;
       continue;
     }
     if (it.kind === 'site') {
       if (browser && host && siteMatches(it.domain, host)) return true;
-      if (browser && !host && hay.includes(it.domain.split('.').slice(-2, -1)[0] || it.domain)) return true;
+      if (browser && !host) {
+        if (it.name && it.name !== it.domain && titled(title, it.name)) return true;
+        const word = isLocalSite(it.domain) ? '' : it.domain.split('.').slice(-2, -1)[0];
+        if (word && hay.includes(word)) return true;
+      }
     }
   }
   if (browser && host && list.some((it) => it.kind === 'site') && signingIn(host)) return true;
@@ -187,7 +223,7 @@ function urlAllowed(url, rules) {
   try { u = new URL(url); } catch { return false; }
   if (!/^https?:$/.test(u.protocol)) return true;   // file:, data:, about:, extension pages
   const host = bare(u.hostname);
-  if (rules.domains.some((d) => siteMatches(d, host))) return true;
+  if (rules.domains.some((d) => siteMatches(d, u.host))) return true;
   if (rules.signIn.some((s) => host === s || host.endsWith(`.${s}`))) return true;
   const hay = lc(url);
   return rules.keywords.some((k) => hay.includes(k));
@@ -197,6 +233,7 @@ module.exports = {
   BROWSERS,
   SIGN_IN_HOSTS,
   domainOf,
+  isLocalSite,
   exeBase,
   isBrowserProcess,
   normalizeItem,

@@ -9,6 +9,15 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+One browser button, and local apps in a bubble (desktop 1.16.0).
+
+- A bubble's sites no longer take a slot each on the bubble bar, the wall or
+  the Bubbles page. One browser button stands for them: click it to open the
+  browser and work, rest on it (on the bar) for a menu of the sites.
+- Apps on this computer that show themselves in a browser (Corpus, at
+  127.0.0.1:5400) can be in a bubble: a local address is a site, port and
+  all, and the app's own window is recognised by its name.
+
 The bubble bar, and File Explorer stops crashing (desktop 1.15.0).
 
 - While a bubble runs, the Windows taskbar steps aside for the bubble bar: the
