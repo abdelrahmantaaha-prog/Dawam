@@ -919,6 +919,9 @@ function FocusSettings({ api, settings, templates, onSaved }) {
       {toggle('bubbleWall', tx('Cover the screens while a bubble runs', 'غطِّ الشاشات أثناء الفقاعة'),
         tx('A calm wall behind the things in your bubble, with each of them on it to open. Off, the bubble still puts away everything else — you just see your desktop behind it.',
           'جدار هادئ خلف ما في فقاعتك، وعليه كل منها لتفتحه. عند إيقافه تظل الفقاعة تُبعد كل ما سواها — لكنك ترى سطح المكتب خلفها.'))}
+      {toggle('bubbleTaskbar', tx('Replace the taskbar while a bubble runs', 'استبدل شريط المهام أثناء الفقاعة'),
+        tx('The Windows taskbar steps aside for the bubble bar: your bubble’s apps and sites, File Explorer, a box to let a site in, the time left and the clock. Start, the Windows key and Alt+Tab still work; the taskbar comes back when the round ends.',
+          'يتنحّى شريط مهام ويندوز لشريط الفقاعة: تطبيقات فقاعتك ومواقعها، ومستكشف الملفات، وخانة لإدخال موقع، والوقت المتبقي والساعة. تظل قائمة ابدأ وزر ويندوز وAlt+Tab تعمل؛ ويعود شريط المهام حين تنتهي الجولة.'))}
       <label className="field">
         <span>{tx('Sites in a bubble open in', 'تُفتح مواقع الفقاعة في')}</span>
         <select value={draft.bubbleSites || 'rhythm'} onChange={(e) => save({ bubbleSites: e.target.value })}>

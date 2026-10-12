@@ -38,6 +38,11 @@ const DEFAULTS = {
     /* Bubbles. The wall is the backdrop that covers every screen while a
        bubble runs, with the bubble's apps and sites on it to open. */
     bubbleWall: true,
+    // The bubble bar takes the Windows taskbar's place while a bubble runs.
+    bubbleTaskbar: true,
+    // Set while the taskbar is hidden, so a Rhythm that was killed mid-round
+    // shows it again at its next launch (bubbles.js, restoreTaskbar).
+    taskbarHiddenByRhythm: false,
     // Where a site on the wall opens: 'rhythm' (the bubble browser, which
     // never loads a page outside the bubble) or 'brave' (the real Brave, held
     // to the bubble by the Rhythm extension).

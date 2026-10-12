@@ -138,7 +138,10 @@ try {
   await ev('window.rhythmFocus.saveTemplate({ name: "Smoke bubble", workMin: 25, items: [{ kind: "site", domain: "example.org", name: "example.org" }] })');
   check('a saved bubble keeps its items', await ev('(await window.rhythmFocus.getData()).templates.some((t) => t.name === "Smoke bubble" && t.items[0].domain === "example.org" && t.allowed.includes("example.org"))'));
   try {
-    const b = await (await fetch('http://127.0.0.1:47615/bubble?since=-1')).json();
+    // Its own bridge: a Rhythm already running on this machine holds the
+    // first port, and this copy moves to the next one.
+    const port = await ev('(await window.rhythmFocus.bubble.companion()).port');
+    const b = await (await fetch(`http://127.0.0.1:${port}/bubble?since=-1`)).json();
     check('Brave can hear about bubbles', typeof b.v === 'number' && b.active === false);
   } catch (err) { check('Brave can hear about bubbles', err.message); }
 

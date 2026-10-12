@@ -68,6 +68,9 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
     // Let a site into the running bubble for this round. Resolves to the
     // site item, or null when no bubble is running or there is no site in it.
     addSite: (text) => ipcRenderer.invoke('bubble-add-site', text),
+    openFiles: () => ipcRenderer.invoke('bubble-open-files'),
+    // The bubble bar: which programs have a window open, every few seconds.
+    onRunning: (cb) => sub('bar-running', (_e, list) => cb(list)),
     browser: (url) => ipcRenderer.invoke('bubble-browser', url),
     braveExtensions: () => ipcRenderer.invoke('bubble-brave-extensions'),
     setBraveExtensions: (ids) => ipcRenderer.invoke('bubble-set-brave-extensions', ids),

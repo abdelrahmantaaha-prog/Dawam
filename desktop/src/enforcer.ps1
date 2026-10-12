@@ -4,6 +4,7 @@
 #   activate <id> <name>   - bring forward the first window of the program <name> (file name,
 #                            no .exe); answers {"id":..,"ok":true|false}
 #   list <id>              - the open app windows; answers {"id":..,"windows":[{title,process,path,hwnd}]}
+#   taskbar hide|show      - the Windows taskbar on every screen (bubbles replace it)
 # Used to send you back to your work, and by the bubble's dock and drag palette.
 # Answers are one JSON line each on stdout, matched to the question by id.
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -60,6 +61,25 @@ public class RhythmEnforce {
     } finally { CloseHandle(h); }
   }
 
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
+
+  /* The Windows taskbar, on every screen: hidden while a bubble runs (the
+     bubble bar stands in its place), shown again after. Hiding the window
+     leaves its strip of screen reserved, so maximized windows stay clear of
+     the bar that takes its place, and no Windows setting is changed. Returns
+     how many taskbars there were. */
+  public static int Taskbar(bool show) {
+    int n = 0;
+    foreach (string cls in new string[] { "Shell_TrayWnd", "Shell_SecondaryTrayWnd" }) {
+      IntPtr h = IntPtr.Zero;
+      while ((h = FindWindowEx(IntPtr.Zero, h, cls, null)) != IntPtr.Zero) {
+        ShowWindow(h, show ? 5 : 0); // SW_SHOW : SW_HIDE
+        n++;
+      }
+    }
+    return n;
+  }
+
   public class Win { public IntPtr Hwnd; public string Title; public string Path; }
 
   /* The windows a person would call open: visible, titled, not owned by
@@ -106,6 +126,9 @@ while ($true) {
   if ($parts.Count -lt 2) { continue }
   try {
     switch ($parts[0]) {
+      'taskbar' {
+        [void][RhythmEnforce]::Taskbar($parts[1] -eq 'show')
+      }
       'minimize' {
         $h = [IntPtr]([int64]$parts[1])
         if ([RhythmEnforce]::IsWindow($h)) { [void][RhythmEnforce]::ShowWindow($h, 6) }  # SW_MINIMIZE

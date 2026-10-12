@@ -67,18 +67,119 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     wallWins = [];
   }
 
+  /* ------------------------------------------------------------------ */
+  /*  The bubble bar, in place of the Windows taskbar                   */
+  /*                                                                    */
+  /*  While a bubble runs the taskbar is hidden on every screen and a    */
+  /*  bar of the bubble's own takes its strip. Windows keeps that strip  */
+  /*  reserved while the taskbar is hidden (checked on this machine: the */
+  /*  work area does not move), so nothing maximized goes under the bar  */
+  /*  and no Windows setting is touched — hiding a window is the whole   */
+  /*  change. The taskbar comes back when the round ends; and because a  */
+  /*  Rhythm that is killed mid-round cannot put it back, the fact that  */
+  /*  it was hidden is written down, and the next launch restores it.    */
+  /* ------------------------------------------------------------------ */
+  let barWins = [];
+  let barStrips = null;   // display id -> the strip the taskbar held, measured before hiding it
+  let barTimer = null;
+  const barWanted = (s) => s.phase === 'work' && s.strict && store.data.settings.bubbleTaskbar !== false;
+
+  /* The part of a screen the taskbar reserves: whatever lies outside its
+     work area, on whichever edge. A screen with no taskbar (or an auto-
+     hiding one) has none; the main screen then gets a bar laid over its
+     bottom edge instead. */
+  function stripOf(d) {
+    const b = d.bounds, w = d.workArea;
+    if (w.y + w.height < b.y + b.height) return { x: b.x, y: w.y + w.height, width: b.width, height: b.y + b.height - (w.y + w.height), vertical: false };
+    if (w.y > b.y) return { x: b.x, y: b.y, width: b.width, height: w.y - b.y, vertical: false };
+    if (w.x > b.x) return { x: b.x, y: b.y, width: w.x - b.x, height: b.height, vertical: true };
+    if (w.x + w.width < b.x + b.width) return { x: w.x + w.width, y: b.y, width: b.x + b.width - (w.x + w.width), height: b.height, vertical: true };
+    return null;
+  }
+
+  function setTaskbarHidden(hidden) {
+    enforcer.send(`taskbar ${hidden ? 'hide' : 'show'}`);
+    if (!!store.data.settings.taskbarHiddenByRhythm !== hidden) {
+      store.data.settings.taskbarHiddenByRhythm = hidden;
+      store.save();
+    }
+  }
+
+  function showBar() {
+    if (barWins.length) return;
+    const primary = screen.getPrimaryDisplay().id;
+    if (!barStrips) {
+      barStrips = new Map();
+      for (const d of screen.getAllDisplays()) {
+        const strip = stripOf(d) || (d.id === primary
+          ? { x: d.bounds.x, y: d.bounds.y + d.bounds.height - 44, width: d.bounds.width, height: 44, vertical: false }
+          : null);
+        if (strip) barStrips.set(d.id, strip);
+      }
+    }
+    for (const [, strip] of barStrips) {
+      const win = new BrowserWindow({
+        x: strip.x, y: strip.y, width: strip.width, height: strip.height,
+        frame: false, skipTaskbar: true, resizable: false, movable: false,
+        minimizable: false, maximizable: false, fullscreenable: false,
+        alwaysOnTop: true, show: false, backgroundColor: '#0E1A17', icon: icon(), title: 'Rhythm bubble bar',
+        webPreferences: { preload }
+      });
+      win.setAlwaysOnTop(true, 'pop-up-menu');
+      win.on('close', (e) => { if (!isQuitting()) e.preventDefault(); });
+      win.loadFile(winFile('bar.html'), { query: { vertical: strip.vertical ? '1' : '0' } });
+      // Shown without taking the focus from whatever you were doing.
+      win.once('ready-to-show', () => { if (!win.isDestroyed()) win.showInactive(); });
+      barWins.push(win);
+    }
+    setTaskbarHidden(true);
+    /* Every few seconds while the bar is up: which of the bubble's apps are
+       open (for the marks under them), and the taskbar hidden again — File
+       Explorer restarting brings a fresh one back. */
+    barTimer = setInterval(async () => {
+      enforcer.send('taskbar hide');
+      const ans = await enforcer.ask('list', '', 4000);
+      const open = [...new Set(((ans && ans.windows) || []).map((w) => exeBase(w.path || w.process)).filter(Boolean))];
+      for (const w of barWins) if (!w.isDestroyed()) w.webContents.send('bar-running', open);
+    }, 3000);
+  }
+
+  function hideBar() {
+    clearInterval(barTimer);
+    barTimer = null;
+    for (const w of barWins) if (!w.isDestroyed()) w.destroy();
+    barWins = [];
+    barStrips = null;
+    setTaskbarHidden(false);
+  }
+
   function onState(s) {
     if (s.phase === 'idle') roundItems = [];
     if (wallWanted(s)) showWall(); else if (wallWins.length) hideWall();
-    for (const w of wallWins) if (!w.isDestroyed()) w.webContents.send('state', s);
+    if (barWanted(s)) showBar(); else if (barWins.length) hideBar();
+    for (const w of [...wallWins, ...barWins]) if (!w.isDestroyed()) w.webContents.send('state', s);
     applyRules();
   }
 
-  // Monitors changed: the walls were sized for screens that may be gone.
+  /* Monitors changed: the walls and bars were sized for screens that may be
+     gone. The strips are measured again only when the taskbar is showing —
+     with it hidden, they are the ones measured before. */
   function refit() {
-    if (!wallWins.length) return;
-    hideWall();
-    if (wallWanted(sessions.getState())) showWall();
+    const s = sessions.getState();
+    if (wallWins.length) { hideWall(); if (wallWanted(s)) showWall(); }
+    if (barWins.length) {
+      for (const w of barWins) if (!w.isDestroyed()) w.destroy();
+      barWins = [];
+      clearInterval(barTimer);
+      const known = barStrips;
+      barStrips = known && new Map([...known].filter(([id]) => screen.getAllDisplays().some((d) => d.id === id)));
+      if (barWanted(s)) showBar(); else setTaskbarHidden(false);
+    }
+  }
+
+  // A previous Rhythm hid the taskbar and never got to show it again.
+  function restoreTaskbar() {
+    if (store.data.settings.taskbarHiddenByRhythm) setTaskbarHidden(false);
   }
 
   function startRound(items) {
@@ -774,6 +875,8 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     ipcMain.handle('bubble-resolve-url', (_e, text) => resolveUrl(text));
     ipcMain.handle('bubble-running', () => running());
     ipcMain.handle('bubble-add-site', (_e, input) => addSite(input));
+    // File Explorer, from the bubble bar — never judged, so always openable.
+    ipcMain.handle('bubble-open-files', () => { spawn('explorer.exe', [], { detached: true, stdio: 'ignore' }).unref(); });
     ipcMain.handle('bubble-browser', (_e, url) => { openBrowser(url); });
     ipcMain.handle('bubble-brave-extensions', () => listBraveExtensions());
     ipcMain.handle('bubble-set-brave-extensions', (_e, ids) => setBraveExtensions(ids));
@@ -803,7 +906,8 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     setBraveExtensions,
     addSite,
     startBridge: () => { bridge.start(); companionFolder(); },
-    stop: () => { bridge.stop(); hideWall(); },
+    restoreTaskbar,
+    stop: () => { bridge.stop(); hideWall(); if (barWins.length) hideBar(); },
   };
 }
 

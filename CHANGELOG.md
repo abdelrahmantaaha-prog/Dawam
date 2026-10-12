@@ -9,6 +9,17 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+The bubble bar, and File Explorer stops crashing (desktop 1.15.0).
+
+- While a bubble runs, the Windows taskbar steps aside for the bubble bar: the
+  bubble's apps and sites (with a mark under the ones that are open), File
+  Explorer, a box to let a site in, the time left and the clock. It sits in
+  the taskbar's own place, so nothing goes under it, and the taskbar comes
+  back when the round ends (Bubble settings → Replace the taskbar).
+- File Explorer is never put away by a bubble any more. Minimizing it the
+  instant it opened crashed it, and the taskbar with it. Every newly opened
+  app also gets a second before it is judged.
+
 Branching out, and more extensions in the bubble browser (desktop 1.14.0).
 
 - A site can be let into the running bubble for the rest of the round, from

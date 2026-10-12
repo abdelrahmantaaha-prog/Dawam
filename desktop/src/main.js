@@ -470,8 +470,9 @@ if (!app.requestSingleInstanceLock()) {
     }
     quitting = true;
     if (poller) poller.stop();
-    if (enforcer) enforcer.stop();
+    // Bubbles first: putting the taskbar back is a command to the enforcer.
     if (bubbles) bubbles.stop();
+    if (enforcer) enforcer.stop();
     hideBreakScreens();
     hideAwayScreens();
     hideLockScreens();
@@ -553,6 +554,7 @@ if (!app.requestSingleInstanceLock()) {
     });
     bubbles.wire();
     bubbles.startBridge();
+    bubbles.restoreTaskbar();
 
     // Free times: scheduled windows when the hard-block list is ignored.
     // Lines like "20:00-23:00" (daily) or "fri,sat 14:00-02:00" (24h clock;
