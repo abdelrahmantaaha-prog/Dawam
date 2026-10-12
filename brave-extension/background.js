@@ -69,10 +69,12 @@ async function sweep(rules) {
 
 async function apply(state) {
   const rules = state && state.active ? state.rules : null;
+  // Rules first: a blocked tab reloads its page as soon as storage says the
+  // page is allowed, and it must not meet the old rules on the way.
+  const changed = await installRules(rules);
   // Storage is also what the popup and blocked.js read. Writing it is an
   // extension call, which keeps this worker awake between questions.
   await chrome.storage.session.set({ bubble: state || null, connected: !!state, at: Date.now() });
-  const changed = await installRules(rules);
   const nudged = state && state.sweep !== lastSweep;
   if (state) lastSweep = state.sweep;
   if (rules && (changed || nudged)) await sweep(rules);
@@ -102,5 +104,23 @@ async function loop() {
 chrome.runtime.onInstalled.addListener(() => { chrome.alarms.create('rhythm', { periodInMinutes: 0.5 }); loop(); });
 chrome.runtime.onStartup.addListener(() => { chrome.alarms.create('rhythm', { periodInMinutes: 0.5 }); loop(); });
 chrome.alarms.onAlarm.addListener(() => loop());
-chrome.runtime.onMessage.addListener((m) => { if (m && m.type === 'wake') loop(); });
+/* "Let this site in" from blocked.html. Only this worker talks to Rhythm, and
+   Rhythm only accepts it from an extension, with the header below. */
+async function letIn(url) {
+  if (!base) base = await findRhythm();
+  if (!base) return { ok: false };
+  try {
+    const r = await fetch(`${base}/bubble/add`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Rhythm': '1' },
+      body: JSON.stringify({ url }), signal: AbortSignal.timeout(4000)
+    });
+    return await r.json();
+  } catch { return { ok: false }; }
+}
+
+chrome.runtime.onMessage.addListener((m, _sender, reply) => {
+  if (m && m.type === 'wake') loop();
+  if (m && m.type === 'add') { letIn(m.url).then(reply); loop(); return true; }
+  return false;
+});
 loop();

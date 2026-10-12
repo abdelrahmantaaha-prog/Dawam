@@ -3,7 +3,7 @@ const main = new URLSearchParams(location.search).get('main') === '1';
 const $ = (id) => document.getElementById(id);
 
 if (!main) document.body.classList.add('side');
-for (const id of ['dock', 'actions', 'note']) $(id).hidden = !main;
+for (const id of ['dock', 'actions', 'note', 'add', 'add-note']) $(id).hidden = !main;
 
 const mmss = (sec) => {
   const s = Math.max(0, Math.round(sec || 0));
@@ -73,6 +73,18 @@ function render(s) {
   document.body.classList.toggle('paused', !!s.paused);
   renderDock(s);
 }
+
+// The site goes in for the rest of the round, appears on the dock, and opens.
+$('add').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const v = $('add-site').value.trim();
+  if (!v) return;
+  const site = await api.bubble.addSite(v);
+  if (!site) { $('add-note').textContent = 'That is not a site — type an address like arxiv.org.'; return; }
+  $('add-site').value = '';
+  $('add-note').textContent = `${site.domain} is in for this round.`;
+  api.bubble.open(site);
+});
 
 $('planner').addEventListener('click', () => api.openPlanner());
 $('browser').addEventListener('click', () => api.bubble.browser());

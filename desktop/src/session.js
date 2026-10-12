@@ -1,5 +1,5 @@
 const { EventEmitter } = require('events');
-const { BROWSERS, normalizeItems, inBubble, siteRules, isBrowserProcess } = require('./bubble');
+const { BROWSERS, normalizeItems, itemKey, inBubble, siteRules, isBrowserProcess } = require('./bubble');
 
 /* A bubble (what a focus mode became) is an allow list and nothing else.
 
@@ -94,6 +94,7 @@ class SessionManager extends EventEmitter {
     this.lastBlocked = null;   // { hwnd, at } — so one window is counted once
     this.allowed = [];
     this.items = [];           // the bubble's apps, sites and words (see bubble.js)
+    this.added = [];           // of those, the ones let in after the round began
     this.bubbleName = '';
     this.homeHwnd = 0; // last allowed window — where a block sends you back to
     this.stableKey = undefined; // identity of the current foreground window
@@ -129,6 +130,7 @@ class SessionManager extends EventEmitter {
       allowed: this.allowed,
       // Icons stay out: this goes to every window once a second.
       items: this.items.map(({ icon, ...rest }) => rest),
+      added: this.added.map(({ icon, ...rest }) => rest),
       bubbleName: this.bubbleName,
       phase: this.phase,
       paused: this.paused,
@@ -182,6 +184,7 @@ class SessionManager extends EventEmitter {
     this.items = Array.isArray(items)
       ? normalizeItems(items)
       : this.allowed.map((text) => ({ kind: 'word', text }));
+    this.added = [];
     this.bubbleName = tpl ? String(tpl.name || '') : '';
     this.plannedMin = min;
     this.totalSec = min * 60;
@@ -268,10 +271,28 @@ class SessionManager extends EventEmitter {
     this.projectId = null;
     this.allowed = [];
     this.items = [];
+    this.added = [];
     this.bubbleName = '';
     this.homeHwnd = 0;
     this.lastBlocked = null;
     this.emitState();
+  }
+
+  /* Research branches out. Something can be let into the running bubble
+     without stopping the round — for this round only; the saved bubble is
+     not touched unless the planner is asked to keep it. Every addition is
+     written into the round's history entry, so a round that kept widening
+     says so afterwards rather than looking like the bubble it started as.
+     Returns the items that were actually new. */
+  addToRound(raw) {
+    if (this.phase !== 'work' || !this.strict()) return [];
+    const have = new Set(this.items.map(itemKey));
+    const fresh = normalizeItems(raw).filter((it) => !have.has(itemKey(it)));
+    if (!fresh.length) return [];
+    this.items = [...this.items, ...fresh];
+    this.added = [...this.added, ...fresh];
+    this.emitState();
+    return fresh;
   }
 
   onSample(sample) {
@@ -365,6 +386,8 @@ class SessionManager extends EventEmitter {
       focusedSec: elapsedSec,
       distractedSec: 0,
       blockedCount: this.blockedCount,
+      // What was let into the bubble after the round began.
+      added: this.added.map((it) => (it.kind === 'site' ? it.domain : it.kind === 'app' ? it.name : it.text)),
       completed
     };
     this.store.data.history.unshift(entry);

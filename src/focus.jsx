@@ -276,7 +276,7 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
       )}
 
       {tab === 'focus' && (live
-        ? <LiveSession api={api} state={state} projects={projects} />
+        ? <LiveSession api={api} state={state} projects={projects} templates={templates} reload={reload} />
         : (
           <div className="focus-card">
             <h3 className="focus-h">{tx('Start a round', 'ابدأ جولة')}</h3>
@@ -429,7 +429,7 @@ export function FocusView({ tasks = [], projects = [], rewards = [], balance = 0
 /*  Live session — the same numbers the overlay shows, with room to     */
 /*  show the window that is currently being judged.                     */
 /* ------------------------------------------------------------------ */
-function LiveSession({ api, state, projects = [] }) {
+function LiveSession({ api, state, projects = [], templates = [], reload }) {
   const s = state;
   const breakPhase = s.phase === 'break';
   const cls = breakPhase ? 'break' : s.paused ? 'paused' : 'working';
@@ -463,6 +463,7 @@ function LiveSession({ api, state, projects = [] }) {
       {/* The bubble's own dock, the same one the wall shows: one tap opens
           the app (or brings it forward) or the site. */}
       {!breakPhase && s.strict && <LiveDock api={api} state={s} />}
+      {!breakPhase && s.strict && <LiveAdd api={api} state={s} templates={templates} reload={reload} />}
 
       <div className="focus-actions">
         {breakPhase ? (
@@ -495,6 +496,59 @@ function LiveDock({ api, state }) {
         <span className="bubble-ico"><Globe size={18} /></span>
         <span className="bubble-name">{tx('Bubble browser', 'متصفح الفقاعة')}</span>
       </button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Branching out: letting a site into the running bubble.             */
+/*                                                                     */
+/*  Research does not stay inside the list it started with. A site can  */
+/*  be let in here (or from the "not in this bubble" page in either     */
+/*  browser) for the rest of the round; the saved bubble only changes   */
+/*  if you say so. What was let in is shown, and kept on the round's    */
+/*  history, so a round that kept widening is honest about it.          */
+/* ------------------------------------------------------------------ */
+function LiveAdd({ api, state, templates, reload }) {
+  const [text, setText] = useState('');
+  const [note, setNote] = useState('');
+  const [kept, setKept] = useState(false);
+  const added = (state.added || []).filter((it) => it.kind === 'site');
+  const tpl = state.templateId != null ? templates.find((t) => t.id === state.templateId) : null;
+  const unsaved = tpl ? added.filter((it) => !itemsOf(tpl).some((x) => itemKey(x) === itemKey(it))) : [];
+
+  const add = async (e) => {
+    e.preventDefault();
+    const v = text.trim();
+    if (!v) return;
+    const site = await api.bubble.addSite(v);
+    if (site) { setText(''); setNote(''); setKept(false); }
+    else setNote(tx('That is not a site — type an address like arxiv.org.', 'هذا ليس موقعًا — اكتب عنوانًا مثل arxiv.org.'));
+  };
+
+  const keep = async () => {
+    await api.saveTemplate({ id: tpl.id, name: tpl.name, workMin: tpl.workMin, items: mergeItems(itemsOf(tpl), unsaved) });
+    setKept(true);
+    if (reload) reload();
+  };
+
+  return (
+    <div className="bubble-live-add">
+      <form className="bubble-type" onSubmit={add}>
+        <input value={text} onChange={(e) => setText(e.target.value)}
+          placeholder={tx('Branching out? Let a site in for this round', 'تتفرّع؟ أدخل موقعًا لهذه الجولة')} />
+        <button className="ghost sm" type="submit" disabled={!text.trim()}><Plus size={14} /> {tx('Let in', 'أدخِل')}</button>
+      </form>
+      {note && <p className="hint-text bubble-note">{note}</p>}
+      {added.length > 0 && (
+        <p className="hint-text bubble-added">
+          {tx('Let in this round:', 'أُدخل في هذه الجولة:')} {added.map((it) => it.domain).join(', ')}
+          {tpl && unsaved.length > 0 && !kept && (
+            <button className="ghost sm" onClick={keep}>{tx(`Keep in “${tpl.name}”`, `احفظها في «${tpl.name}»`)}</button>
+          )}
+          {kept && <span className="focus-applied"> {tx('kept', 'حُفظت')}</span>}
+        </p>
+      )}
     </div>
   );
 }
@@ -665,6 +719,9 @@ function RoundEndedCard({ entry, onDismiss, onMarkDone, onLearn }) {
         {tx(`${focusedMin} min focused of ${spentMin} spent`, `${focusedMin} دقيقة تركيز من ${spentMin} دقيقة`)}
         {entry.blockedCount ? tx(` · ${entry.blockedCount} blocked`, ` · حُظر ${entry.blockedCount}`) : ''}
       </p>
+      {entry.added && entry.added.length > 0 && (
+        <p className="hint-text">{tx('Branched out to', 'تفرّعت إلى')} {entry.added.join(', ')}</p>
+      )}
       <div className="focus-actions">
         {entry.taskId && (
           <button className="primary" onClick={() => { onMarkDone(entry.taskId, spentMin); onDismiss(); }}>
@@ -944,8 +1001,22 @@ function BraveCompanion({ api }) {
 function BraveExtensions({ api }) {
   const [list, setList] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [pickNote, setPickNote] = useState('');
   useEffect(() => { api.bubble.braveExtensions().then(setList).catch(() => setList([])); }, [api]);
   if (!list) return null;
+  const pick = async () => {
+    setBusy(true); setPickNote('');
+    try {
+      const r = await api.bubble.pickExtension();
+      if (r && r.list) setList(r.list);
+      if (r && r.error === 'no-manifest') setPickNote(tx('That folder has no manifest.json — pick the folder the extension’s manifest is in.', 'لا يحوي هذا المجلد manifest.json — اختر المجلد الذي فيه ملف الإضافة.'));
+    } finally { setBusy(false); }
+  };
+  const forget = async (id) => { setBusy(true); try { setList(await api.bubble.forgetExtension(id)); } finally { setBusy(false); } };
+  const SOURCE = {
+    'brave-unpacked': tx('unpacked in Brave', 'غير مضغوطة في Brave'),
+    folder: tx('unpacked folder', 'مجلد غير مضغوط'),
+  };
   const flip = async (id) => {
     const on = list.filter((x) => x.on).map((x) => x.id);
     const next = on.includes(id) ? on.filter((x) => x !== id) : [...on, id];
@@ -966,9 +1037,13 @@ function BraveExtensions({ api }) {
               'Loaded straight from Brave’s own folder. Most extensions that work on the page itself (spelling, grammar, dark mode, password fill) work here; ones that need parts of Brave this browser does not have may not. Their buttons sit at the end of the address bar.',
               'تُحمّل مباشرة من مجلد Brave. أغلب الإضافات التي تعمل على الصفحة نفسها (الإملاء، القواعد، الوضع الداكن، تعبئة كلمات المرور) تعمل هنا؛ أما التي تحتاج أجزاء من Brave ليست في هذا المتصفح فقد لا تعمل. أزرارها في آخر شريط العنوان.')}</p>
             {list.map((x) => (
-              <label key={x.id} className="check">
-                <input type="checkbox" checked={x.on} disabled={busy} onChange={() => flip(x.id)} />
-                <span>{x.name} <small className="hint-text">v{x.version}{
+              <label key={x.id} className="check" title={x.dir || ''}>
+                <input type="checkbox" checked={x.on} disabled={busy || x.missing} onChange={() => flip(x.id)} />
+                <span>{x.name}{SOURCE[x.source] ? <span className="bubble-src">{SOURCE[x.source]}</span> : null}
+                  {x.source === 'folder' && (
+                    <button type="button" className="bubble-pick-del" onClick={(e) => { e.preventDefault(); forget(x.id); }} aria-label={tx('Remove', 'أزل')}><X size={12} /></button>
+                  )}
+                  {' '}<small className="hint-text">{x.missing ? tx('folder not found', 'المجلد غير موجود') : `v${x.version}`}{
                   x.on && x.error ? ` · ${tx('could not load', 'تعذّر تحميلها')}: ${x.error}`
                     : x.on && x.partial ? ` · ${tx('only partly works here — its background part would not start', 'تعمل هنا جزئيًا فقط — جزؤها الخلفي لم يبدأ')}`
                       : x.on && x.loaded ? ` · ${tx('loaded', 'محمّلة')}`
@@ -977,6 +1052,8 @@ function BraveExtensions({ api }) {
             ))}
           </>
         )}
+      <button className="ghost sm" onClick={pick} disabled={busy}><FolderOpen size={13} /> {tx('Load unpacked…', 'تحميل غير مضغوط…')}</button>
+      {pickNote && <p className="hint-text bubble-note">{pickNote}</p>}
     </div>
   );
 }

@@ -1894,3 +1894,7 @@ button.bubble-tile:hover{border-color:var(--verdigris);background:var(--soft)}
 .bubble-steps{margin:8px 0 0;padding-inline-start:20px;font-size:12.5px;color:var(--muted);line-height:1.7}
 .bubble-steps code{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;background:var(--panel);padding:1px 5px;border-radius:4px}
 .bubble-path{display:block;overflow-wrap:anywhere;font-family:ui-monospace,Menlo,monospace}
+.bubble-live-add{margin-top:14px;text-align:start}
+.bubble-added{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.bubble-src{margin-inline-start:6px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--verdigris)}
+.bubble-brave .bubble-pick-del{padding:0 4px;vertical-align:middle}

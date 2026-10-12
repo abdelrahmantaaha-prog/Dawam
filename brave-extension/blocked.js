@@ -5,6 +5,18 @@ try { host = new URL(target).hostname.replace(/^www\./, ''); } catch { /* show i
 document.getElementById('site').textContent = host;
 document.title = `${host} — outside the bubble`;
 document.getElementById('back').addEventListener('click', () => history.back());
+/* The worker asks Rhythm to let the site in. Rhythm then tells the worker the
+   bubble changed, the rules widen, and render() below sees the page is
+   allowed and goes to it. */
+document.getElementById('add').addEventListener('click', async () => {
+  const btn = document.getElementById('add');
+  btn.disabled = true;
+  const r = await chrome.runtime.sendMessage({ type: 'add', url: target }).catch(() => null);
+  if (!r || !r.ok) {
+    btn.disabled = false;
+    document.getElementById('note').textContent = 'Rhythm could not be reached to let it in. Is it running?';
+  }
+});
 
 function render(bubble) {
   // The bubble ended, or changed to one this page belongs in: go to it.

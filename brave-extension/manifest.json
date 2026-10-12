@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Rhythm Bubbles",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Holds Brave to the bubble Rhythm is running: while a bubble runs, only its sites open. Talks only to Rhythm on this computer.",
   "permissions": ["declarativeNetRequest", "tabs", "alarms", "storage"],
   "host_permissions": ["<all_urls>"],

@@ -201,6 +201,7 @@ module.exports = {
   isBrowserProcess,
   normalizeItem,
   normalizeItems,
+  itemKey,
   itemsOfMode,
   wordsOfItems,
   inBubble,

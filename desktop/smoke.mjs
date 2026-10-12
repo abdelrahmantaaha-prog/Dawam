@@ -132,7 +132,9 @@ try {
      the local bridge the Brave extension listens to. */
   check('the bubble board renders', await ev('!!document.querySelector(".bubble-drop")'));
   check('a dropped link becomes its site', await ev('(await window.rhythmFocus.bubble.resolveUrl("https://www.github.com/anthropics")).domain === "github.com"'));
-  check('the open windows can be listed', await ev('Array.isArray(await window.rhythmFocus.bubble.running())'));
+  check('nothing can be let in with no bubble running', await ev('(await window.rhythmFocus.bubble.addSite("arxiv.org")) === null'));
+  check('the extension list answers', await ev('Array.isArray(await window.rhythmFocus.bubble.braveExtensions())'));
+  check('the open windows can be listed',await ev('Array.isArray(await window.rhythmFocus.bubble.running())'));
   await ev('window.rhythmFocus.saveTemplate({ name: "Smoke bubble", workMin: 25, items: [{ kind: "site", domain: "example.org", name: "example.org" }] })');
   check('a saved bubble keeps its items', await ev('(await window.rhythmFocus.getData()).templates.some((t) => t.name === "Smoke bubble" && t.items[0].domain === "example.org" && t.allowed.includes("example.org"))'));
   try {

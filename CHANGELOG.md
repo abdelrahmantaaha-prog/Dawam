@@ -9,6 +9,15 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+Branching out, and more extensions in the bubble browser (desktop 1.14.0).
+
+- A site can be let into the running bubble for the rest of the round, from
+  the "not in this bubble" page (in Brave or the bubble browser), the wall, or
+  the Bubbles page. Your saved bubble stays as it was unless you choose
+  "Keep in" it, and the finished round lists where you branched out to.
+- The bubble browser can carry the extensions you load unpacked in Brave, and
+  any other unpacked extension folder (Bubble settings → Load unpacked…).
+
 ## [3.9] — 2026-10-17 · Desktop 1.14.0
 
 ### Fixed

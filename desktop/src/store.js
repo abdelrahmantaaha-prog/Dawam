@@ -42,8 +42,10 @@ const DEFAULTS = {
     // never loads a page outside the bubble) or 'brave' (the real Brave, held
     // to the bubble by the Rhythm extension).
     bubbleSites: 'rhythm',
-    // Brave extensions the bubble browser loads, by id.
-    braveExtensions: []
+    // Extensions the bubble browser loads: Brave ids, or "folder:<path>".
+    braveExtensions: [],
+    // Unpacked extension folders picked in Bubble settings (not Brave's own).
+    extraExtensions: []
   },
   templates: [],
   history: []

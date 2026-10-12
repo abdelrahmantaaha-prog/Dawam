@@ -23,7 +23,7 @@
    Nothing here reaches the internet. The bridge listens on 127.0.0.1 only and
    only ever says what the bubble is. */
 
-const { BrowserWindow, WebContentsView, Menu, app, screen, session, shell, nativeImage, ipcMain, clipboard } = require('electron');
+const { BrowserWindow, WebContentsView, Menu, app, screen, session, shell, nativeImage, ipcMain, clipboard, dialog } = require('electron');
 const { spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
@@ -83,6 +83,20 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
 
   function startRound(items) {
     roundItems = normalizeItems(items);
+  }
+
+  /* Letting a site into the running bubble, from wherever the person is when
+     they need it: the planner, the wall, or the "not in this bubble" page in
+     either browser. The site — not the one page — goes in, like a dropped
+     link. Null when there is no bubble running or no site in the input. */
+  function addSite(input) {
+    const site = resolveUrl(input);
+    if (!site) return null;
+    const fresh = sessions.addToRound([site]);
+    if (fresh.length) roundItems = normalizeItems([...roundItems, ...fresh]);
+    const s = sessions.getState();
+    if (s.phase !== 'work' || !s.strict) return null;
+    return site;
   }
 
   /* ------------------------------------------------------------------ */
@@ -304,6 +318,15 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
       wc.on(ev, sendTabs);
     }
     wc.on('page-favicon-updated', (_e, icons) => { t.favicon = icons && icons[0]; sendTabs(); });
+    /* The refusal page has no bridge to Rhythm (it is a plain page in a
+       sandboxed tab), so "let it in" is a navigation to a made-up address
+       that is caught here and never leaves the tab. */
+    wc.on('will-navigate', (e, url) => {
+      if (!url.startsWith('rhythm-add:')) return;
+      e.preventDefault();
+      const target = decodeURIComponent(url.slice('rhythm-add:'.length));
+      if (addSite(target)) wc.loadURL(target);
+    });
     wc.on('before-input-event', (e, input) => { if (shortcut(input)) e.preventDefault(); });
     wc.on('context-menu', (_e, p) => contextMenu(t, p));
     if (activate) activeTab = t.id;
@@ -450,32 +473,85 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     return m[1];
   }
 
-  /* The extensions installed in Brave, newest version of each, across every
-     profile. Read from Brave's own folder and loaded from there — nothing is
-     copied, so an extension Brave updates is the updated one next launch. */
+  function readExtension(dir, id, source) {
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
+    return { id, dir, source, version: manifest.version || '', name: msg(dir, manifest, manifest.name) || id, mv: manifest.manifest_version, manifest };
+  }
+
+  const sameDir = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  // The Rhythm extension itself has no business in the bubble browser: it
+  // holds Brave to the bubble, which this browser already does on its own.
+  const isCompanion = (dir) => sameDir(dir, companionFolder())
+    || sameDir(dir, path.join(__dirname, '..', '..', 'brave-extension'));
+
+  /* Every extension the bubble browser could carry:
+
+       brave           installed in Brave from a store — the newest version
+                       of each, across every profile
+       brave-unpacked  loaded unpacked in Brave (developer mode); Brave keeps
+                       their folders in its Secure Preferences, location 4
+       folder          an unpacked folder picked here, Brave or not
+
+     All are loaded from where they are — nothing is copied — so an extension
+     that is updated or edited is the new one the next time it loads. Keys:
+     a Brave id for the first two, "folder:" + the path for the third. */
   function braveExtensions() {
     const out = new Map();
     let profiles = [];
-    try { profiles = fs.readdirSync(braveData()).filter((n) => n === 'Default' || /^Profile \d+$/.test(n)); } catch { return []; }
+    try { profiles = fs.readdirSync(braveData()).filter((n) => n === 'Default' || /^Profile \d+$/.test(n)); } catch { profiles = []; }
     for (const prof of profiles) {
       const root = path.join(braveData(), prof, 'Extensions');
       let ids = [];
-      try { ids = fs.readdirSync(root); } catch { continue; }
+      try { ids = fs.readdirSync(root); } catch { ids = []; }
       for (const id of ids) {
         if (out.has(id) || !/^[a-p]{32}$/.test(id)) continue;
         let versions = [];
         try { versions = fs.readdirSync(path.join(root, id)).sort(newerFirst); } catch { continue; }
         for (const v of versions) {
-          const dir = path.join(root, id, v);
-          try {
-            const manifest = JSON.parse(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8'));
-            out.set(id, { id, dir, version: manifest.version || v, name: msg(dir, manifest, manifest.name) || id, mv: manifest.manifest_version, manifest });
-            break;
-          } catch { /* half-updated folder: try the older one */ }
+          try { out.set(id, readExtension(path.join(root, id, v), id, 'brave')); break; } catch { /* half-updated folder: try the older one */ }
         }
+      }
+      let prefs = null;
+      try { prefs = JSON.parse(fs.readFileSync(path.join(braveData(), prof, 'Secure Preferences'), 'utf8')); } catch { /* none */ }
+      const settings = (prefs && prefs.extensions && prefs.extensions.settings) || {};
+      for (const [id, s] of Object.entries(settings)) {
+        if (out.has(id) || !s || s.location !== 4 || !s.path || !path.isAbsolute(s.path) || isCompanion(s.path)) continue;
+        try { out.set(id, readExtension(s.path, id, 'brave-unpacked')); } catch { /* folder moved or deleted */ }
+      }
+    }
+    for (const dir of store.data.settings.extraExtensions || []) {
+      if ([...out.values()].some((e) => sameDir(e.dir, dir)) || isCompanion(dir)) continue;
+      const key = `folder:${dir}`;
+      try { out.set(key, readExtension(dir, key, 'folder')); } catch {
+        out.set(key, { id: key, dir, source: 'folder', name: path.basename(dir), version: '', missing: true, manifest: {} });
       }
     }
     return [...out.values()];
+  }
+
+  /* "Load unpacked…": any folder with a manifest in it. It is remembered and
+     switched on at once — picking it was the decision. */
+  async function pickExtension(win) {
+    const r = await dialog.showOpenDialog(win || BrowserWindow.getFocusedWindow(), {
+      title: 'Choose an unpacked extension folder', properties: ['openDirectory']
+    });
+    if (r.canceled || !r.filePaths[0]) return { list: listBraveExtensions() };
+    const dir = r.filePaths[0];
+    if (!fs.existsSync(path.join(dir, 'manifest.json'))) return { list: listBraveExtensions(), error: 'no-manifest' };
+    const known = braveExtensions().find((e) => sameDir(e.dir, dir));
+    const key = known ? known.id : `folder:${dir}`;
+    if (!known) store.data.settings.extraExtensions = [...(store.data.settings.extraExtensions || []), dir];
+    const on = new Set(store.data.settings.braveExtensions || []);
+    on.add(key);
+    return { list: await setBraveExtensions([...on]) };
+  }
+
+  // Only a picked folder can be forgotten; Brave's own come and go with Brave.
+  async function forgetExtension(key) {
+    if (!String(key).startsWith('folder:')) return listBraveExtensions();
+    const dir = String(key).slice('folder:'.length);
+    store.data.settings.extraExtensions = (store.data.settings.extraExtensions || []).filter((d) => !sameDir(d, dir));
+    return setBraveExtensions((store.data.settings.braveExtensions || []).filter((k) => k !== key));
   }
 
   const loaded = new Map();     // brave id -> { ext, popup, iconData } | { error }
@@ -514,7 +590,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
 
   async function loadBraveExtensions() {
     const want = new Set(store.data.settings.braveExtensions || []);
-    for (const info of braveExtensions()) if (want.has(info.id) && !loaded.has(info.id)) await loadOne(info);
+    for (const info of braveExtensions()) if (want.has(info.id) && !info.missing && !loaded.has(info.id)) await loadOne(info);
     sendExtensions();
   }
 
@@ -540,6 +616,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
       const l = loaded.get(e.id);
       return {
         id: e.id, name: e.name, version: e.version, mv: e.mv, on: want.has(e.id),
+        source: e.source, dir: e.source === 'brave' ? null : e.dir, missing: !!e.missing,
         loaded: !!(l && l.ext), partial: !!(l && l.partial), error: (l && l.error) || null
       };
     });
@@ -606,10 +683,32 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
       waiting.clear();
     }
 
+    /* POST /bubble/add {url} lets a site into the running bubble — the
+       extension's "let it in" button. It is the one thing the bridge does
+       besides tell, so it is held to the extension: the request must come
+       from an extension page and carry a custom header. A web page can do
+       neither (the header forces a CORS preflight this server never
+       answers), so no site can widen your bubble on its own. */
+    function add(req, res) {
+      const origin = String(req.headers.origin || '');
+      if (!origin.startsWith('chrome-extension://') || req.headers['x-rhythm'] !== '1') {
+        res.writeHead(403); res.end(); return;
+      }
+      let body = '';
+      req.on('data', (c) => { body += c; if (body.length > 4096) req.destroy(); });
+      req.on('end', () => {
+        let site = null;
+        try { site = addSite(JSON.parse(body).url); } catch { /* bad body */ }
+        res.writeHead(site ? 200 : 409, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: !!site, domain: site ? site.domain : null }));
+      });
+    }
+
     /* GET /bubble?since=N holds the request open (up to 20 s) until the bubble
        changes, so Brave hears about a new bubble the moment it starts. */
     function handle(req, res) {
       const url = new URL(req.url, 'http://127.0.0.1');
+      if (req.method === 'POST' && url.pathname === '/bubble/add') { add(req, res); return; }
       if (req.method !== 'GET' || url.pathname !== '/bubble') { res.writeHead(404); res.end(); return; }
       lastSeen = Date.now();
       const since = Number(url.searchParams.get('since'));
@@ -674,9 +773,12 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     ipcMain.handle('bubble-resolve-paths', (_e, paths) => resolvePaths(paths));
     ipcMain.handle('bubble-resolve-url', (_e, text) => resolveUrl(text));
     ipcMain.handle('bubble-running', () => running());
+    ipcMain.handle('bubble-add-site', (_e, input) => addSite(input));
     ipcMain.handle('bubble-browser', (_e, url) => { openBrowser(url); });
     ipcMain.handle('bubble-brave-extensions', () => listBraveExtensions());
     ipcMain.handle('bubble-set-brave-extensions', (_e, ids) => setBraveExtensions(ids));
+    ipcMain.handle('bubble-pick-extension', (e) => pickExtension(BrowserWindow.fromWebContents(e.sender)));
+    ipcMain.handle('bubble-forget-extension', (_e, key) => forgetExtension(key));
     ipcMain.handle('bubble-companion', () => ({ folder: companionFolder(), brave: !!braveExe(), ...bridge.status() }));
     ipcMain.handle('bubble-companion-open', () => shell.openPath(companionFolder()));
 
@@ -699,6 +801,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     handOffToBrave,
     openBrowser,
     setBraveExtensions,
+    addSite,
     startBridge: () => { bridge.start(); companionFolder(); },
     stop: () => { bridge.stop(); hideWall(); },
   };

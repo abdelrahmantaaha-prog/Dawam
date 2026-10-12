@@ -136,6 +136,37 @@ describe('the session machine, under a bubble', () => {
     expect(sm.items[0].icon).toBeDefined();
   });
 
+  it('lets a site in mid-round, once, and says so on the round', () => {
+    const blocks = [];
+    sm.on('block', (b) => blocks.push(b));
+    sm.startWork({ task: 'Research', workMin: 30, items: [DOCS] });
+    expect(sm.addToRound([{ kind: 'site', domain: 'arxiv.org', name: 'arxiv.org' }])).toHaveLength(1);
+    expect(sm.addToRound([{ kind: 'site', domain: 'arxiv.org', name: 'arxiv.org' }])).toHaveLength(0);
+    expect(sm.siteRules().domains).toEqual(['docs.google.com', 'arxiv.org']);
+    expect(sm.getState().added.map((i) => i.domain)).toEqual(['arxiv.org']);
+    sm.stableSince = Date.now() - 6000;
+    sm.stableKey = 'brave|arxiv.org';
+    sm.onSample({ title: 'A paper', process: 'brave', host: 'arxiv.org', hwnd: 4 });
+    expect(blocks).toHaveLength(0);
+    sm.endsAt = Date.now() + (30 * 60 - 45) * 1000;
+    sm.stop();
+    expect(sm.store.data.history[0].added).toEqual(['arxiv.org']);
+  });
+
+  it('lets nothing in when no bubble is running', () => {
+    expect(sm.addToRound([{ kind: 'site', domain: 'arxiv.org' }])).toEqual([]);
+    sm.startWork({ task: 'Timer only', workMin: 30, items: [] });
+    expect(sm.addToRound([{ kind: 'site', domain: 'arxiv.org' }])).toEqual([]);
+  });
+
+  it('starts every round with nothing let in', () => {
+    sm.startWork({ task: 'A', workMin: 30, items: [DOCS] });
+    sm.addToRound([{ kind: 'site', domain: 'arxiv.org' }]);
+    sm.startWork({ task: 'B', workMin: 30, items: [DOCS] });
+    expect(sm.getState().added).toEqual([]);
+    expect(sm.items).toHaveLength(1);
+  });
+
   it('names the bubble from the saved one it runs under', () => {
     sm.store.data.templates = [{ id: 7, name: 'Writing', items: [DOCS] }];
     sm.startWork({ task: 'Draft', workMin: 30, items: [DOCS], templateId: 7 });

@@ -65,9 +65,15 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
     resolvePaths: (paths) => ipcRenderer.invoke('bubble-resolve-paths', paths),
     resolveUrl: (text) => ipcRenderer.invoke('bubble-resolve-url', text),
     running: () => ipcRenderer.invoke('bubble-running'),
+    // Let a site into the running bubble for this round. Resolves to the
+    // site item, or null when no bubble is running or there is no site in it.
+    addSite: (text) => ipcRenderer.invoke('bubble-add-site', text),
     browser: (url) => ipcRenderer.invoke('bubble-browser', url),
     braveExtensions: () => ipcRenderer.invoke('bubble-brave-extensions'),
     setBraveExtensions: (ids) => ipcRenderer.invoke('bubble-set-brave-extensions', ids),
+    // "Load unpacked…": resolves { list, error? }. Forget takes a picked folder back out.
+    pickExtension: () => ipcRenderer.invoke('bubble-pick-extension'),
+    forgetExtension: (key) => ipcRenderer.invoke('bubble-forget-extension', key),
     companion: () => ipcRenderer.invoke('bubble-companion'),
     openCompanionFolder: () => ipcRenderer.invoke('bubble-companion-open'),
   },
