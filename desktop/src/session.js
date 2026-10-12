@@ -27,7 +27,11 @@ function isNeutral(title, process, host) {
   if (!title && !proc) return true;
   if (SHELL.has(proc)) return true;
   if (title === 'Rhythm' || title === 'Anchor') return true;
-  if (proc === 'explorer' && (!title || title === 'Program Manager')) return true;
+  /* File Explorer, folder windows included. It is the Windows shell: putting
+     a folder window away while it is still building its ribbon crashes
+     explorer.exe — and with it the taskbar — which is exactly what happened
+     five times in one evening once apps were judged with no delay. */
+  if (proc === 'explorer') return true;
   if (BROWSERS.includes(proc) && !host && NEW_TAB.test(String(title).trim())) return true;
   return false;
 }
@@ -61,6 +65,7 @@ function alwaysAllowed(settings) {
     .filter(Boolean);
 }
 
+const APP_GRACE_MS = 1000;         // a new app window, before it is judged (see onSample)
 const MAX_PAUSE_SEC = 5 * 60;      // one pause, at most
 const PAUSE_BUDGET_SEC = 10 * 60;  // all manual pauses in one round, at most
 
@@ -308,8 +313,10 @@ class SessionManager extends EventEmitter {
 
     /* Slow pages briefly wear the wrong title and address while loading, so a
        browser window is given a few seconds after it changes before it is
-       judged. Nothing else is: an app is known by its program file, which is
-       right from its first frame, so it is judged the moment it is in front. */
+       judged. An app is known by its program file, right from its first frame,
+       so it needs no such wait — but it gets one second all the same: a window
+       minimized while it is still being built can take its program down with
+       it (File Explorer's ribbon did), and a second is not long enough to use. */
     const identity = neutral ? '(neutral)' : `${process.toLowerCase()}|${host || title}`;
     if (identity !== this.stableKey) {
       this.stableKey = identity;
@@ -317,7 +324,8 @@ class SessionManager extends EventEmitter {
     }
     const browser = isBrowserProcess(process);
     const settleMs = Math.max(0, Number(this.settings().settleSec) || 0) * 1000;
-    const settling = !neutral && browser && Date.now() - this.stableSince < settleMs;
+    const holdMs = browser ? settleMs : Math.min(settleMs, APP_GRACE_MS);
+    const settling = !neutral && Date.now() - this.stableSince < holdMs;
 
     const judged = this.phase === 'work' && this.strict() && !neutral;
     const blocked = judged && !allowed && !settling;

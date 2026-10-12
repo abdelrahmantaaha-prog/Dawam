@@ -101,14 +101,30 @@ describe('the session machine, under a bubble', () => {
   beforeEach(() => { sm = new SessionManager(fakeStore()); clearInterval(sm.timer); });
   afterEach(() => clearInterval(sm.timer));
 
-  it('blocks an app outside the bubble at once — no settling for apps', () => {
+  it('blocks an app outside the bubble after one second, not the browser settling time', () => {
     const blocks = [];
     sm.on('block', (b) => blocks.push(b));
     sm.startWork({ task: 'Write', workMin: 30, items: [CODE, DOCS] });
     sm.onSample({ title: 'main.js', process: 'Code', path: CODE.exe, hwnd: 1 });
+    sm.stableSince = Date.now() - 1500;   // Code has been in front a while: it is home
+    sm.onSample({ title: 'main.js', process: 'Code', path: CODE.exe, hwnd: 1 });
+    // A window still being built is left alone…
+    sm.onSample({ title: 'Steam', process: 'steam', path: 'C:\\Steam\\steam.exe', hwnd: 2 });
+    expect(blocks).toHaveLength(0);
+    // …and put away a second later, well before the five browser seconds.
+    sm.stableSince = Date.now() - 1100;
     sm.onSample({ title: 'Steam', process: 'steam', path: 'C:\\Steam\\steam.exe', hwnd: 2 });
     expect(blocks).toHaveLength(1);
     expect(blocks[0]).toMatchObject({ offender: 2, target: 1, browser: false });
+  });
+
+  it('never puts away File Explorer — minimizing it while it opens crashes the shell', () => {
+    const blocks = [];
+    sm.on('block', (b) => blocks.push(b));
+    sm.startWork({ task: 'Code', workMin: 30, items: [CODE] });
+    sm.stableSince = Date.now() - 6000;
+    sm.onSample({ title: 'Downloads', process: 'explorer', path: 'C:\\Windows\\explorer.exe', hwnd: 9 });
+    expect(blocks).toHaveLength(0);
   });
 
   it('still lets a browser page finish loading before judging it', () => {
