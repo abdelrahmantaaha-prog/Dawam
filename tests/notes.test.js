@@ -19,7 +19,7 @@ vi.mock('../src/storage.js', () => ({
 }));
 vi.mock('../src/sync.js', () => ({ markDeleted: () => {} }));
 
-const { sanitise, excerpt, newNote, saveNote, loadNotes, deleteNote, isEmptyNote, notesForTask } =
+const { sanitise, excerpt, newNote, saveNote, loadNotes, deleteNote, isEmptyNote, notesForTask, fileDrop, appendTopics, LATER_NOTEBOOK } =
   await import('../src/notes.js');
 
 beforeEach(() => store.clear());
@@ -163,5 +163,45 @@ describe('isEmptyNote', () => {
     expect(isEmptyNote(newNote({ body: '<p><br></p>' }))).toBe(true);
     expect(isEmptyNote(newNote({ title: 'x' }))).toBe(false);
     expect(isEmptyNote(newNote({ body: '<p>words</p>' }))).toBe(false);
+  });
+});
+
+describe("drop-offs from outside — fileDrop", () => {
+  it("makes the notebook, pinned, the first time", () => {
+    const r = fileDrop([], { items: [{ topic: "Hawaii petitions", detail: "21,000 names" }] });
+    expect(r.isNew).toBe(true);
+    expect(r.note.title).toBe(LATER_NOTEBOOK);
+    expect(r.note.pinned).toBe(true);
+    expect(r.note.body).toBe("<ul><li><b>Hawaii petitions</b> — 21,000 names</li></ul>");
+  });
+  it("appends to the notebook with that title, whatever its case", () => {
+    const mine = newNote({ title: "to look into", body: "<ul><li><b>A</b></li></ul>" });
+    const r = fileDrop([newNote({ title: "Other" }), mine], { items: [{ topic: "B" }] });
+    expect(r.isNew).toBe(false);
+    expect(r.note.id).toBe(mine.id);
+    expect(r.note.body).toBe("<ul><li><b>A</b></li><li><b>B</b></li></ul>");
+  });
+  it("starts a new list after writing that does not end in one", () => {
+    expect(appendTopics("<p>my own words</p>", [{ topic: "C" }])).toBe("<p>my own words</p><ul><li><b>C</b></li></ul>");
+  });
+  it("uses the notebook named in the drop", () => {
+    expect(fileDrop([], { notebook: "Books", items: [{ topic: "x" }] }).note.title).toBe("Books");
+  });
+  it("escapes what arrives instead of parsing it", () => {
+    const r = fileDrop([], { items: [{ topic: "<img src=x onerror=alert(1)>", detail: "a & b" }] });
+    expect(r.note.body).toContain("&lt;img");
+    expect(sanitise(r.note.body)).not.toContain("<img");
+    expect(r.note.body).toContain("a &amp; b");
+  });
+  it("ignores a drop with nothing in it", () => {
+    expect(fileDrop([], {})).toBeNull();
+    expect(fileDrop([], { items: [{ topic: "  " }] })).toBeNull();
+    expect(fileDrop([], null)).toBeNull();
+  });
+  it("survives a save and a reload", async () => {
+    const saved = await saveNote(fileDrop([], { items: [{ topic: "D" }] }).note);
+    const [back] = await loadNotes();
+    expect(back.id).toBe(saved.id);
+    expect(back.body).toBe("<ul><li><b>D</b></li></ul>");
   });
 });

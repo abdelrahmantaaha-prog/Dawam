@@ -121,6 +121,43 @@ export async function deleteNote(id) {
   markDeleted(noteKey(id));
 }
 
+/* ---- drop-offs ----
+   Other programs on this PC (Claude, chiefly) can add topics to a notebook
+   without reaching into the planner's storage: the desktop shell picks up a
+   `notebook-add-*.json` file from the backups folder and hands it here. Each
+   topic becomes a bullet at the end of the notebook with that title — made,
+   and pinned, the first time — so the entry is stamped and synced exactly like
+   a line typed by hand. Text only: whatever arrives is escaped, never parsed. */
+export const LATER_NOTEBOOK = 'To look into';
+const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+export function dropLine(item) {
+  const topic = String((item && (item.topic || item.text)) || '').trim().slice(0, 300);
+  const detail = String((item && item.detail) || '').trim().slice(0, 1000);
+  if (!topic) return '';
+  return `<li><b>${esc(topic)}</b>${detail ? ` — ${esc(detail)}` : ''}</li>`;
+}
+
+/* Into the notebook's last list when it ends with one, so a run of topics
+   reads as one list; otherwise a new list at the end. */
+export function appendTopics(body, items) {
+  const lines = (items || []).map(dropLine).join('');
+  if (!lines) return String(body || '');
+  const b = String(body || '');
+  const tail = b.match(/<\/ul>\s*$/i);
+  return tail ? b.slice(0, tail.index) + lines + b.slice(tail.index) : `${b}<ul>${lines}</ul>`;
+}
+
+/* The note a drop-off turns into, or null when it carries nothing usable. */
+export function fileDrop(notes, drop) {
+  const items = drop && Array.isArray(drop.items) ? drop.items : [];
+  if (!items.some(dropLine)) return null;
+  const title = String((drop && drop.notebook) || '').trim().slice(0, 120) || LATER_NOTEBOOK;
+  const found = (notes || []).find((n) => tagKey(n.title) === tagKey(title));
+  const base = found || newNote({ title, pinned: true, colour: NOTE_COLOURS[3] });
+  return { note: { ...base, body: appendTopics(base.body, items) }, isNew: !found };
+}
+
 /* Notebooks written from a task. A task can carry several — a plan and a
    transcript are not the same page. */
 export const notesForTask = (notes, taskId) => (notes || []).filter((n) => n.taskId && n.taskId === taskId);

@@ -807,6 +807,40 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.handle('backup-where', () => backupDir());
 
+    /* ---- notebook drop-offs ----
+       The other way in from outside: a program that wants a topic in one of
+       the planner's notebooks writes `notebook-add-<anything>.json` into the
+       backups folder (written as .part and renamed, so a matching name is
+       always whole). The planner takes them when told, files them through its
+       own storage, and only then says which ones to delete — a planner that
+       closes halfway loses nothing. The names fail backupName's pattern, so
+       the backup handlers above can never touch them. */
+    const NOTEBOOK_DROP = /^notebook-add-[\w.-]+\.json$/;
+    ipcMain.handle('inbox-take', async () => {
+      let names = [];
+      try { names = (await fs.promises.readdir(backupDir())).filter((n) => NOTEBOOK_DROP.test(n)).sort(); } catch { return []; }
+      const out = [];
+      for (const n of names.slice(0, 50)) {
+        const file = path.join(backupDir(), n);
+        try {
+          const st = await fs.promises.stat(file);
+          if (st.size > 64 * 1024) throw new Error('too big');
+          out.push({ name: n, data: JSON.parse((await fs.promises.readFile(file, 'utf8')).replace(/^﻿/, '')) });
+        } catch {
+          // Not JSON, or far too big for a few topics: set aside, not retried forever.
+          await fs.promises.rename(file, `${file}.bad`).catch(() => {});
+        }
+      }
+      return out;
+    });
+    ipcMain.handle('inbox-done', async (_e, names) => {
+      for (const n of Array.isArray(names) ? names : []) {
+        if (NOTEBOOK_DROP.test(String(n))) await fs.promises.unlink(path.join(backupDir(), String(n))).catch(() => {});
+      }
+      return true;
+    });
+    const announceDrop = () => { if (planner && !planner.isDestroyed()) planner.webContents.send('inbox-ready'); };
+
     /* ---- export on request ----
        Other programs on this machine (the Claude gate, for one) read the
        daily snapshot, and an hourly file can be an hour behind the planner.
@@ -826,7 +860,10 @@ if (!app.requestSingleInstanceLock()) {
     try {
       fs.mkdirSync(backupDir(), { recursive: true });
       // (Windows sometimes reports no filename: when in doubt, look — the look is one cheap unlink)
-      const reqWatcher = fs.watch(backupDir(), (_event, name) => { if (!name || name === EXPORT_REQ) serveExportRequest(); });
+      const reqWatcher = fs.watch(backupDir(), (_event, name) => {
+        if (!name || name === EXPORT_REQ) serveExportRequest();
+        if (!name || NOTEBOOK_DROP.test(name)) announceDrop();
+      });
       reqWatcher.on('error', () => {});
       app.on('before-quit', () => { try { reqWatcher.close(); } catch { /* going down anyway */ } });
       serveExportRequest();   // one left from while the app was closed

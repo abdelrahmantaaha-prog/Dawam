@@ -111,7 +111,14 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
   onHistoryChanged: (cb) => sub('history-changed', () => cb()),
   onDataChanged: (cb) => sub('data-changed', () => cb()),
   /* Something outside asked for a fresh snapshot (main.js, export-request). */
-  onExportNow: (cb) => sub('export-now', () => cb())
+  onExportNow: (cb) => sub('export-now', () => cb()),
+  /* Topics dropped off for a notebook (main.js, notebook-add-*.json): take
+     them, file them, then report which are done so they can be deleted. */
+  inbox: {
+    take: () => ipcRenderer.invoke('inbox-take'),
+    done: (names) => ipcRenderer.invoke('inbox-done', names),
+  },
+  onInboxReady: (cb) => sub('inbox-ready', () => cb())
 });
 
 function sub(channel, handler) {

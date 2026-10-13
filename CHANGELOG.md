@@ -9,6 +9,16 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+Topics from outside go into a notebook (desktop 1.18.0).
+
+- Another program on this PC can add a topic to a notebook by leaving a
+  `notebook-add-*.json` file in Documents\Rhythm backups
+  (`scripts/notebook-add.mjs` writes one). Each topic becomes a bullet at the
+  end of the notebook with that title — "To look into" unless another is
+  named — and the notebook is made and pinned the first time. With Rhythm
+  closed the file waits for the next launch; with that notebook open in the
+  editor it waits for the editor to close.
+
 Links follow the round (desktop 1.17.0, Brave extension 1.3.0).
 
 - During a round, a link clicked in another app opens in the bubble browser

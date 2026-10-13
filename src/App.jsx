@@ -31,7 +31,7 @@ import { EMPTY as EMPTY_FILTER, applyFilter, applySort, arrange, clear as clearF
 import { stampWeek, writeTarget } from './weekdoc.js';
 import { initialProject, projectOfTask, tagProjectOf, withTagProject } from './tagproject.js';
 import { addProjectFocus } from './projectfocus.js';
-import { allNoteTags, loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, isEmptyNote, excerpt as noteExcerpt } from './notes.js';
+import { allNoteTags, loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, isEmptyNote, fileDrop, excerpt as noteExcerpt } from './notes.js';
 import { MeetingSheet } from './meetingsheet.jsx';
 import { nextMark, TINY, stackGate, isPrayerAnchor, anchorLabel, moveHabit, mergeHabits, dropInMerged, applyHabitOrder } from './habits.js';
 import { dueProjects, dueSittings, paceStatus, sittingStreak, todayQuota, worksOn } from './quota.js';
@@ -2271,6 +2271,53 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   }, [weekStart, boardProject]);
 
   useEffect(() => { if (ready) loadNotes().then(setNotes); }, [ready, localVersion]);
+
+  /* Topics dropped off from outside (desktop only — see main.js, notebook
+     drop-offs) are filed here, through saveNote, so they are stamped and
+     synced like anything typed. A notebook open in the editor is left alone
+     until it closes: the editor holds its own copy of the body, and its next
+     save would write the new topics away. */
+  const openNoteRef = useRef(openNote);
+  openNoteRef.current = openNote;
+  const inboxBusy = useRef(false);
+  const inboxAgain = useRef(false);
+  const drainInbox = useCallback(async () => {
+    const api = typeof window !== 'undefined' ? window.rhythmFocus : null;
+    if (!api || !api.inbox) return;
+    if (inboxBusy.current) { inboxAgain.current = true; return; }
+    inboxBusy.current = true;
+    try {
+      // Round again only when a nudge came in mid-pass: its file may have
+      // landed after this pass listed the folder.
+      for (;;) {
+        inboxAgain.current = false;
+        const drops = (await api.inbox.take()) || [];
+        if (drops.length) {
+          let wall = await loadNotes();
+          const done = [];
+          for (const d of drops) {
+            const filed = fileDrop(wall, d.data);
+            if (!filed) { done.push(d.name); continue; }              // nothing usable in it
+            if (filed.note.id === openNoteRef.current) continue;     // waits for the editor to close
+            const saved = await saveNote(filed.note);
+            wall = filed.isNew ? [saved, ...wall] : wall.map((n) => (n.id === saved.id ? saved : n));
+            done.push(d.name);
+          }
+          if (done.length) { await api.inbox.done(done); setNotes(await loadNotes()); }
+        }
+        if (!inboxAgain.current) break;
+      }
+    } catch { /* the files stay where they are; the next nudge tries again */ }
+    finally { inboxBusy.current = false; }
+  }, []);
+  useEffect(() => {
+    if (!ready) return undefined;
+    const api = typeof window !== 'undefined' ? window.rhythmFocus : null;
+    if (!api || typeof api.onInboxReady !== 'function') return undefined;
+    return api.onInboxReady(() => { drainInbox(); });
+  }, [ready, drainInbox]);
+  // On launch (drop-offs left while the app was closed) and whenever the editor closes.
+  useEffect(() => { if (ready && !openNote) drainInbox(); }, [ready, openNote, drainInbox]);
 
   const noteById = (id) => notes.find((n) => n.id === id) || null;
   const notebooksFor = (taskId) => notesForTask(notes, taskId).map((n) => ({ ...n, excerpt: noteExcerpt(n.body, 60) }));
