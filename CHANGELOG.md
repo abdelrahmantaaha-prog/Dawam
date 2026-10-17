@@ -9,6 +9,11 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## [3.10] — 2026-10-17 · Desktop 1.19.0
+
+The desktop work from 1.15 to 1.18, which had only been installed on this PC,
+joined with 3.9's sync fix. Nothing new beyond the two put together.
+
 Topics from outside go into a notebook (desktop 1.18.0).
 
 - Another program on this PC can add a topic to a notebook by leaving a
