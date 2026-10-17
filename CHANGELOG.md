@@ -9,6 +9,25 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## [3.9] — 2026-10-17 · Desktop 1.14.0
+
+### Fixed
+- **A device opened after days away could overwrite the week.** Recurring
+  tasks that add themselves wait until a synced device has pulled, but the
+  check read "the sync server has not answered yet" as "sync is off". So a
+  desktop opened after six days added its recurring tasks to its six-day-old
+  copy of the week in its first second, stamped it newest, and pushed it over
+  everything the phone had ticked since — taking the ticks and tasks with it,
+  while the points (kept per day) stayed. Automatic writes now wait for a
+  real answer, and a device that has synced before also waits while the
+  server cannot be reached.
+- **"No sync backend" after starting offline.** The sync check ran once at
+  boot, so a device that started before its network was up stayed local until
+  it was restarted. A check that gets no answer now says the server could not
+  be reached, retries on a backoff and whenever the network or the window
+  comes back, and has a *Try again now* button. On the desktop, *Checked*
+  shows the deployment address the request really went to.
+
 ## [3.8] — 2026-10-12 · Desktop 1.13.0
 
 Focus becomes **Bubbles** (desktop).

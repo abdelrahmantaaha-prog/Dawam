@@ -865,8 +865,15 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
             <div className="sect">
               <div className="sect-h"><Repeat size={13} /> {tx('Cross-device sync', 'المزامنة بين الأجهزة')}</div>
               {!sync || !sync.capability.sync ? (<>
-                <div className="security-note"><Shield size={15} /><p>{tx('This copy of Rhythm has no sync backend, so it is fully local — your planner never leaves this device. Export a backup regularly to keep it safe.', 'هذه النسخة بلا خادم مزامنة، لذا تعمل محليًا بالكامل — لا يغادر مخططك هذا الجهاز. صدّر نسخة احتياطية بانتظام للحفاظ عليه.')}</p></div>
-                <p className="hint-text" style={{ marginTop: 10 }}>{tx('Sync appears here automatically on a deployment that has one configured.', 'تظهر المزامنة هنا تلقائيًا في أي نسخة مُهيّأة لها.')}</p>
+                {sync && sync.capability.unreachable ? (<>
+                  <div className="security-note"><Shield size={15} /><p>{tx('Rhythm could not reach the sync server, so it is working locally for now. It keeps trying, and sync turns on by itself as soon as the server answers.', 'تعذّر على Rhythm الوصول إلى خادم المزامنة، لذا يعمل محليًا حاليًا. سيواصل المحاولة، وتعمل المزامنة تلقائيًا فور استجابة الخادم.')}</p></div>
+                  <div className="io-actions" style={{ marginTop: 10 }}>
+                    <button className="ghost sm" onClick={sync.recheck}><Repeat size={13} /> {tx('Try again now', 'أعد المحاولة الآن')}</button>
+                  </div>
+                </>) : (<>
+                  <div className="security-note"><Shield size={15} /><p>{tx('This copy of Rhythm has no sync backend, so it is fully local — your planner never leaves this device. Export a backup regularly to keep it safe.', 'هذه النسخة بلا خادم مزامنة، لذا تعمل محليًا بالكامل — لا يغادر مخططك هذا الجهاز. صدّر نسخة احتياطية بانتظام للحفاظ عليه.')}</p></div>
+                  <p className="hint-text" style={{ marginTop: 10 }}>{tx('Sync appears here automatically on a deployment that has one configured.', 'تظهر المزامنة هنا تلقائيًا في أي نسخة مُهيّأة لها.')}</p>
+                </>)}
                 {sync && sync.capability.probe && (
                   <p className="hint-text" style={{ marginTop: 6, overflowWrap: 'anywhere' }}>
                     {tx('Checked', 'تم الفحص')}: <code>{sync.capability.probe}</code>

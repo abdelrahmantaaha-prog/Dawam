@@ -1332,7 +1332,9 @@ export default function Rhythm() {
      Only today, never back-filled: a day the app was not opened on is gone,
      and five missed "Water the plants" arriving at once is noise. */
   const autoTodayISO = ready ? fmtISO(logicalDayMid()) : '';
-  const syncGate = !!(sync.capability && sync.capability.sync && sync.user) && !sync.fresh;
+  // sync.fresh already means "safe to write unprompted", including "not yet
+  // known" as unsafe. Do not re-derive it here — see autoWriteSafe in sync.js.
+  const syncGate = !sync.fresh;
   const autoBusy = useRef(false);
   useEffect(() => {
     if (!ready || syncGate || autoBusy.current) return;

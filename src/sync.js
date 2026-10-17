@@ -298,6 +298,8 @@ const PUSH_DEBOUNCE = 4000;
    newer edits another device made in the meantime. One cheap GET a minute
    keeps the snapshot young. */
 const POLL_MS = 60000;
+/* How long an unreachable capability probe waits before asking again. */
+const PROBE_RETRY_MS = [5000, 15000, 30000, 60000, 120000, 300000];
 
 /* Never sync out from under someone who is mid-edit. Adopting the server's copy
    while a task editor is open makes the app feel like it is fighting you.
@@ -313,6 +315,34 @@ function userIsEditing() {
   if (typeof document === 'undefined') return false;
   return !!document.querySelector('.overlay');
 }
+
+/* Safe for an automatic write to go ahead: sync is off here (nothing to be
+   stale against), or this device has pulled since it last woke. Unknown —
+   the boot probe still out — counts as not safe.
+
+   This is the ONLY answer callers may use. The app once rebuilt it as
+   "sync is on, signed in, and not fresh", which reads the same but is not:
+   before the probe answers, sync is not yet known to be on, so that version
+   said "go ahead". A desktop opened after six days added its recurring tasks
+   to its six-day-old copy of the week in that first second, stamped it
+   newest, and pushed it over everything the phone had ticked since.
+
+   An unreachable server is the same question asked later: the probe has an
+   answer, but not one that says sync is off. A device that has synced before
+   waits, or it writes onto a stale copy that the first successful sync
+   pushes. One that never has is not stale against anything, so offline-only
+   use goes ahead as it always did. */
+const SYNCED_KEY = 'rhythm:sync:everSynced';
+// A linked phone counts from the start: its token predates this flag.
+const everSynced = () => { try { return !!localStorage.getItem(SYNCED_KEY) || !!deviceToken(); } catch { return false; } };
+const noteSynced = () => { try { localStorage.setItem(SYNCED_KEY, '1'); } catch { /* full */ } };
+
+export const autoWriteSafe = (capability, user, fresh, syncedBefore = everSynced()) => {
+  if (!capability || !capability.checked) return false;
+  if (capability.unreachable) return !syncedBefore;
+  if (!capability.sync || !user) return true;
+  return !!fresh;
+};
 
 /* status: "unavailable" | "signed-out" | "idle" | "syncing" | "offline" | "error" */
 export function useSync({ localVersion, onApplied, loaded }) {
@@ -336,16 +366,34 @@ export function useSync({ localVersion, onApplied, loaded }) {
   const onAppliedRef = useRef(onApplied);
   onAppliedRef.current = onApplied;
 
-  /* one capability probe on boot: does this deployment even have sync? */
+  /* The capability probe: does this deployment even have sync?
+
+     It used to run once on boot and never again, so a desktop that started
+     before its network was up (login, wake from sleep) got one
+     ERR_NAME_NOT_RESOLVED and called itself "fully local" until it was
+     restarted — against a deployment that was up the whole time. Now a probe
+     that got no answer at all (or a 5xx) is UNREACHABLE, not "no backend",
+     and keeps trying: on a backoff, when the network comes back, and when the
+     window is looked at again. Any real answer settles it for the session. */
+  const reprobe = useRef(() => {});
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const url = new URL(API.me, window.location.href).href;
+    let stopped = false, settledProbe = false, inflight = false, tries = 0, t = null;
+    const report = (probe, why, unreachable) => {
+      if (!stopped) setCapability({ checked: true, sync: false, auth: false, db: false, probe, why, unreachable });
+    };
+    const once = async () => {
+      // On the desktop the request is relayed to the deployment by the main
+      // process; showing rhythm://app/api/me there named a URL nobody asked.
+      let url = new URL(API.me, window.location.href).href;
+      const ds = desktopSync();
+      if (ds && ds.base) { try { url = (await ds.base()) + '/api/me'; } catch { /* keep the local guess */ } }
+      let r;
+      try { r = await apiFetch(API.me); }
+      catch (e) { report(url, String(e.message || e), true); return false; }
+      if (!r.ok) { report(url, 'HTTP ' + r.status, r.status >= 500); return r.status < 500; }
       try {
-        const r = await apiFetch(API.me);
-        if (!r.ok) throw new Error('HTTP ' + r.status);
         const j = await r.json();
-        if (cancelled) return;
+        if (stopped) return true;
         setCapability({ checked: true, sync: !!j.sync, auth: !!j.auth, db: !!j.db, probe: url,
           why: j.sync ? '' : `deployment reports auth=${!!j.auth} db=${!!j.db}` });
         setUser(j.user || null);
@@ -355,11 +403,30 @@ export function useSync({ localVersion, onApplied, loaded }) {
         // is not an error state — but it must not be SILENT either. Reporting
         // the URL that was actually tried is what distinguishes "this build has
         // no backend" from "this build is asking its own WebView for /api".
-        if (!cancelled) setCapability({ checked: true, sync: false, auth: false, db: false, probe: url, why: String(e.message || e) });
+        report(url, String(e.message || e), false);
       }
-    })();
-    return () => { cancelled = true; };
+      return true;
+    };
+    const run = async () => {
+      if (stopped || settledProbe || inflight) return;
+      clearTimeout(t);
+      inflight = true;
+      try { settledProbe = await once(); } finally { inflight = false; }
+      if (!stopped && !settledProbe) t = setTimeout(run, PROBE_RETRY_MS[Math.min(tries++, PROBE_RETRY_MS.length - 1)]);
+    };
+    const onVisible = () => { if (document.visibilityState === 'visible') run(); };
+    reprobe.current = () => { tries = 0; run(); };
+    run();
+    window.addEventListener('online', run);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      stopped = true;
+      clearTimeout(t);
+      window.removeEventListener('online', run);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
+  const recheck = useCallback(() => reprobe.current(), []);
 
   const reconcile = useCallback(async (reason) => {
     if (!capability.sync || !user || busy.current) return;
@@ -422,6 +489,7 @@ export function useSync({ localVersion, onApplied, loaded }) {
       }
 
       setLastSync(Date.now());
+      noteSynced();
       setFresh(true);
       setStatus('idle');
     } catch (e) {
@@ -510,13 +578,10 @@ export function useSync({ localVersion, onApplied, loaded }) {
     await signOut();
   }, []);
 
-  /* Safe for an automatic write to go ahead: sync is off here (nothing to be
-     stale against), or this device has pulled since it last woke. Unknown —
-     the boot probe still out — counts as not safe. */
-  const current = !capability.checked ? false : (!capability.sync || !user) ? true : fresh;
+  const current = autoWriteSafe(capability, user, fresh);
 
   return useMemo(
-    () => ({ capability, user, status, lastSync, error, fresh: current, syncNow: () => reconcile('manual'), signIn, signOut, stopSync }),
-    [capability, user, status, lastSync, error, current, reconcile, stopSync]
+    () => ({ capability, user, status, lastSync, error, fresh: current, syncNow: () => reconcile('manual'), recheck, signIn, signOut, stopSync }),
+    [capability, user, status, lastSync, error, current, reconcile, recheck, stopSync]
   );
 }
