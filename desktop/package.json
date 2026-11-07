@@ -1,7 +1,7 @@
 {
   "name": "dawam-desktop",
   "productName": "Dawam",
-  "version": "1.20.0",
+  "version": "1.20.1",
   "private": true,
   "description": "Dawam on the desktop — the planner window plus the focus suite (the app formerly known as Anchor).",
   "main": "src/main.js",

@@ -33,8 +33,9 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
    drift. A junction is left at the old name, because Brave remembers the
    unpacked extension by its folder (see bubbles.js companionFolder), and so
    does anything else that was pointed at %APPDATA%\Rhythm. If the rename
-   cannot happen — an old Rhythm still running holds files open, or both
-   folders already exist — the app simply keeps using the old folder. Nothing
+   cannot happen — an old Rhythm still running holds files open, or a Dawam
+   folder with something in it already exists — the app simply keeps using
+   the old folder. Nothing
    is ever deleted here. */
 (function moveDataFromRhythm() {
   try {
@@ -44,7 +45,14 @@ app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
     let st;
     try { st = fs.lstatSync(legacy); } catch { return; }      // never had Rhythm
     if (st.isSymbolicLink() || !st.isDirectory()) return;     // already moved
-    if (fs.existsSync(current)) { app.setPath('userData', legacy); return; }
+    // Electron makes an empty userData folder before this code runs, so only a
+    // Dawam folder with something in it means data already lives there.
+    if (fs.existsSync(current)) {
+      let empty = false;
+      try { empty = fs.readdirSync(current).length === 0; } catch { /* in use: leave it */ }
+      if (!empty) { app.setPath('userData', legacy); return; }
+      try { fs.rmdirSync(current); } catch { app.setPath('userData', legacy); return; }
+    }
     try {
       fs.renameSync(legacy, current);
     } catch {

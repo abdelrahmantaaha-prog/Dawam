@@ -9,6 +9,13 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## Desktop 1.20.1 — 2026-11-07
+
+- The data folder actually moves now. Electron creates an empty
+  `%APPDATA%\Dawam` before the app's own code runs, which 1.20.0 took for
+  data already living there, so it stayed on `%APPDATA%\Rhythm` (safely — the
+  fallback). An empty Dawam folder no longer counts.
+
 ## [3.11] — 2026-11-07 · Desktop 1.20.0 · Brave extension 1.4.0
 
 Rhythm is now **Dawam** (دوام). The name, and nothing else.
