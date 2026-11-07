@@ -1,6 +1,6 @@
-/* Rhythm desktop — the planner and the focus suite in one process.
+/* Dawam desktop — the planner and the focus suite in one process.
 
-   The planner is Rhythm's own web build, loaded into the main window. The
+   The planner is Dawam's own web build, loaded into the main window. The
    focus half is Anchor, brought over whole: the same PowerShell foreground
    poller, the same session state machine, the same overlay / break / away
    windows. What is new is the seam between them — a focus round can be
@@ -23,6 +23,38 @@ const { normalizeItems, wordsOfItems } = require('./bubble');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
+/* Rhythm became Dawam (desktop 1.20). Electron names the data folder after
+   the product, so without this the new name would open on an empty
+   %APPDATA%\Dawam and the plan, which is localStorage inside that folder,
+   would look gone. Runs before anything reads userData — the single-instance
+   lock included.
+
+   The old folder is renamed, not copied: one copy of the data, never two that
+   drift. A junction is left at the old name, because Brave remembers the
+   unpacked extension by its folder (see bubbles.js companionFolder), and so
+   does anything else that was pointed at %APPDATA%\Rhythm. If the rename
+   cannot happen — an old Rhythm still running holds files open, or both
+   folders already exist — the app simply keeps using the old folder. Nothing
+   is ever deleted here. */
+(function moveDataFromRhythm() {
+  try {
+    const legacy = path.join(app.getPath('appData'), 'Rhythm');
+    const current = app.getPath('userData');
+    if (path.resolve(current).toLowerCase() === path.resolve(legacy).toLowerCase()) return;
+    let st;
+    try { st = fs.lstatSync(legacy); } catch { return; }      // never had Rhythm
+    if (st.isSymbolicLink() || !st.isDirectory()) return;     // already moved
+    if (fs.existsSync(current)) { app.setPath('userData', legacy); return; }
+    try {
+      fs.renameSync(legacy, current);
+    } catch {
+      app.setPath('userData', legacy);
+      return;
+    }
+    try { fs.symlinkSync(current, legacy, 'junction'); } catch { /* Brave may need the extension loaded again */ }
+  } catch { /* leave Electron's default */ }
+})();
+
 const DEV = process.argv.includes('--dev');
 const DEV_URL = process.env.RHYTHM_DEV_URL || 'http://127.0.0.1:5199';
 /* Where the planner's built output lives.
@@ -36,7 +68,7 @@ const DIST = app.isPackaged
 
 /* The planner is served from rhythm://app rather than file://.
 
-   Origin is the reason. Rhythm keeps everything in localStorage, and
+   Origin is the reason. Dawam keeps everything in localStorage, and
    localStorage is keyed by origin — file:// gives each document its own
    opaque one, and a localhost server would move the data every time the port
    changed. A registered standard scheme is one fixed, secure origin for the
@@ -73,13 +105,13 @@ function serveDist(req) {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  let planner = null;   // the Rhythm window — the app's face
+  let planner = null;   // the Dawam window — the app's face
   let overlay = null;
   let tray = null;
   let quitting = false;
   /* Uncloseable, deliberately.
 
-     Rhythm is what holds the day together, so a day cannot begin by closing
+     Dawam is what holds the day together, so a day cannot begin by closing
      it. Every window's close button already hides rather than destroys; this
      flag finishes the job by refusing app.quit() itself, and the tray has no
      Quit for it to be asked from.
@@ -410,14 +442,14 @@ if (!app.requestSingleInstanceLock()) {
     const paused = state.paused ? ' (paused)' : '';
     const tip =
       state.phase === 'work'
-        ? `Rhythm — ${state.task}${paused}`
+        ? `Dawam — ${state.task}${paused}`
         : state.phase === 'break'
-          ? 'Rhythm — on a break'
-          : 'Rhythm';
+          ? 'Dawam — on a break'
+          : 'Dawam';
     tray.setToolTip(tip);
     tray.setContextMenu(
       Menu.buildFromTemplate([
-        { label: 'Open Rhythm', click: showPlanner },
+        { label: 'Open Dawam', click: showPlanner },
         {
           label: overlay && overlay.isVisible() ? 'Hide Focus Overlay' : 'Show Focus Overlay',
           click: () => {
@@ -447,8 +479,8 @@ if (!app.requestSingleInstanceLock()) {
         // No Quit. The item that used to live here was the one reflex that
         // could end the day early, so it is gone outside of development.
         ...(DEV
-          ? [{ label: 'Quit Rhythm (dev)', click: () => app.quit() }]
-          : [{ label: 'Rhythm stays open', enabled: false }])
+          ? [{ label: 'Quit Dawam (dev)', click: () => app.quit() }]
+          : [{ label: 'Dawam stays open', enabled: false }])
       ])
     );
   }
@@ -459,7 +491,7 @@ if (!app.requestSingleInstanceLock()) {
     // Tray app: keep running with no windows.
   });
 
-  // Signing out or shutting down. Rhythm holds the day, not the machine.
+  // Signing out or shutting down. Dawam holds the day, not the machine.
   app.on('session-end', () => { allowQuit = true; });
 
   app.on('before-quit', (e) => {
@@ -513,7 +545,7 @@ if (!app.requestSingleInstanceLock()) {
 
     /* Start with Windows, always. Since the app cannot be closed, signing out
        would otherwise be the loophole that closes it — a reboot is not a
-       decision to be rid of Rhythm for the day. Re-asserted on every boot
+       decision to be rid of Dawam for the day. Re-asserted on every boot
        rather than only when a toggle flips, so a reinstall to a new path heals
        its own registry entry. The --autostart arg lets a login launch open
        quietly in the tray. */
@@ -539,7 +571,7 @@ if (!app.requestSingleInstanceLock()) {
     screen.on('display-metrics-changed', onDisplaysChanged);
 
     if (store.migratedFromAnchor) {
-      notify('Anchor moved in', 'Your focus settings, templates and history came across to Rhythm.');
+      notify('Anchor moved in', 'Your focus settings, templates and history came across to Dawam.');
     }
 
     tray = new Tray(icon().resize({ width: 16, height: 16 }));
@@ -595,7 +627,7 @@ if (!app.requestSingleInstanceLock()) {
       const title = s.title || '';
       const procName = s.process || '';
       if (!title && !procName) return;
-      if (procName.toLowerCase() === 'electron' || title === 'Rhythm') return;
+      if (procName.toLowerCase() === 'electron' || title === 'Dawam' || title === 'Rhythm') return;
       const hay = `${title} ${procName} ${s.host || ''}`.toLowerCase();
       const hit = list.find((k) => hay.includes(k));
       if (!hit) return;
@@ -656,7 +688,7 @@ if (!app.requestSingleInstanceLock()) {
     let lastModeNotifyAt = 0;
     sessions.on('block', (b) => {
       const { offender, target, label } = b;
-      // Brave with the Rhythm extension swaps the tab itself; see bubbles.js.
+      // Brave with the Dawam extension swaps the tab itself; see bubbles.js.
       if (bubbles.handOffToBrave(b, sessions.getState().current)) return;
       if (offender) enforcer.send(`minimize ${offender}`);
       if (target && target !== offender) {
@@ -767,7 +799,20 @@ if (!app.requestSingleInstanceLock()) {
        person can see them, copy them, and restore one on another machine.
        Names are checked against one pattern so the renderer can never read or
        write outside the folder. */
-    const backupDir = () => path.join(app.getPath('documents'), 'Rhythm backups');
+    /* 'Rhythm backups' before the rename. Moved once, on first use; if it
+       cannot be moved (a file open in it), backups keep going to the old one. */
+    let backupFolder = null;
+    const backupDir = () => {
+      if (backupFolder) return backupFolder;
+      const docs = app.getPath('documents');
+      const next = path.join(docs, 'Dawam backups');
+      const old = path.join(docs, 'Rhythm backups');
+      backupFolder = next;
+      if (!fs.existsSync(next) && fs.existsSync(old)) {
+        try { fs.renameSync(old, next); } catch { backupFolder = old; }
+      }
+      return backupFolder;
+    };
     const backupName = (n) => (/^rhythm-[\w.-]+\.json$/.test(String(n)) ? String(n) : null);
     ipcMain.handle('backup-write', async (_e, name, text) => {
       const n = backupName(name);
@@ -904,7 +949,7 @@ if (!app.requestSingleInstanceLock()) {
       const base = syncBase();
       authWin = new BrowserWindow({
         width: 520, height: 660, autoHideMenuBar: true, icon: icon(),
-        title: 'Sign in to Rhythm',
+        title: 'Sign in to Dawam',
       });
       authWin.webContents.setUserAgent(authWin.webContents.getUserAgent().replace(/Electron\/\S+\s?/, '').replace(/rhythm-desktop\/\S+\s?/, ''));
       const done = (url) => {
@@ -950,7 +995,7 @@ if (!app.requestSingleInstanceLock()) {
           camFailed = true;
           notify(
             'Chair detection unavailable',
-            'Rhythm could not access the camera — the feature is off until the app restarts.'
+            'Dawam could not access the camera — the feature is off until the app restarts.'
           );
         } else {
           // e.g. NotReadableError / "Device in use" — the camera is busy

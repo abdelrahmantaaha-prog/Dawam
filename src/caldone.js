@@ -1,7 +1,7 @@
 /* Done-marks for calendar events.
 
-   The calendar itself stays read-only — Rhythm never writes back to a feed or
-   to Google. "Done" is Rhythm's own private mark that you attended the thing,
+   The calendar itself stays read-only — Dawam never writes back to a feed or
+   to Google. "Done" is Dawam's own private mark that you attended the thing,
    so it lives in planner storage, one page per day (the same shape as the
    points ledger, for the same reason: sync merges per key last-write-wins, and
    per-day pages shrink the two-devices-same-window loss to a single day).

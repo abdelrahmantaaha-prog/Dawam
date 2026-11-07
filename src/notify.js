@@ -8,7 +8,7 @@
 /*    2. An ongoing notification mirroring whatever the Now page is     */
 /*       showing, so the next thing is glanceable from the shade.       */
 /*                                                                      */
-/*  EVERY export here is a no-op on the web. Rhythm stays a PWA: the    */
+/*  EVERY export here is a no-op on the web. Dawam stays a PWA: the    */
 /*  browser build never calls a Capacitor API, and the plugin is only   */
 /*  imported once we know we're running inside the Android shell.       */
 /*                                                                      */
@@ -163,7 +163,7 @@ export async function testNotification() {
   if (state !== 'granted') return `permission is "${state}"`;
   await ensureChannels(ln);
   try {
-    await ln.schedule({ notifications: [{ id: 99, title: 'Rhythm', body: 'Notifications are working.', channelId: CH_REMIND }] });
+    await ln.schedule({ notifications: [{ id: 99, title: 'Dawam', body: 'Notifications are working.', channelId: CH_REMIND }] });
     return 'sent';
   } catch (e) { return `failed: ${e && e.message ? e.message : e}`; }
 }
@@ -266,7 +266,7 @@ export async function pendingCount() {
    away and survives "clear all" — through Android 13. On Android 14+ Google
    deliberately let users dismiss ongoing notifications, and the ONLY way to
    outrank that is a foreground service (native Java, a persistent
-   "Rhythm is running" entry, and battery implications). Short of that, the
+   "Dawam is running" entry, and battery implications). Short of that, the
    strongest available approach is what we do here: post it sticky, keep the
    last text cached, and re-post on every resume and on every tap so a
    dismissal heals the moment the app is touched. */

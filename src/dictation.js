@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------------ */
-/*  Dictation — speaking to Rhythm, on a laptop and on a phone.        */
+/*  Dictation — speaking to Dawam, on a laptop and on a phone.        */
 /*                                                                     */
 /*  There is no single API that works in all three shells this app     */
 /*  ships in, so there are two paths and one rule for choosing:        */

@@ -27,7 +27,7 @@ const clockOf = (ms) => { const d = new Date(ms); return fmtTime(`${pad(d.getHou
  *
  * A rail rather than a column, because they cannot be moved: the feed is
  * read-only and a card that refuses to be dragged sitting among cards that
- * can be is a worse lie than not putting it there. What Rhythm CAN keep about
+ * can be is a worse lie than not putting it there. What Dawam CAN keep about
  * one still lives here — whether you turned up, what it is for, and the page
  * you wrote before walking in. */
 function Meetings({ meetings, calDone, prepFor, onOpen, onToggleDone }) {

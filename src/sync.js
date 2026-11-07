@@ -303,7 +303,7 @@ const PROBE_RETRY_MS = [5000, 15000, 30000, 60000, 120000, 300000];
 
 /* Never sync out from under someone who is mid-edit. Adopting the server's copy
    while a task editor is open makes the app feel like it is fighting you.
-   Rhythm's editors and dialogs all sit inside `.overlay`.
+   Dawam's editors and dialogs all sit inside `.overlay`.
 
    Deliberately NOT `.gate`. The time lock and the focus lock also cover the
    screen, but they are locks rather than edit forms: nothing is being typed
@@ -399,7 +399,7 @@ export function useSync({ localVersion, onApplied, loaded }) {
         setUser(j.user || null);
         setStatus(!j.sync ? 'unavailable' : j.user ? 'idle' : 'signed-out');
       } catch (e) {
-        // Running without a backend is a supported way to use Rhythm, so this
+        // Running without a backend is a supported way to use Dawam, so this
         // is not an error state — but it must not be SILENT either. Reporting
         // the URL that was actually tried is what distinguishes "this build has
         // no backend" from "this build is asking its own WebView for /api".

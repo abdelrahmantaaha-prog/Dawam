@@ -34,7 +34,7 @@ contextBridge.exposeInMainWorld('rhythmFocus', {
     signOut: () => ipcRenderer.invoke('sync-signout'),
   },
 
-  /* Automatic backups as files in Documents\Rhythm backups. See main.js. */
+  /* Automatic backups as files in Documents\Dawam backups. See main.js. */
   backup: {
     write: (name, text) => ipcRenderer.invoke('backup-write', name, text),
     list: () => ipcRenderer.invoke('backup-list'),

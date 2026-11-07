@@ -5,7 +5,7 @@
 /*  and which boards to watch. Nothing is imported behind your back.     */
 /*                                                                      */
 /*  In the day: cards that are actually due, with one button to make a   */
-/*  Rhythm task out of one. The card is never touched — Rhythm has read  */
+/*  Dawam task out of one. The card is never touched — Dawam has read  */
 /*  access and nothing else, and two systems writing to each other is    */
 /*  how you end up with four copies of everything.                       */
 /* ------------------------------------------------------------------ */
@@ -131,7 +131,7 @@ export function TrelloSettings({ trello, onChange, report, onRefresh, refreshing
   );
 }
 
-/* Due cards, in the day. `onAdd` makes a Rhythm task out of one — a copy, by
+/* Due cards, in the day. `onAdd` makes a Dawam task out of one — a copy, by
    the person's choice, leaving the board alone. */
 export function TrelloCards({ cards, onAdd, added }) {
   if (!cards || !cards.length) return null;

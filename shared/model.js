@@ -5,7 +5,7 @@
      entry = { value: "<raw JSON string>", updatedAt: <ms> }   // live
             | { deletedAt: <ms> }                              // tombstone
 
-   Rhythm already stores its planner as independent localStorage keys —
+   Dawam already stores its planner as independent localStorage keys —
    settings, pool, templates, and one per week. Those keys ARE the records, so
    merging per key gives exactly what Mizan gets by merging per record: two
    devices editing different weeks both keep their work, and only a genuine
@@ -18,7 +18,7 @@
    server merge blindly with no change log, no vector clocks, and no
    reconciliation code on the client.
 
-   Deletes are tombstones. Rhythm prunes weeks older than about a month; without
+   Deletes are tombstones. Dawam prunes weeks older than about a month; without
    a tombstone the server would hand every pruned week straight back on the next
    pull, and the device would prune and re-download it forever. */
 

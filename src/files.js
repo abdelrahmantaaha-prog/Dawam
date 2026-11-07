@@ -61,7 +61,7 @@ export async function saveJson(filename, text) {
     // the share sheet is how the file actually reaches somewhere permanent.
     const res = await fs.writeFile({ path: filename, data: text, directory: Directory.Cache, encoding: Encoding.UTF8 });
     try {
-      await sh.share({ title: 'Rhythm backup', url: res.uri, dialogTitle: 'Save your Rhythm backup' });
+      await sh.share({ title: 'Dawam backup', url: res.uri, dialogTitle: 'Save your Dawam backup' });
       return 'shared';
     } catch (shareErr) {
       // Share cancelled or unavailable — the file still exists, so say where.

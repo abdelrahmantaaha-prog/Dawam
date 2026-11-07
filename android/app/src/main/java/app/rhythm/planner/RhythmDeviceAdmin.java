@@ -9,7 +9,7 @@ import android.app.admin.DeviceAdminReceiver;
    two buttons — and every other power it carries is left unused. A receiver
    with no policy attached is the smallest thing that can be provisioned.
 
-   Nothing happens without the adb command. Declaring this does not make Rhythm
+   Nothing happens without the adb command. Declaring this does not make Dawam
    a device owner, does not ask to become one, and has no effect on a normal
    install. */
 public class RhythmDeviceAdmin extends DeviceAdminReceiver {

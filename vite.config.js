@@ -55,8 +55,8 @@ export default defineConfig({
       injectRegister: 'auto',
       includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
       manifest: {
-        name: 'Rhythm — plan your day around the day',
-        short_name: 'Rhythm',
+        name: 'Dawam — plan your day around the day',
+        short_name: 'Dawam',
         description: 'A prayer-time-anchored daily planner. Local-only.',
         theme_color: '#3E8A6C',
         background_color: '#F4FAF6',

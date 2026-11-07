@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Rhythm Bubbles",
-  "version": "1.3.0",
-  "description": "Holds Brave to the bubble Rhythm is running: while a bubble runs, only its sites open. Talks only to Rhythm on this computer.",
+  "name": "Dawam Bubbles",
+  "version": "1.4.0",
+  "description": "Holds Brave to the bubble Dawam is running: while a bubble runs, only its sites open. Talks only to Dawam on this computer.",
   "permissions": ["declarativeNetRequest", "tabs", "alarms", "storage", "webNavigation"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
   "action": {
-    "default_title": "Rhythm bubble",
+    "default_title": "Dawam bubble",
     "default_popup": "popup.html",
     "default_icon": { "16": "icons/icon.png", "32": "icons/icon.png" }
   },

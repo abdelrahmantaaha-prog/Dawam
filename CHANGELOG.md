@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to **Rhythm** are documented here.
+All notable changes to **Dawam** (called Rhythm until 3.11) are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project uses a simple incrementing version number (0.1 per release).
@@ -8,6 +8,28 @@ and this project uses a simple incrementing version number (0.1 per release).
 ---
 
 ## [Unreleased]
+
+## [3.11] — 2026-11-07 · Desktop 1.20.0 · Brave extension 1.4.0
+
+Rhythm is now **Dawam** (دوام). The name, and nothing else.
+
+- Every window, the tray, notifications, the installer (`Dawam-Setup-*.exe`),
+  the shortcuts, the Android launcher label and widget, the PWA, and the Brave
+  extension ("Dawam Bubbles") say Dawam; the Arabic interface says «دوام».
+- The desktop data folder moves from `%APPDATA%\Rhythm` to `%APPDATA%\Dawam`
+  on the first launch, by renaming it — one copy, nothing deleted — and leaves
+  a junction at the old name, so Brave keeps finding the unpacked extension.
+  If an old Rhythm still holds it open, the app keeps using the old folder.
+- `Documents\Rhythm backups` becomes `Documents\Dawam backups` the same way;
+  `scripts/notebook-add.mjs` writes to whichever exists.
+- Kept on purpose, because data or other apps are keyed by them: the
+  `rhythm://` scheme (the planner's storage origin), every `rhythm:*` storage
+  key, the backup file names and their `rhythm-planner` tag, the Android
+  package `app.rhythm.planner` and its component class names (the widget and
+  the device-owner receiver), the Windows app id and login-item name, the
+  `Documents/Rhythm/now.json` folder Bawwab reads, and the sync deployment at
+  rhythm-ruby.vercel.app.
+- The APK from CI is now `dawam.apk`.
 
 ## [3.10] — 2026-10-17 · Desktop 1.19.0
 

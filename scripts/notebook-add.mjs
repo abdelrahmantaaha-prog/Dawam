@@ -1,22 +1,26 @@
 #!/usr/bin/env node
-/* Drop a topic into one of Rhythm's notebooks from outside the app.
+/* Drop a topic into one of Dawam's notebooks from outside the app.
  *
  *   node scripts/notebook-add.mjs "Topic" ["one line of detail"] [--notebook "To look into"]
  *
- * Writes notebook-add-<time>.json into Documents\Rhythm backups, which the
+ * Writes notebook-add-<time>.json into Documents\Dawam backups, which the
  * desktop app watches (desktop/src/main.js, notebook drop-offs). The app files
  * it as a bullet at the end of that notebook — creating and pinning the
- * notebook the first time — and deletes the file. With Rhythm closed the file
+ * notebook the first time — and deletes the file. With Dawam closed the file
  * waits and is filed at the next launch, so nothing here needs the app running.
  *
  * Documents, not AppData: a write to AppData from the Claude app's shells
- * lands in its private container copy, which Rhythm never sees.
+ * lands in its private container copy, which Dawam never sees.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 
-const DIR = process.env.RHYTHM_DROP_DIR || path.join(os.homedir(), 'Documents', 'Rhythm backups');
+// 'Rhythm backups' until the app (renamed from Rhythm) has run once and moved it.
+const DOCS = path.join(os.homedir(), 'Documents');
+const DIR = process.env.RHYTHM_DROP_DIR
+  || [path.join(DOCS, 'Dawam backups'), path.join(DOCS, 'Rhythm backups')].find((d) => fs.existsSync(d))
+  || path.join(DOCS, 'Dawam backups');
 
 const args = process.argv.slice(2);
 let notebook = '';

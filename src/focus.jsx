@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------------ */
-/*  Focus — the desktop half of Rhythm, the app formerly called Anchor. */
+/*  Focus — the desktop half of Dawam, the app formerly called Anchor. */
 /*                                                                      */
 /*  Everything here talks to the Electron shell through the one bridge   */
 /*  the preload installs. On the web and inside the Android shell that   */
@@ -939,12 +939,12 @@ function FocusSettings({ api, settings, templates, onSaved }) {
       <label className="field">
         <span>{tx('Sites in a bubble open in', 'تُفتح مواقع الفقاعة في')}</span>
         <select value={draft.bubbleSites || 'rhythm'} onChange={(e) => save({ bubbleSites: e.target.value })}>
-          <option value="rhythm">{tx('Rhythm’s bubble browser', 'متصفح الفقاعة في ريذم')}</option>
+          <option value="rhythm">{tx('Dawam’s bubble browser', 'متصفح الفقاعة في «دوام»')}</option>
           <option value="brave">{tx('Brave', 'Brave')}</option>
         </select>
         <small className="hint-text">{tx(
-          'The bubble browser never loads a page outside the bubble. During a round, links you click in other apps open there too — the Rhythm extension (below) moves them out of Brave; the rest of the time they open in Brave as always. Brave stays one click away: “Open in Brave” in the bubble browser’s toolbar and right-click menu.',
-          'متصفح الفقاعة لا يحمّل أبدًا صفحة خارج الفقاعة. أثناء الجولة تُفتح فيه أيضًا الروابط التي تنقرها في التطبيقات الأخرى — تنقلها إضافة ريذم (أدناه) من Brave؛ وفي بقية الوقت تُفتح في Brave كالمعتاد. ويبقى Brave على بُعد نقرة: «افتح في Brave» في شريط أدوات متصفح الفقاعة وقائمة النقر بالزر الأيمن.')}</small>
+          'The bubble browser never loads a page outside the bubble. During a round, links you click in other apps open there too — the Dawam extension (below) moves them out of Brave; the rest of the time they open in Brave as always. Brave stays one click away: “Open in Brave” in the bubble browser’s toolbar and right-click menu.',
+          'متصفح الفقاعة لا يحمّل أبدًا صفحة خارج الفقاعة. أثناء الجولة تُفتح فيه أيضًا الروابط التي تنقرها في التطبيقات الأخرى — تنقلها إضافة «دوام» (أدناه) من Brave؛ وفي بقية الوقت تُفتح في Brave كالمعتاد. ويبقى Brave على بُعد نقرة: «افتح في Brave» في شريط أدوات متصفح الفقاعة وقائمة النقر بالزر الأيمن.')}</small>
       </label>
       {num('settleSec', tx('Settling seconds', 'ثواني الاستقرار'), 0, 30, tx('Browser pages only: a page that is still loading is not judged by its loading title. Apps are judged the moment they are in front.', 'صفحات المتصفح فقط: الصفحة أثناء التحميل لا تُحاكم بعنوانها المؤقت. التطبيقات تُحاكم لحظة ظهورها.'))}
       <BraveCompanion api={api} />
@@ -966,18 +966,18 @@ function FocusSettings({ api, settings, templates, onSaved }) {
       {list('freeTimes', tx('Free times', 'أوقات حرة'), tx('20:00-23:00 — or fri,sat 14:00-02:00. The hard block is off inside these.', '20:00-23:00 — أو fri,sat 14:00-02:00. الحظر التام معطّل خلالها.'))}
 
       <h4 className="focus-h4">{tx('This app', 'هذا التطبيق')}</h4>
-      {/* Not a toggle. Rhythm has no Quit on the desktop, so signing out would
+      {/* Not a toggle. Dawam has no Quit on the desktop, so signing out would
           be the loophole that closed it — it comes back at every sign-in. */}
       <label className="check is-fixed">
         <input type="checkbox" checked disabled readOnly />
         <span>{tx('Start with Windows', 'البدء مع تشغيل ويندوز')}
           <small className="hint-text">{tx(
-            'Always on. Rhythm has no Quit on the desktop — closing a window sends it to the tray, and it launches again at every sign-in. To actually end it, use Task Manager or uninstall it.',
-            'مفعّل دائمًا. لا يوجد زر إنهاء لريذم على سطح المكتب — إغلاق النافذة يرسله إلى شريط المهام، ويبدأ من جديد مع كل تسجيل دخول. لإنهائه فعلًا، استخدم مدير المهام أو أزل تثبيته.'
+            'Always on. Dawam has no Quit on the desktop — closing a window sends it to the tray, and it launches again at every sign-in. To actually end it, use Task Manager or uninstall it.',
+            'مفعّل دائمًا. لا يوجد زر إنهاء لـ«دوام» على سطح المكتب — إغلاق النافذة يرسله إلى شريط المهام، ويبدأ من جديد مع كل تسجيل دخول. لإنهائه فعلًا، استخدم مدير المهام أو أزل تثبيته.'
           )}</small>
         </span>
       </label>
-      {toggle('openPlannerAtStart', tx('Open the planner window at launch', 'افتح نافذة المخطط عند التشغيل'), tx('Off means Rhythm starts in the tray.', 'إيقافها يعني أن ريذم يبدأ في شريط المهام.'))}
+      {toggle('openPlannerAtStart', tx('Open the planner window at launch', 'افتح نافذة المخطط عند التشغيل'), tx('Off means Dawam starts in the tray.', 'إيقافها يعني أن «دوام» يبدأ في شريط المهام.'))}
 
       <p className="hint-text"><Save size={12} /> {tx('Changes save as you leave each field.', 'تُحفظ التغييرات عند مغادرة كل حقل.')}</p>
     </div>
@@ -996,7 +996,7 @@ function BraveCompanion({ api }) {
   return (
     <div className="bubble-brave">
       <div className="bubble-brave-head">
-        <strong>{tx('The Rhythm extension for Brave', 'إضافة ريذم لـ Brave')}</strong>
+        <strong>{tx('The Dawam extension for Brave', 'إضافة «دوام» لـ Brave')}</strong>
         <span className={`bubble-status ${c.connected ? 'ok' : ''}`}>{c.connected ? tx('connected', 'متصلة') : tx('not connected', 'غير متصلة')}</span>
       </div>
       {c.connected

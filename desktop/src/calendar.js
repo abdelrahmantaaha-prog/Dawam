@@ -1,4 +1,4 @@
-/* Calendar, from the one place in Rhythm that can actually reach the network
+/* Calendar, from the one place in Dawam that can actually reach the network
    without asking anyone's permission.
 
    Two ways in, and the difference is the whole reason the desktop app was
@@ -61,7 +61,7 @@ async function fetchIcs(rawUrl) {
     for (let hop = 0; hop <= MAX_HOPS; hop++) {
       const r = await fetch(url.toString(), {
         redirect: 'manual',
-        headers: { Accept: 'text/calendar, text/plain;q=0.9', 'User-Agent': 'Rhythm/1.0 (calendar reader)' },
+        headers: { Accept: 'text/calendar, text/plain;q=0.9', 'User-Agent': 'Dawam/1.0 (calendar reader)' },
       });
       if (r.status >= 300 && r.status < 400) {
         const loc = r.headers.get('location');
@@ -144,17 +144,17 @@ function authorize(clientId, clientSecret) {
       if (url.pathname !== '/') { res.writeHead(404).end(); return; }
       const reply = (msg) => {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(`<!doctype html><meta charset="utf-8"><title>Rhythm</title>
+        res.end(`<!doctype html><meta charset="utf-8"><title>Dawam</title>
           <body style="font:16px system-ui;display:grid;place-items:center;height:90vh;margin:0;background:#F4FAF6;color:#1E332C">
           <div style="text-align:center"><h1 style="font-weight:600">${msg}</h1>
-          <p style="color:#6B8577">You can close this tab and go back to Rhythm.</p></div>`);
+          <p style="color:#6B8577">You can close this tab and go back to Dawam.</p></div>`);
       };
       if (url.searchParams.get('state') !== state) { reply('Something went wrong.'); return finish({ ok: false, error: 'state-mismatch' }); }
       const err = url.searchParams.get('error');
-      if (err) { reply('Rhythm was not given access.'); return finish({ ok: false, error: err }); }
+      if (err) { reply('Dawam was not given access.'); return finish({ ok: false, error: err }); }
       const code = url.searchParams.get('code');
       if (!code) { reply('Something went wrong.'); return finish({ ok: false, error: 'no-code' }); }
-      reply('Rhythm can read your calendar.');
+      reply('Dawam can read your calendar.');
 
       const port = server.address().port;
       const body = new URLSearchParams({

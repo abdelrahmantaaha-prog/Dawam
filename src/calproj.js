@@ -1,8 +1,8 @@
 /* ------------------------------------------------------------------ */
 /*  Calendar events -> long-term projects.                             */
 /*                                                                     */
-/*  The feeds stay read-only. Rhythm never writes back to Google or to  */
-/*  an .ics, so "this meeting belongs to the book" is Rhythm's own      */
+/*  The feeds stay read-only. Dawam never writes back to Google or to  */
+/*  an .ics, so "this meeting belongs to the book" is Dawam's own      */
 /*  private note, kept beside the plan the same way calendar done-marks */
 /*  are.                                                                */
 /*                                                                     */

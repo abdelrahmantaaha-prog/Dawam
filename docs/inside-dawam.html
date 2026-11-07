@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Inside Rhythm</title>
+<title>Inside Dawam</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="A chapter-by-chapter tour of the Rhythm codebase, built from its real source.">
+<meta name="description" content="A chapter-by-chapter tour of the Dawam codebase, built from its real source.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
@@ -298,7 +298,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
     <div class="brand">
       <div class="mark">R</div>
       <div>
-        <b>Inside Rhythm</b>
+        <b>Inside Dawam</b>
         <span>v2.0 · 5,457 lines</span>
       </div>
     </div>
@@ -314,7 +314,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
 
       <header class="hero">
         <div class="eyebrow">A tour of your own codebase</div>
-        <h1>Inside Rhythm</h1>
+        <h1>Inside Dawam</h1>
         <p class="sub">Every line of code on this page is real code from <code>Downloads/Claude/rhythm-pwa</code> — not simplified examples. We start from “what is a build step” and end at “I understand the sync merge well enough to change it safely.”</p>
         <div class="facts">
           <div class="fact"><b>5</b> views</div>
@@ -335,8 +335,8 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
           <h2>Start here</h2>
           <p class="lede">Read this page in order, at a screen, with the repo open beside it. It is built to be used, not skimmed.</p>
           <p>Three things worth knowing before we begin.</p>
-          <p><strong>“Line by line” has to be honest.</strong> Rhythm is 5,457 lines, and <code>App.jsx</code> alone is 2,241 of them. Nobody learns from 2,241 annotated lines. This page walks <strong>the spine</strong> — the astronomy, the day model, the ledger, the sync document — line by line, and teaches you the pattern so the giant component reads as an assembly of things you already understand.</p>
-          <p><strong>Rhythm is the project with the most real computer science in it.</strong> Solar declination and the equation of time; a conflict-resolution algorithm that has to be provably symmetric; an append-only ledger; a deterministic serialiser written specifically to fix an infinite loop. If you want to see why theory matters, it is all in this repo.</p>
+          <p><strong>“Line by line” has to be honest.</strong> Dawam is 5,457 lines, and <code>App.jsx</code> alone is 2,241 of them. Nobody learns from 2,241 annotated lines. This page walks <strong>the spine</strong> — the astronomy, the day model, the ledger, the sync document — line by line, and teaches you the pattern so the giant component reads as an assembly of things you already understand.</p>
+          <p><strong>Dawam is the project with the most real computer science in it.</strong> Solar declination and the equation of time; a conflict-resolution algorithm that has to be provably symmetric; an append-only ledger; a deterministic serialiser written specifically to fix an infinite loop. If you want to see why theory matters, it is all in this repo.</p>
           <p><strong>The dotted lines are the lesson.</strong> In every code panel, lines with an ochre dot in the gutter carry a note. Click one, or use the Prev / Next buttons and the arrow keys, and the note appears beside the code.</p>
           <div class="note-box">
             <span class="badge">Setup</span>
@@ -353,7 +353,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
           <div class="eyebrow">Chapter 1</div>
           <h2>What this thing actually is</h2>
           <p class="lede">A planner whose clock is the sun, that works with the network unplugged, and that only recently learned to have an account.</p>
-          <p>Rhythm has an unusual shape for a modern app, and every unusual thing about it follows from one decision: <strong>the device is the source of truth</strong>.</p>
+          <p>Dawam has an unusual shape for a modern app, and every unusual thing about it follows from one decision: <strong>the device is the source of truth</strong>.</p>
         </div>
 
         <div class="cards">
@@ -370,7 +370,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
           <div class="card">
             <div class="tagline">part 3</div>
             <h4>A service worker</h4>
-            <p>Precaches the entire app and its fonts, so Rhythm opens with the plane in flight mode. This is what makes it a <button class="term" data-def="Progressive Web App: a website that can be installed to the home screen, launches without browser chrome, and works offline. No app store involved.">PWA</button> rather than a website.</p>
+            <p>Precaches the entire app and its fonts, so Dawam opens with the plane in flight mode. This is what makes it a <button class="term" data-def="Progressive Web App: a website that can be installed to the home screen, launches without browser chrome, and works offline. No app store involved.">PWA</button> rather than a website.</p>
           </div>
           <div class="card">
             <div class="tagline">part 4, optional</div>
@@ -381,7 +381,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
 
         <div class="prose" style="margin-top: 22px;">
           <h3>The sentence that explains the whole design</h3>
-          <p>Rhythm is <strong>local-first</strong>. Not “offline-capable” — local-<em>first</em>, which is a stronger claim: the local copy is authoritative and the network is an optimisation. That one decision explains why storage is wrapped in a fake-async API, why sync is a merge rather than a fetch, why conflicts must resolve without a server arbitrating, and why a rendering never waits for a request.</p>
+          <p>Dawam is <strong>local-first</strong>. Not “offline-capable” — local-<em>first</em>, which is a stronger claim: the local copy is authoritative and the network is an optimisation. That one decision explains why storage is wrapped in a fake-async API, why sync is a merge rather than a fetch, why conflicts must resolve without a server arbitrating, and why a rendering never waits for a request.</p>
           <p>The trade is honest: no spinner ever blocks you from ticking something off, and in exchange you own the backup problem, and two devices editing the same week on the same day can lose one edit. Chapter 6 is exactly how much that costs and why it was accepted.</p>
         </div>
 
@@ -438,8 +438,8 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
         <div class="prose">
           <div class="eyebrow">Chapter 3</div>
           <h2>The sun as a clock</h2>
-          <p class="lede">Rhythm's day is not divided into hours. It is divided into six blocks whose boundaries move with the sun, computed on the device from first principles.</p>
-          <p>Most planners would fetch prayer times from an API. Rhythm computes them, which means the app works with no network, in any city, on any date — and it means there is real astronomy in your codebase.</p>
+          <p class="lede">Dawam's day is not divided into hours. It is divided into six blocks whose boundaries move with the sun, computed on the device from first principles.</p>
+          <p>Most planners would fetch prayer times from an API. Dawam computes them, which means the app works with no network, in any city, on any date — and it means there is real astronomy in your codebase.</p>
         </div>
         <div class="specimen" data-spec="sun"></div>
 
@@ -449,7 +449,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
         <div class="specimen" data-spec="prayers"></div>
 
         <div class="note-box">
-          <span class="badge">Why this matters beyond Rhythm</span>
+          <span class="badge">Why this matters beyond Dawam</span>
           <p>This is a worked example of a pattern worth recognising: a problem that <em>looks</em> like it needs a server (“where do I get prayer times?”) is actually a closed-form calculation someone published decades ago. Before adding a network dependency, it is always worth asking whether the answer is computable. Every dependency you avoid is a failure mode you never have to handle.</p>
         </div>
 
@@ -458,7 +458,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
         </div>
         <div class="specimen" data-spec="blocks"></div>
 
-        <div class="check" data-answer="It returns 'isha' — the final fall-through. Between midnight and Fajr none of the earlier comparisons match, so control reaches the last line. That is correct rather than accidental: Rhythm's logical day runs Fajr to Fajr, so 2am belongs to the previous evening's Isha block, which is also why the prayer gate at that hour is still last night's.">
+        <div class="check" data-answer="It returns 'isha' — the final fall-through. Between midnight and Fajr none of the earlier comparisons match, so control reaches the last line. That is correct rather than accidental: Dawam's logical day runs Fajr to Fajr, so 2am belongs to the previous evening's Isha block, which is also why the prayer gate at that hour is still last night's.">
           <div class="q">Check yourself: it is 02:00, after midnight but before Fajr. Which block does <code>activeBlockAt</code> return, and is that a bug?</div>
           <button class="reveal" type="button">Show answer</button>
           <div class="a"></div>
@@ -473,7 +473,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
           <div class="eyebrow">Chapter 4</div>
           <h2>Now: one thing at a time</h2>
           <p class="lede">The Now view shows a single task. Everything interesting about it is in what it refuses to do.</p>
-          <p>A list of twenty things is a list you avoid. Rhythm's Now view surfaces exactly one item; checking it reveals the next. That is a product decision, but it creates an engineering obligation, and the comment above the code states it in capital letters.</p>
+          <p>A list of twenty things is a list you avoid. Dawam's Now view surfaces exactly one item; checking it reveals the next. That is a product decision, but it creates an engineering obligation, and the comment above the code states it in capital letters.</p>
         </div>
         <div class="specimen" data-spec="now"></div>
 
@@ -541,7 +541,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
 
         <div class="prose">
           <h3>The document, and why it merges per key</h3>
-          <p>Rhythm already stores its planner as independent localStorage keys — settings, the pool, one per week. Those keys <em>are</em> the records, so merging per key gives you conflict resolution for free.</p>
+          <p>Dawam already stores its planner as independent localStorage keys — settings, the pool, one per week. Those keys <em>are</em> the records, so merging per key gives you conflict resolution for free.</p>
         </div>
         <div class="specimen" data-spec="merge"></div>
 
@@ -568,7 +568,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
         <div class="specimen" data-spec="editing"></div>
 
         <div class="check" data-answer="A tombstone: { deletedAt: <ms> }. Without it the server hands the pruned week straight back on the next pull, and the device prunes and re-downloads it forever — the same shape of infinite loop as the fingerprint bug, from a completely different cause. A tombstone also competes on its own timestamp, so genuinely re-creating that week later beats the delete.">
-          <div class="q">Check yourself: Rhythm prunes weeks older than about a month. What has to be written when a week is deleted, and what goes wrong without it?</div>
+          <div class="q">Check yourself: Dawam prunes weeks older than about a month. What has to be written when a week is deleted, and what goes wrong without it?</div>
           <button class="reveal" type="button">Show answer</button>
           <div class="a"></div>
         </div>
@@ -582,7 +582,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
           <div class="eyebrow">Chapter 7</div>
           <h2>The two optional halves: notifications and AI</h2>
           <p class="lede">One only exists inside the Android shell; the other only exists if you supply a key. Both are written so their absence changes nothing.</p>
-          <p>Rhythm ships as a PWA <em>and</em> as an Android app built with <button class="term" data-def="Capacitor wraps a web app in a native shell and exposes native APIs (notifications, filesystem, share) to JavaScript. The same source builds both the website and the app.">Capacitor</button>. Native notifications only make sense in the second one, so every export in <code>notify.js</code> is a no-op on the web.</p>
+          <p>Dawam ships as a PWA <em>and</em> as an Android app built with <button class="term" data-def="Capacitor wraps a web app in a native shell and exposes native APIs (notifications, filesystem, share) to JavaScript. The same source builds both the website and the app.">Capacitor</button>. Native notifications only make sense in the second one, so every export in <code>notify.js</code> is a no-op on the web.</p>
         </div>
         <div class="specimen" data-spec="notify"></div>
 
@@ -599,7 +599,7 @@ hr.rule { border: 0; border-top: 1px solid var(--line); margin: 44px 0 0; }
         </div>
 
         <div class="check" data-answer="Fail loudly. A 401 is a configuration error, not an outage — falling back would hide the real problem behind a working feature, and the user would never learn their key is wrong until the day the backup also fails. Only unreachable, rate-limited and 5xx responses trigger the fallback.">
-          <div class="q">Check yourself: Gemini returns 401 because the key was pasted with a trailing space. Should Rhythm fall back to Groq?</div>
+          <div class="q">Check yourself: Gemini returns 401 because the key was pasted with a trailing space. Should Dawam fall back to Groq?</div>
           <button class="reveal" type="button">Show answer</button>
           <div class="a"></div>
         </div>
@@ -1165,7 +1165,7 @@ const SPECS = {
     "lines": [
       [
         11,
-        "/*  EVERY export here is a no-op on the web. Rhythm stays a PWA: the    */",
+        "/*  EVERY export here is a no-op on the web. Dawam stays a PWA: the    */",
         "The contract, stated once at the top, so no caller anywhere needs to check which platform it is on."
       ],
       [

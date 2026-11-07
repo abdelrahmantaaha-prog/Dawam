@@ -9,7 +9,7 @@
 /*  recurrence, timezones, all-day spans — so it is the part that is     */
 /*  unit-tested.                                                        */
 /*                                                                      */
-/*  What is deliberately NOT here: writing. Rhythm never edits your      */
+/*  What is deliberately NOT here: writing. Dawam never edits your      */
 /*  calendar. A feed is read, and the day is planned around it.          */
 /* ------------------------------------------------------------------ */
 

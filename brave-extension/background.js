@@ -1,20 +1,20 @@
-/* Rhythm Bubbles — the worker.
+/* Dawam Bubbles — the worker.
 
-   Rhythm (the desktop app) runs a small server on this computer that says
+   Dawam (the desktop app) runs a small server on this computer that says
    what bubble is running. This worker keeps a question open to it — "tell me
    when the bubble changes" — and turns the answer into Brave's own blocking
    rules, so a page outside the bubble is swapped for blocked.html before it
    loads. When the bubble ends, the rules go and the swapped tabs go back to
    where they were (blocked.js does that part).
 
-   If Rhythm is not running there is no bubble, and Brave is left alone. */
+   If Dawam is not running there is no bubble, and Brave is left alone. */
 
 importScripts('rules.js');
 
 const PORTS = [47615, 47616, 47617];
 const BLOCKED = chrome.runtime.getURL('blocked.html');
 
-let base = null;        // http://127.0.0.1:<port> once Rhythm is found
+let base = null;        // http://127.0.0.1:<port> once Dawam is found
 let version = -1;       // the bubble version last seen; the server holds the question until it changes
 let rulesKey = null;    // the rules currently installed, to skip needless rewrites
 let lastSweep = null;
@@ -96,7 +96,7 @@ async function loop() {
   try {
     for (;;) {
       if (!base) base = await findRhythm();
-      if (!base) { await apply(null); return; }   // Rhythm is not running: no bubble
+      if (!base) { await apply(null); return; }   // Dawam is not running: no bubble
       try {
         const r = await fetch(`${base}/bubble?since=${version}`, { cache: 'no-store', signal: AbortSignal.timeout(25000) });
         await apply(await r.json());
@@ -118,8 +118,8 @@ chrome.runtime.onStartup.addListener(() => {
   loop();
 });
 chrome.alarms.onAlarm.addListener(() => loop());
-/* "Let this site in" from blocked.html. Only this worker talks to Rhythm, and
-   Rhythm only accepts it from an extension, with the header below. */
+/* "Let this site in" from blocked.html. Only this worker talks to Dawam, and
+   Dawam only accepts it from an extension, with the header below. */
 async function letIn(url) {
   if (!base) base = await findRhythm();
   if (!base) return { ok: false };
@@ -135,8 +135,8 @@ async function letIn(url) {
 /* Links from other apps, during a round.
 
    A link clicked in Corpus, Claude, an email or a PDF opens in Brave, the
-   default browser. While a bubble runs, Rhythm would rather it opened in the
-   bubble browser — so the tab is offered to Rhythm, and closed here if Rhythm
+   default browser. While a bubble runs, Dawam would rather it opened in the
+   bubble browser — so the tab is offered to Dawam, and closed here if Dawam
    took it. The rest of the time Brave is left to be Brave.
 
    What counts as "a link from another app": a page Brave opened because a
@@ -144,8 +144,8 @@ async function letIn(url) {
    this machine; Chromium documents "auto_toplevel" for the same thing, so
    both count) — in an ordinary window. Not a bookmark, not an address typed here, not a
    link followed inside Brave, not an app window (Corpus shows itself in
-   one), not the tabs Brave brings back when it starts, and not a page Rhythm
-   itself sent to Brave (Rhythm turns those down). */
+   one), not the tabs Brave brings back when it starts, and not a page Dawam
+   itself sent to Brave (Dawam turns those down). */
 async function offer(details) {
   if (details.frameId !== 0 || !['start_page', 'auto_toplevel'].includes(details.transitionType)) return;
   const { bubble, startedAt } = await chrome.storage.session.get(['bubble', 'startedAt']);
@@ -168,7 +168,7 @@ async function offer(details) {
     });
     const { taken } = await r.json();
     if (taken) await chrome.tabs.remove(details.tabId);
-  } catch { /* Rhythm away: the tab stays in Brave */ }
+  } catch { /* Dawam away: the tab stays in Brave */ }
 }
 chrome.webNavigation.onCommitted.addListener((d) => { offer(d); });
 

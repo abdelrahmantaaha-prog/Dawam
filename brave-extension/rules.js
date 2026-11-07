@@ -1,5 +1,5 @@
 /* The one rule, shared by the worker and the pages: may this address open in
-   the bubble? The same decision Rhythm's own bubble browser makes (desktop/
+   the bubble? The same decision Dawam's own bubble browser makes (desktop/
    src/bubble.js, urlAllowed) — a site allows itself and everything under it,
    sign-in pages always load, and a keyword allows any address that says it. */
 

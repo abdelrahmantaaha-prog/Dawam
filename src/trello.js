@@ -7,11 +7,11 @@
 /*  with the person's own API key and a token they grant once.           */
 /*                                                                      */
 /*  The token is asked for with scope=read and expiration=never. Read    */
-/*  because Rhythm has no business editing someone's board; never        */
+/*  because Dawam has no business editing someone's board; never        */
 /*  because the alternative is re-authorising in the middle of a working */
 /*  day, which is the thing this whole feature was told not to do.       */
 /*                                                                      */
-/*  Cards are never copied automatically. A card becomes a Rhythm task   */
+/*  Cards are never copied automatically. A card becomes a Dawam task   */
 /*  when the person says so, and the card itself is left untouched —     */
 /*  two systems silently writing to each other is how you end up with    */
 /*  four copies of everything.                                          */
@@ -28,7 +28,7 @@ export const TRELLO_KEY_URL = 'https://trello.com/power-ups/admin';
 export const authorizeUrl = (key) =>
   `https://trello.com/1/authorize?${new URLSearchParams({
     key: String(key || ''),
-    name: 'Rhythm',
+    name: 'Dawam',
     scope: 'read',
     expiration: 'never',
     response_type: 'token',
@@ -58,7 +58,7 @@ export const listCards = (auth, boardId) =>
   get(`/boards/${boardId}/cards`, auth, { fields: 'name,due,dueComplete,idList,shortUrl,closed,dateLastActivity' });
 
 /* ---------- the pure part ----------
-   Trello's shapes, turned into the only thing Rhythm wants: a title, when it
+   Trello's shapes, turned into the only thing Dawam wants: a title, when it
    is due, and enough context to know where it came from. */
 export function normalizeCards(cards, lists = [], board = {}) {
   const listName = new Map(lists.map((l) => [l.id, l.name]));

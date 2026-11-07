@@ -62,7 +62,7 @@ export async function readFeed(rawUrl, { fetchImpl = fetch } = {}) {
       const r = await fetchImpl(url.toString(), {
         redirect: 'manual',
         signal: ac.signal,
-        headers: { Accept: 'text/calendar, text/plain;q=0.9, */*;q=0.1', 'User-Agent': 'Rhythm/1.0 (calendar reader)' },
+        headers: { Accept: 'text/calendar, text/plain;q=0.9, */*;q=0.1', 'User-Agent': 'Dawam/1.0 (calendar reader)' },
       });
 
       if (r.status >= 300 && r.status < 400) {

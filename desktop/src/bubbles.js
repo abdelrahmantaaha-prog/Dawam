@@ -13,11 +13,11 @@
                    browser or in Brave.
      drops         turning whatever was dragged onto the planner (a program, a
                    shortcut, a link, an open window) into an item.
-     the browser   Rhythm's own bubble browser. It never loads a page outside
+     the browser   Dawam's own bubble browser. It never loads a page outside
                    the bubble — the page is refused before it is fetched, which
                    no amount of window-watching can do for another browser. It
                    can carry the extensions you use in Brave.
-     the bridge    a tiny local server the Rhythm extension in Brave listens
+     the bridge    a tiny local server the Dawam extension in Brave listens
                    to, so Brave holds itself to the bubble too.
 
    Nothing here reaches the internet. The bridge listens on 127.0.0.1 only and
@@ -51,7 +51,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
         ...d.workArea,
         frame: false, skipTaskbar: true, resizable: false, movable: false,
         minimizable: false, maximizable: false, fullscreenable: false,
-        backgroundColor: '#0E1A17', icon: icon(), title: 'Rhythm bubble',
+        backgroundColor: '#0E1A17', icon: icon(), title: 'Dawam bubble',
         show: false,
         webPreferences: { preload }
       });
@@ -76,7 +76,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
   /*  work area does not move), so nothing maximized goes under the bar  */
   /*  and no Windows setting is touched — hiding a window is the whole   */
   /*  change. The taskbar comes back when the round ends; and because a  */
-  /*  Rhythm that is killed mid-round cannot put it back, the fact that  */
+  /*  Dawam that is killed mid-round cannot put it back, the fact that  */
   /*  it was hidden is written down, and the next launch restores it.    */
   /* ------------------------------------------------------------------ */
   let barWins = [];
@@ -122,7 +122,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
         x: strip.x, y: strip.y, width: strip.width, height: strip.height,
         frame: false, skipTaskbar: true, resizable: false, movable: false,
         minimizable: false, maximizable: false, fullscreenable: false,
-        alwaysOnTop: true, show: false, backgroundColor: '#0E1A17', icon: icon(), title: 'Rhythm bubble bar',
+        alwaysOnTop: true, show: false, backgroundColor: '#0E1A17', icon: icon(), title: 'Dawam bubble bar',
         webPreferences: { preload }
       });
       win.setAlwaysOnTop(true, 'pop-up-menu');
@@ -177,7 +177,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     }
   }
 
-  // A previous Rhythm hid the taskbar and never got to show it again.
+  // A previous Dawam hid the taskbar and never got to show it again.
   function restoreTaskbar() {
     if (store.data.settings.taskbarHiddenByRhythm) setTaskbarHidden(false);
   }
@@ -272,9 +272,9 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     menu.popup({ window: win, x: Math.round(at && at.x || 0), y: Math.round(at && at.y || 0) });
   }
 
-  /* Sending a page to Brave on purpose. During a round the Rhythm extension
+  /* Sending a page to Brave on purpose. During a round the Dawam extension
      moves links that arrive in Brave from other apps into the bubble browser
-     (see takeLink); a page Rhythm itself just sent must not be moved straight
+     (see takeLink); a page Dawam itself just sent must not be moved straight
      back, so it is remembered for a few seconds. In a bubble, Brave is still
      held to the bubble's sites by the extension. */
   const sentToBrave = new Map();   // url -> when
@@ -394,9 +394,9 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
   }
 
   /* The windows open right now, one per program, as items to drag in.
-     Rhythm, the Windows shell and Task Manager are left out — they are never
+     Dawam, the Windows shell and Task Manager are left out — they are never
      judged, so putting them in a bubble would mean nothing. */
-  const NOT_OFFERED = new Set(['rhythm', 'electron', 'explorer', 'taskmgr', 'applicationframehost', 'searchhost', 'shellexperiencehost', 'textinputhost', 'systemsettings']);
+  const NOT_OFFERED = new Set(['dawam', 'rhythm', 'electron', 'explorer', 'taskmgr', 'applicationframehost', 'searchhost', 'shellexperiencehost', 'textinputhost', 'systemsettings']);
   async function running() {
     const ans = await enforcer.ask('list', '', 6000);
     const wins = (ans && Array.isArray(ans.windows)) ? ans.windows : [];
@@ -427,7 +427,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     ses = session.fromPartition(BROWSER_PARTITION);
     // Sites that refuse "embedded" browsers (Google sign-in, for one) are told
     // the truth about the engine and nothing about the wrapper.
-    ses.setUserAgent(ses.getUserAgent().replace(/Electron\/\S+\s?/, '').replace(/rhythm-desktop\/\S+\s?/, '').replace(/Rhythm\/\S+\s?/, ''));
+    ses.setUserAgent(ses.getUserAgent().replace(/Electron\/\S+\s?/, '').replace(/(?:dawam|rhythm)-desktop\/\S+\s?/, '').replace(/(?:Dawam|Rhythm)\/\S+\s?/, ''));
     /* The heart of it: a page outside the bubble is refused before a byte of
        it is fetched. Only whole pages are judged (a tab's page, a frame's
        page is the site's own business); images, scripts and fonts come from
@@ -471,7 +471,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     if (!browserWin || browserWin.isDestroyed()) return;
     browserWin.webContents.send('bb-tabs', tabs.map(tabInfo));
     const t = tabs.find((x) => x.id === activeTab);
-    browserWin.setTitle(t ? `${t.view.webContents.getTitle() || 'Bubble browser'} — Rhythm` : 'Bubble browser — Rhythm');
+    browserWin.setTitle(t ? `${t.view.webContents.getTitle() || 'Bubble browser'} — Dawam` : 'Bubble browser — Dawam');
   }
 
   function layout() {
@@ -497,7 +497,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
       wc.on(ev, sendTabs);
     }
     wc.on('page-favicon-updated', (_e, icons) => { t.favicon = icons && icons[0]; sendTabs(); });
-    /* The refusal page has no bridge to Rhythm (it is a plain page in a
+    /* The refusal page has no bridge to Dawam (it is a plain page in a
        sandboxed tab), so "let it in" is a navigation to a made-up address
        that is caught here and never leaves the tab. */
     wc.on('will-navigate', (e, url) => {
@@ -594,7 +594,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     if (!browserWin || browserWin.isDestroyed()) {
       browserWin = new BrowserWindow({
         width: 1200, height: 820, minWidth: 480, minHeight: 360,
-        autoHideMenuBar: true, icon: icon(), title: 'Bubble browser — Rhythm',
+        autoHideMenuBar: true, icon: icon(), title: 'Bubble browser — Dawam',
         backgroundColor: '#0E1A17',
         webPreferences: { preload }
       });
@@ -660,7 +660,7 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
   }
 
   const sameDir = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
-  // The Rhythm extension itself has no business in the bubble browser: it
+  // The Dawam extension itself has no business in the bubble browser: it
   // holds Brave to the bubble, which this browser already does on its own.
   const isCompanion = (dir) => sameDir(dir, companionFolder())
     || sameDir(dir, path.join(__dirname, '..', '..', 'brave-extension'));
@@ -947,9 +947,9 @@ function createBubbles({ store, sessions, enforcer, icon, preload, winFile, noti
     return false;
   }
 
-  /* The extension lives in Rhythm's own data folder, copied there from the
+  /* The extension lives in Dawam's own data folder, copied there from the
      app on every launch. Brave remembers an unpacked extension by its folder,
-     so the folder must not move when Rhythm is updated or reinstalled. */
+     so the folder must not move when Dawam is updated or reinstalled. */
   let companionDir = null;
   function companionFolder() {
     if (companionDir) return companionDir;

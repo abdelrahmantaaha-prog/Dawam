@@ -483,7 +483,7 @@ function pyramidPath(cx, baseY, halfW, h) {
 /* ------------------------------------------------------------------ */
 function AppIcon({ size = 34 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" role="img" aria-label="Rhythm">
+    <svg width={size} height={size} viewBox="0 0 32 32" role="img" aria-label="Dawam">
       <rect width="32" height="32" rx="9" fill="#3E8A6C" />
       <circle cx="16" cy="13" r="6" fill="#F8FCF9" />
       <rect x="6" y="22" width="20" height="2.6" rx="1.3" fill="#F8FCF9" />

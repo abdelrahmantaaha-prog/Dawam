@@ -5,7 +5,7 @@ try { host = new URL(target).hostname.replace(/^www\./, ''); } catch { /* show i
 document.getElementById('site').textContent = host;
 document.title = `${host} — outside the bubble`;
 document.getElementById('back').addEventListener('click', () => history.back());
-/* The worker asks Rhythm to let the site in. Rhythm then tells the worker the
+/* The worker asks Dawam to let the site in. Dawam then tells the worker the
    bubble changed, the rules widen, and render() below sees the page is
    allowed and goes to it. */
 document.getElementById('add').addEventListener('click', async () => {
@@ -14,7 +14,7 @@ document.getElementById('add').addEventListener('click', async () => {
   const r = await chrome.runtime.sendMessage({ type: 'add', url: target }).catch(() => null);
   if (!r || !r.ok) {
     btn.disabled = false;
-    document.getElementById('note').textContent = 'Rhythm could not be reached to let it in. Is it running?';
+    document.getElementById('note').textContent = 'Dawam could not be reached to let it in. Is it running?';
   }
 });
 

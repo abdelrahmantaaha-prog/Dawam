@@ -1,10 +1,16 @@
-# Rhythm — v2.0
+# Dawam — v2.0
+
+*Dawam (دوام) was called Rhythm until November 2026 — the name is from "the
+deeds most loved are the most constant, even if small". Only the name
+changed: storage keys, the `rhythm://` scheme, the Android package
+`app.rhythm.planner` and the sync deployment keep the old word on purpose,
+because data is keyed by them.*
 
 A prayer-time-anchored daily planner. **Local-only by design**: everything lives
 in your browser's storage on your device. Nothing is synced, nothing is sent
 anywhere (one opt-in exception: the AI brain-dump sorter, see below).
 
-This is the Vite PWA edition of Rhythm, converted from the original single-file
+This is the Vite PWA edition of Dawam, converted from the original single-file
 Claude artifact.
 
 ## Run it
@@ -28,7 +34,7 @@ your own server). **The service worker requires HTTPS** (or localhost).
 
 ## Desktop app — the planner and the focus suite together
 
-On Windows, Rhythm runs as its own app that also contains everything **Anchor**
+On Windows, Dawam runs as its own app that also contains everything **Anchor**
 used to be: the always-on-top overlay, focus modes (allow lists — anything not
 allowed is blocked), break and away blackouts, chair detection, hard blocks and
 free times. Anchor is not a
@@ -47,7 +53,7 @@ rest cost something would only teach you not to rest.
 
 What the merge is for is the seam between the two halves. A round is started
 **from a planned task**, sized by that task's own slot or by what past rounds
-taught Rhythm it takes; "focus this" anywhere in the planner starts a real round
+taught Dawam it takes; "focus this" anywhere in the planner starts a real round
 instead of the plain countdown the web build falls back to; and when the round
 ends the planner is told, with the task id and the time really spent, so it can
 offer to tick the task off and learn the duration from measurement rather than
@@ -59,13 +65,13 @@ shipping buttons that cannot work.
 
 ## Calendars and Trello (read-only)
 
-Rhythm can plan around what you have already committed to. **Settings →
+Dawam can plan around what you have already committed to. **Settings →
 Calendar** takes a feed address (in Google Calendar: Settings → your calendar →
 Integrate calendar → "Secret address in iCal format"); everything on it becomes
 time the planner will not schedule over. On the desktop you can sign in to
 Google properly instead — the shell holds a refresh token, so it is
 authorise-once rather than the hour-long token a browser gets. Both routes ask
-for read access only; Rhythm never writes to your calendar.
+for read access only; Dawam never writes to your calendar.
 
 All-day events do not block the day's hours by default — a birthday is a note
 on the day, not a claim on it — and there is a setting for the minutes each
@@ -84,7 +90,7 @@ re-checked.
 ## Install as an app
 
 Open the deployed site on your phone → browser menu → **Add to Home Screen**
-(Safari) or **Install app** (Chrome/Edge). Rhythm then launches standalone,
+(Safari) or **Install app** (Chrome/Edge). Dawam then launches standalone,
 works fully offline (the service worker precaches the whole app and the fonts),
 and updates itself automatically when you deploy a new build.
 
@@ -196,14 +202,14 @@ else.
 / token**) point this copy at *keybroker*, which rotates the keys every project
 in this folder shares and remembers the cooldowns they have all discovered.
 It is tried first; the keys above are what answers when it cannot be reached.
-A browser has nowhere to hide a token, so Rhythm holds its own — revocable on
+A browser has nowhere to hide a token, so Dawam holds its own — revocable on
 its own without taking the other apps down.
 
 For CI-built APKs, set the same two names as repository secrets: `.env.local`
 is gitignored, so without them the build ships with no pool and every AI
 feature asks for a key the phone does not have.
 
-- **Gemini** — get a key at aistudio.google.com/apikey, no card needed. Rhythm
+- **Gemini** — get a key at aistudio.google.com/apikey, no card needed. Dawam
   calls Flash-Lite via the `gemini-flash-lite-latest` alias (with a pinned
   fallback), so Google's model retirements don't break anything. Free-tier
   limits are per-minute and per-day (HTTP 429; daily quota resets at midnight
@@ -273,7 +279,7 @@ which sorts keys; **none use `JSON.stringify`.** Keep it that way.
 ### Sync in the APK
 
 The APK serves the bundled build from `https://localhost` — the WebView's own
-asset server. That is what makes Rhythm work with no network at all, but it
+asset server. That is what makes Dawam work with no network at all, but it
 also means a relative `/api/me` never leaves the phone: sync would report "no
 backend" however the deployment is configured, and no amount of rebuilding
 would change it. The app therefore aims its data calls at the deployment by
@@ -409,7 +415,7 @@ It gives you:
 
 `.github/workflows/android.yml` builds it on GitHub's runners, which already
 have a JDK and the Android SDK. **Actions → Build Android APK → Run workflow**,
-then download the `rhythm-apk` artifact. It also runs on pushes to `main` that
+then download the `dawam-apk` artifact. It also runs on pushes to `main` that
 touch the app, and pushing a `v*` tag additionally attaches the APK to a GitHub
 Release — much easier to download straight onto a phone than a CI artifact.
 
@@ -703,7 +709,7 @@ than claiming the better one:
 | Mode | What it is |
 | --- | --- |
 | **pinned** | The ordinary case. Android shows its own confirmation and you can leave by holding Back and Overview together. A speed bump with a name. |
-| **locked** | Rhythm is the device owner. Nothing leaves until the app releases it. |
+| **locked** | Dawam is the device owner. Nothing leaves until the app releases it. |
 
 The second needs provisioning once, by hand, from a computer, on a device with
 no accounts on it yet:
@@ -726,7 +732,7 @@ unclaimed.
 > Play policy restricts accessibility services to accessibility. It would break
 > on the next release and could not be published. Lock task mode is stronger
 > for this purpose anyway: it does not block one screen of Settings, it blocks
-> leaving Rhythm at all.
+> leaving Dawam at all.
 
 ## Progress toward a project goal pays
 

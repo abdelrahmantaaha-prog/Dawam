@@ -4,13 +4,13 @@ function render({ bubble, connected }) {
   const list = document.getElementById('sites');
   list.replaceChildren();
   if (!connected) {
-    head.textContent = 'Rhythm is not reachable';
-    sub.textContent = 'Rhythm for Windows has to be running for bubbles to reach Brave. Brave is not being held to anything right now.';
+    head.textContent = 'Dawam is not reachable';
+    sub.textContent = 'Dawam for Windows has to be running for bubbles to reach Brave. Brave is not being held to anything right now.';
     return;
   }
   if (!bubble || !bubble.active) {
     head.textContent = 'No bubble running';
-    sub.textContent = 'Connected to Rhythm. When a bubble starts, only its sites will open here.';
+    sub.textContent = 'Connected to Dawam. When a bubble starts, only its sites will open here.';
     return;
   }
   head.textContent = bubble.name ? `In the ${bubble.name} bubble` : 'In a bubble';

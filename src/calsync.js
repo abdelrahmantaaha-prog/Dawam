@@ -8,7 +8,7 @@
 /*  is three transports behind one function, and the app above never     */
 /*  learns which one answered.                                          */
 /*                                                                      */
-/*  Read-only, always. Rhythm never writes to your calendar.             */
+/*  Read-only, always. Dawam never writes to your calendar.             */
 /* ------------------------------------------------------------------ */
 
 import { loadKey, saveKey } from './storage.js';

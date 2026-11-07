@@ -255,7 +255,7 @@ function HabitCard({ id, h, habits = [], todayISO, open, rewards = [], balance =
             <div className="focus-choices">
               {[5, 10, 15, 20, 30, 45].map((mn) => (<button key={mn} className="ghost sm" onClick={() => onFocus(mn)}>{mn}{tx('m', 'د')}</button>))}
             </div>
-            <p className="hint-text" style={{ margin: '4px 0 0' }}>{tx('Locks Rhythm for the duration, like a task focus lock. You can end early.', 'يقفل التطبيق طوال المدة، مثل قفل تركيز المهام. يمكنك الإنهاء مبكرًا.')}</p>
+            <p className="hint-text" style={{ margin: '4px 0 0' }}>{tx('Locks Dawam for the duration, like a task focus lock. You can end early.', 'يقفل التطبيق طوال المدة، مثل قفل تركيز المهام. يمكنك الإنهاء مبكرًا.')}</p>
           </div>
           {!isPrayer && <div className="proj-edit-foot">
             {confirmDel ? (
@@ -289,7 +289,7 @@ function ProjectsView({ projects, sky, stars, heroLight, onAdd, onUpd, onDel, on
         {projects.length === 0 && (
           <div className="proj-empty">
             <Target size={26} />
-            <p>{tx('Track anything with a finish line — translating a book, a course, a series of investigations. Set a target and a deadline, log progress as you go, link tasks to it, and Rhythm tells you whether you are on pace.', 'تابِع أي شيء له خط نهاية — ترجمة كتاب، أو دورة، أو سلسلة تحقيقات. حدّد هدفًا وموعدًا نهائيًا، وسجّل تقدّمك، واربط المهام به، وسيخبرك التطبيق إن كنت على المسار الصحيح.')}</p>
+            <p>{tx('Track anything with a finish line — translating a book, a course, a series of investigations. Set a target and a deadline, log progress as you go, link tasks to it, and Dawam tells you whether you are on pace.', 'تابِع أي شيء له خط نهاية — ترجمة كتاب، أو دورة، أو سلسلة تحقيقات. حدّد هدفًا وموعدًا نهائيًا، وسجّل تقدّمك، واربط المهام به، وسيخبرك التطبيق إن كنت على المسار الصحيح.')}</p>
           </div>
         )}
         {/* A card is a summary now, so it does not need a full row to itself —
@@ -784,9 +784,9 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
               <div className="sect-h" style={{ marginTop: 16 }}><Lock size={13} /> {tx('The time lock', 'قفل الوقت')}</div>
               <label className="toggle">
                 <input type="checkbox" checked={local.timeLock !== false} onChange={(e) => patch({ timeLock: e.target.checked })} />
-                <span>{tx('When a timed task\'s time comes, lock Rhythm until I am focusing on it', 'عندما يحين وقت مهمة موقوتة، اقفل التطبيق حتى أركّز عليها')}</span>
+                <span>{tx('When a timed task\'s time comes, lock Dawam until I am focusing on it', 'عندما يحين وقت مهمة موقوتة، اقفل التطبيق حتى أركّز عليها')}</span>
               </label>
-              <p className="hint-text">{tx('A task with a start and an end can only be focused on inside that window, and while it is open it is the only thing you can focus on. Ending the round early locks Rhythm again until the window closes.', 'المهمة ذات البداية والنهاية لا يمكن التركيز عليها إلا داخل وقتها، وأثناءه تكون الشيء الوحيد الذي يمكنك التركيز عليه. إنهاء الجولة مبكرًا يقفل التطبيق مجددًا حتى ينتهي وقتها.')}</p>
+              <p className="hint-text">{tx('A task with a start and an end can only be focused on inside that window, and while it is open it is the only thing you can focus on. Ending the round early locks Dawam again until the window closes.', 'المهمة ذات البداية والنهاية لا يمكن التركيز عليها إلا داخل وقتها، وأثناءه تكون الشيء الوحيد الذي يمكنك التركيز عليه. إنهاء الجولة مبكرًا يقفل التطبيق مجددًا حتى ينتهي وقتها.')}</p>
               <div className="sect-h" style={{ marginTop: 16 }}><Lock size={13} /> {tx('The Now lock', 'قفل «الآن»')}</div>
               <label className="toggle">
                 <input type="checkbox" checked={!!(local.nowLock && local.nowLock.on)}
@@ -847,7 +847,7 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
           {tab === 'security' && (
             <div className="sect">
               <div className="sect-h"><Shield size={13} /> {tx('App PIN', 'رمز التطبيق')}</div>
-              <div className="security-note"><Shield size={15} /><p>{tx('A PIN asks for four digits when Rhythm opens. It deters someone casually picking up your device — it is a soft lock, not encryption, and does not protect your data from anyone with technical access to this device.', 'يطلب الرمز أربعة أرقام عند فتح التطبيق. يردع من يتناول جهازك عرضًا — لكنه قفل بسيط وليس تشفيرًا، ولا يحمي بياناتك ممّن يملك وصولًا تقنيًا إلى هذا الجهاز.')}</p></div>
+              <div className="security-note"><Shield size={15} /><p>{tx('A PIN asks for four digits when Dawam opens. It deters someone casually picking up your device — it is a soft lock, not encryption, and does not protect your data from anyone with technical access to this device.', 'يطلب الرمز أربعة أرقام عند فتح التطبيق. يردع من يتناول جهازك عرضًا — لكنه قفل بسيط وليس تشفيرًا، ولا يحمي بياناتك ممّن يملك وصولًا تقنيًا إلى هذا الجهاز.')}</p></div>
               {hasPin && <p className="hint-text" style={{ color: 'var(--verdigris)', fontWeight: 700 }}><KeyRound size={12} /> {tx('A PIN is currently set.', 'يوجد رمز مضبوط حاليًا.')}</p>}
               <div className="pin-set-grid">
                 <label><span>{hasPin ? tx('New 4-digit PIN', 'رمز جديد من 4 أرقام') : tx('4-digit PIN', 'رمز من 4 أرقام')}</span><input className="time-input" type="password" inputMode="numeric" maxLength={4} value={pinA} onChange={(e) => { setPinMsg(''); setPinA(e.target.value.replace(/\D/g, '').slice(0, 4)); }} placeholder="••••" /></label>
@@ -866,12 +866,12 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
               <div className="sect-h"><Repeat size={13} /> {tx('Cross-device sync', 'المزامنة بين الأجهزة')}</div>
               {!sync || !sync.capability.sync ? (<>
                 {sync && sync.capability.unreachable ? (<>
-                  <div className="security-note"><Shield size={15} /><p>{tx('Rhythm could not reach the sync server, so it is working locally for now. It keeps trying, and sync turns on by itself as soon as the server answers.', 'تعذّر على Rhythm الوصول إلى خادم المزامنة، لذا يعمل محليًا حاليًا. سيواصل المحاولة، وتعمل المزامنة تلقائيًا فور استجابة الخادم.')}</p></div>
+                  <div className="security-note"><Shield size={15} /><p>{tx('Dawam could not reach the sync server, so it is working locally for now. It keeps trying, and sync turns on by itself as soon as the server answers.', 'تعذّر على Dawam الوصول إلى خادم المزامنة، لذا يعمل محليًا حاليًا. سيواصل المحاولة، وتعمل المزامنة تلقائيًا فور استجابة الخادم.')}</p></div>
                   <div className="io-actions" style={{ marginTop: 10 }}>
                     <button className="ghost sm" onClick={sync.recheck}><Repeat size={13} /> {tx('Try again now', 'أعد المحاولة الآن')}</button>
                   </div>
                 </>) : (<>
-                  <div className="security-note"><Shield size={15} /><p>{tx('This copy of Rhythm has no sync backend, so it is fully local — your planner never leaves this device. Export a backup regularly to keep it safe.', 'هذه النسخة بلا خادم مزامنة، لذا تعمل محليًا بالكامل — لا يغادر مخططك هذا الجهاز. صدّر نسخة احتياطية بانتظام للحفاظ عليه.')}</p></div>
+                  <div className="security-note"><Shield size={15} /><p>{tx('This copy of Dawam has no sync backend, so it is fully local — your planner never leaves this device. Export a backup regularly to keep it safe.', 'هذه النسخة بلا خادم مزامنة، لذا تعمل محليًا بالكامل — لا يغادر مخططك هذا الجهاز. صدّر نسخة احتياطية بانتظام للحفاظ عليه.')}</p></div>
                   <p className="hint-text" style={{ marginTop: 10 }}>{tx('Sync appears here automatically on a deployment that has one configured.', 'تظهر المزامنة هنا تلقائيًا في أي نسخة مُهيّأة لها.')}</p>
                 </>)}
                 {sync && sync.capability.probe && (
@@ -893,7 +893,7 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                   <div className="io-actions" style={{ marginTop: 10 }}>
                     <button className="primary" onClick={sync.signIn}><KeyRound size={14} /> {tx('Continue with Google', 'المتابعة بحساب Google')}</button>
                   </div>
-                  <p className="hint-text" style={{ marginTop: 8 }}>{tx('Staying signed out keeps Rhythm exactly as it is: local-only.', 'البقاء دون تسجيل دخول يُبقي التطبيق كما هو: محلي بالكامل.')}</p>
+                  <p className="hint-text" style={{ marginTop: 8 }}>{tx('Staying signed out keeps Dawam exactly as it is: local-only.', 'البقاء دون تسجيل دخول يُبقي التطبيق كما هو: محلي بالكامل.')}</p>
                 </>)}
                 <div className="sect-h" style={{ marginTop: 16 }}><KeyRound size={13} /> {sync.inAppShell ? tx('Link with a code', 'اربط برمز') : tx('Or link with a code', 'أو اربط برمز')}</div>
                 <p className="hint-text" style={{ marginTop: 0 }}>{tx('On a device where you are already signed in, open Settings → Sync → "Code for another device" and paste it here. Made for the Android app, where Google sign-in cannot run.', 'من جهاز سجّلت الدخول عليه، افتح الإعدادات ← المزامنة ← «رمز لجهاز آخر» والصقه هنا. مصمم لتطبيق أندرويد حيث لا يعمل تسجيل دخول جوجل.')}</p>
@@ -948,7 +948,7 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                 ) : notify.state === 'granted' ? (
                   <p className="hint-text" style={{ color: 'var(--verdigris)', fontWeight: 700 }}><CheckCircle2 size={12} /> {tx('Reminders are on.', 'التنبيهات مفعّلة.')}</p>
                 ) : notify.state === 'denied' ? (
-                  <p className="hint-text vault-warn"><AlertCircle size={12} /> {tx('Blocked — turn notifications on for Rhythm in Android settings.', 'محظورة — فعّل الإشعارات للتطبيق من إعدادات أندرويد.')}</p>
+                  <p className="hint-text vault-warn"><AlertCircle size={12} /> {tx('Blocked — turn notifications on for Dawam in Android settings.', 'محظورة — فعّل الإشعارات للتطبيق من إعدادات أندرويد.')}</p>
                 ) : (
                   <button className="primary" onClick={onEnableNotify}><Clock size={14} /> {tx('Enable reminders', 'تفعيل التنبيهات')}</button>
                 )}
@@ -1026,7 +1026,7 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                 </label>
                 <p className="hint-text" style={{ margin: '6px 0 0', overflowWrap: 'anywhere' }}>
                   {autoBackups.kind === 'desktop'
-                    ? <>{tx('Saved as files in', 'تُحفظ كملفات في')} <code>{auto.where || 'Documents\\Rhythm backups'}</code>. {tx('They survive a reinstall, and any of them can be restored here or on another computer.', 'تبقى بعد إعادة التثبيت، ويمكن استعادة أي منها هنا أو على جهاز آخر.')}</>
+                    ? <>{tx('Saved as files in', 'تُحفظ كملفات في')} <code>{auto.where || 'Documents\\Dawam backups'}</code>. {tx('They survive a reinstall, and any of them can be restored here or on another computer.', 'تبقى بعد إعادة التثبيت، ويمكن استعادة أي منها هنا أو على جهاز آخر.')}</>
                     : autoBackups.kind === 'phone'
                       ? tx("Saved in the app's own storage on this phone. They survive updates and cleared browser data, but not uninstalling the app — download a copy now and then to keep one off the phone.", 'تُحفظ في مساحة التطبيق على هذا الهاتف. تبقى بعد التحديثات ومسح بيانات المتصفح، لكن ليس بعد حذف التطبيق — نزّل نسخة من حين لآخر لتحفظها خارج الهاتف.')
                       : tx("Saved in this browser's database, separate from the planner itself. They do not survive clearing all site data — download a copy now and then.", 'تُحفظ في قاعدة بيانات هذا المتصفح بمعزل عن المخطط نفسه. لا تبقى بعد مسح كل بيانات الموقع — نزّل نسخة من حين لآخر.')}

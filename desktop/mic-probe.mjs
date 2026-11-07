@@ -49,7 +49,7 @@ async function plannerTarget() {
     } catch { /* not listening yet */ }
     await sleep(500);
   }
-  console.error('The planner window never appeared. Is Rhythm already running?');
+  console.error('The planner window never appeared. Is Dawam already running?');
   stop();
   process.exit(1);
 }

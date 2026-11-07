@@ -11,7 +11,7 @@
 /*  planner already lives there, it is small, and a copy that dies with  */
 /*  the original is not a backup.                                       */
 /*                                                                     */
-/*    desktop  real files in Documents\Rhythm backups, through the      */
+/*    desktop  real files in Documents\Dawam backups, through the      */
 /*             shell's bridge. Visible, copyable, survive a reinstall.  */
 /*    phone    the app's private files (Capacitor Filesystem, Data).    */
 /*             Survive updates and cleared WebView storage; not an      */

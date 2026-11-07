@@ -1,4 +1,4 @@
-/* Rhythm core - pure logic: i18n, dates, prayer math, sky, blocks, model. */
+/* Dawam core - pure logic: i18n, dates, prayer math, sky, blocks, model. */
 const APP_VERSION = '3.0';
 
 /* ------------------------------------------------------------------ */
@@ -280,7 +280,7 @@ const DEFAULT_SETTINGS = {
      to get ready rather than to discover it has begun. */
   leadMin: 30,
   weekStartDay: 6,
-  /* While a timed task's own window is open, Rhythm stays covered until you
+  /* While a timed task's own window is open, Dawam stays covered until you
      are focusing on that task, and no round can be started on a timed task
      outside its window. See src/timelock.js. */
   timeLock: true,

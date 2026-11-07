@@ -13,14 +13,14 @@
    watching for that screen, or an overlay drawn on top of it — is precisely
    what Android hardened against, and Play policy restricts accessibility
    services to accessibility. Lock task mode is stronger for this purpose
-   anyway: it does not block one screen of Settings, it blocks leaving Rhythm
+   anyway: it does not block one screen of Settings, it blocks leaving Dawam
    at all, Settings included.
 
    Two modes, and the app must not confuse them:
 
      pinned   ordinary. Android shows its own confirmation and the person can
               leave by holding Back and Overview. A speed bump with a name.
-     locked   Rhythm is the device owner. Nothing leaves until the app says so.
+     locked   Dawam is the device owner. Nothing leaves until the app says so.
               Provisioned once over adb (see android/README, and the comment in
               RhythmLockPlugin.java).
 

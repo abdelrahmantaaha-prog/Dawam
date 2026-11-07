@@ -128,12 +128,13 @@ describe('focus session ↔ planner task', () => {
     expect(blocks).toHaveLength(1);
   });
 
-  it('never blocks Rhythm, the Windows shell, Task Manager or a blank new tab', () => {
+  it('never blocks Dawam (or the Rhythm it was), the Windows shell, Task Manager or a blank new tab', () => {
     const blocks = [];
     sm.on('block', (b) => blocks.push(b));
     sm.startWork({ task: 'Write', workMin: 30, allowed: ['word'] });
     for (const w of [
-      { title: 'Rhythm', process: 'Rhythm', hwnd: 1 },
+      { title: 'Dawam', process: 'Dawam', hwnd: 1 },
+      { title: 'Rhythm', process: 'Rhythm', hwnd: 6 },
       { title: '', process: 'explorer', hwnd: 2 },
       { title: 'Search', process: 'SearchHost', hwnd: 3 },
       { title: 'Task Manager', process: 'Taskmgr', hwnd: 4 },

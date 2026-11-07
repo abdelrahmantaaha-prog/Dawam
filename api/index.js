@@ -1,10 +1,10 @@
-/* Rhythm sync API — a single Vercel Node function running an Express app.
+/* Dawam sync API — a single Vercel Node function running an Express app.
 
    Why one function rather than a file per route: Auth.js needs a catch-all
    mount for its own routes, the session helper has to be shared with every
    sync route, and cold starts are cheaper amortised over one bundle than four.
 
-   Everything here is optional to the app. Rhythm works fully offline with no
+   Everything here is optional to the app. Dawam works fully offline with no
    backend at all — that is the point of it — so /api/me reports what this
    deployment actually has configured and the client hides sync entirely rather
    than showing buttons that cannot work. */
@@ -174,7 +174,7 @@ app.get("/api/sync", rateLimit(120, 60_000), async (req, res) => {
    The client sends its whole document. The server merges it with what it has
    and returns the result, which the client adopts. mergeState is symmetric and
    idempotent, so this needs no change log, no vector clocks and no
-   reconciliation code on the client. Rhythm's document is a map of planner
+   reconciliation code on the client. Dawam's document is a map of planner
    keys, so "merge" resolves per key — two devices editing different weeks both
    keep their work. */
 app.post("/api/sync", rateLimit(60, 60_000), async (req, res) => {

@@ -3,7 +3,7 @@
 /*                                                                     */
 /*  Everything above the line is the feed's and cannot be edited here:  */
 /*  the title, the time, where it came from. Everything below is        */
-/*  Rhythm's own record around it. The sheet says which is which,       */
+/*  Dawam's own record around it. The sheet says which is which,       */
 /*  because a form that lets you type into a field it will then discard */
 /*  is worse than one that does not offer the field.                    */
 /* ------------------------------------------------------------------ */
@@ -33,7 +33,7 @@ export function MeetingSheet({
               {wdFull(start.getDay())} {start.getDate()} {mon(start.getMonth())} · {clockOf(ev.startMs)}–{clockOf(ev.endMs)}
               {ev.location ? ` · ${ev.location}` : ''}
             </p>
-            <p className="ms-ro"><Lock size={11} /> {tx('From your calendar — Rhythm never changes it.', 'من تقويمك — لا يعدّله ريذم أبدًا.')}</p>
+            <p className="ms-ro"><Lock size={11} /> {tx('From your calendar — Dawam never changes it.', 'من تقويمك — لا يعدّله «دوام» أبدًا.')}</p>
             {project && <span className="ms-proj" style={{ '--pcolour': project.color }}>{project.name}</span>}
           </div>
 

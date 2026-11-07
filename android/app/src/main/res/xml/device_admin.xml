@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Deliberately empty.
 
-     A device-admin receiver has to declare the policies it uses, and Rhythm
+     A device-admin receiver has to declare the policies it uses, and Dawam
      uses none of them. Ownership is provisioned for one reason — lock task
      mode that cannot be escaped by holding two buttons — and every other power
      it carries (wiping the device, forcing a password, disabling the camera)

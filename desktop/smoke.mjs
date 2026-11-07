@@ -28,7 +28,7 @@ const DATA_DIR = path.join(HERE, '.smoke-data');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* By default the dev binary, run against this folder. Set RHYTHM_SMOKE_BIN
-   to a built Rhythm.exe to point the very same test at a packaged release —
+   to a built Dawam.exe to point the very same test at a packaged release —
    packaging is where the seam breaks (asar paths, a missing dist), so a
    release is not done until this passes against the exe. */
 const PACKAGED = process.env.RHYTHM_SMOKE_BIN;
@@ -63,7 +63,7 @@ async function plannerTarget() {
     } catch { /* not listening yet */ }
     await sleep(500);
   }
-  bail('The planner window never appeared. Is Rhythm already running? Quit it from the tray and try again.');
+  bail('The planner window never appeared. Is Dawam already running? Quit it from the tray and try again.');
 }
 
 const target = await plannerTarget();
@@ -138,7 +138,7 @@ try {
   await ev('window.rhythmFocus.saveTemplate({ name: "Smoke bubble", workMin: 25, items: [{ kind: "site", domain: "example.org", name: "example.org" }] })');
   check('a saved bubble keeps its items', await ev('(await window.rhythmFocus.getData()).templates.some((t) => t.name === "Smoke bubble" && t.items[0].domain === "example.org" && t.allowed.includes("example.org"))'));
   try {
-    // Its own bridge: a Rhythm already running on this machine holds the
+    // Its own bridge: a Dawam already running on this machine holds the
     // first port, and this copy moves to the next one.
     const port = await ev('(await window.rhythmFocus.bubble.companion()).port');
     const b = await (await fetch(`http://127.0.0.1:${port}/bubble?since=-1`)).json();

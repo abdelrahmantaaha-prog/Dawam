@@ -52,7 +52,7 @@ const POOL_AUTH_MSG = () => tx(
   '\u0631\u0641\u0636 \u0645\u062e\u0632\u0646 \u0627\u0644\u0645\u0641\u0627\u062a\u064a\u062d \u062a\u0648\u0643\u0646 \u0647\u0630\u0627 \u0627\u0644\u062a\u0637\u0628\u064a\u0642. \u0631\u0627\u062c\u0639 \u0627\u0644\u0625\u0639\u062f\u0627\u062f\u0627\u062a \u2190 \u062a\u0648\u0643\u0646 \u0627\u0644\u0645\u062e\u0632\u0646\u060c \u0623\u0648 \u0627\u0645\u0633\u062d \u062d\u0642\u0644\u064a \u0627\u0644\u0645\u062e\u0632\u0646 \u0644\u0627\u0633\u062a\u062e\u062f\u0627\u0645 \u0645\u0641\u062a\u0627\u062d Gemini \u0627\u0644\u062e\u0627\u0635 \u0628\u0643.',
 );
 
-export default function Rhythm() {
+export default function Dawam() {
   const [ready, setReady] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date(), 6));
@@ -87,7 +87,7 @@ export default function Rhythm() {
   const [calInstances, setCalInstances] = useState([]);
   const [calReport, setCalReport] = useState([]);
   const [calBusy, setCalBusy] = useState(false);
-  /* Rhythm's own done-marks for calendar events — the calendar itself is never
+  /* Dawam's own done-marks for calendar events — the calendar itself is never
      written to. Keyed by day ISO, loaded for the two days on screen (today and
      the selected one); `refresh` re-runs this after sync lands new pages. */
   const [calDone, setCalDone] = useState({});
@@ -574,7 +574,7 @@ export default function Rhythm() {
   const applyImport = async (text) => {
     let parsed;
     try { parsed = JSON.parse(text); } catch { return { ok: false, msg: "That isn't valid JSON." }; }
-    if (!parsed || parsed.app !== 'rhythm-planner' || !parsed.data) return { ok: false, msg: "This doesn't look like a Rhythm backup." };
+    if (!parsed || parsed.app !== 'rhythm-planner' || !parsed.data) return { ok: false, msg: "This doesn't look like a Dawam backup." };
     /* A restore REPLACES the planner, and restoring the wrong file is an
        easy mistake with no undo — so the planner as it stands is snapshotted
        first, and shows up in the list of automatic backups to go back to. */
@@ -2174,7 +2174,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   useEffect(() => { if (ready) loadCalPrep().then(setCalPrepMap); }, [ready]);
 
   /* Everything a board needs to say about one meeting. The feed itself is
-     never touched — this is all Rhythm's own record around it. */
+     never touched — this is all Dawam's own record around it. */
   const meetingDone = (ev) => !!(calDone[fmtISO(new Date(ev.startMs))] || {})[calKey(ev)];
   // Straight through toggleMeeting: the Plan page's inline meetings already
   // use it, and two paths writing the same done-marks would drift.
@@ -2421,7 +2421,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
 
   /* ---- Trello ----
      Refreshed alongside the calendars. Cards are shown, never imported: one
-     becomes a Rhythm task only when the person presses the button, and the
+     becomes a Dawam task only when the person presses the button, and the
      card itself is left exactly as it was. */
   const refreshTrelloCards = useCallback(async (cfg, { force = false } = {}) => {
     const t = cfg || settingsRef.current.trello || {};
@@ -2465,7 +2465,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     for (const bid of Object.keys(out)) out[bid].sort((a, b) => a.dueMin - b.dueMin);
     return out;
   }, [trelloToday, timings, selDayStartMs]);
-  /* Today's meetings, as Rhythm sees them: read-only toward the calendar, but
+  /* Today's meetings, as Dawam sees them: read-only toward the calendar, but
      checkable, focusable, and present in Now once their hour arrives.
        - running now and unchecked  → the "In a meeting" live card
        - ended and unchecked        → a queue item at its clock position, so a
@@ -2485,7 +2485,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const fmtMs = (ms) => fmtTime(new Date(ms).toTimeString().slice(0, 5));
   const meetingFocusMin = (m) => Math.max(1, Math.round((m.endMs - Math.max(m.startMs, Date.now())) / 60000));
   // A card becomes an ordinary task in the block the day is looking at. It
-  // keeps no link back: Rhythm has read access to that board and nothing more,
+  // keeps no link back: Dawam has read access to that board and nothing more,
   // so pretending the two stay in step would be a lie.
   const addTrelloCard = async (card) => {
     await addTaskOnDate(fmtISO(addDays(weekStart, selectedDay)), activeBlock.id, card.title);
@@ -3483,7 +3483,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       <header className="hdr" ref={hdrRef}>
         <div className="brand">
           <AppIcon size={36} />
-          <div className="brand-en"><strong>Rhythm <span className="ver-tag">v{APP_VERSION}</span></strong><span>{tx('plan your day around the day', 'خطّط يومك حول اليوم')}</span></div>
+          <div className="brand-en"><strong>Dawam <span className="ver-tag">v{APP_VERSION}</span></strong><span>{tx('plan your day around the day', 'خطّط يومك حول اليوم')}</span></div>
         </div>
         <div className="hdr-actions">
           <button className="icon pts-chip" onClick={() => setShowPoints(true)} aria-label={tx('Points', 'النقاط')} title={tx('Points', 'النقاط')}><Coins size={16} /><span>{balance}</span></button>
@@ -4259,12 +4259,12 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
                   </li>
                 ))}</ul>
               )}
-              <p className="gate-note">{allDone ? tx('All steps done — wrap up whenever.', 'انتهت كل الخطوات — أنهِ متى شئت.') : tx('Rhythm is locked while you focus.', 'التطبيق مقفل أثناء تركيزك.')}</p>
+              <p className="gate-note">{allDone ? tx('All steps done — wrap up whenever.', 'انتهت كل الخطوات — أنهِ متى شئت.') : tx('Dawam is locked while you focus.', 'التطبيق مقفل أثناء تركيزك.')}</p>
               {ftask && !ftask.done && (
                 <button className="primary sm" onClick={() => { toggleDone(ftask.id); setFocus(null); }}><CheckCircle2 size={14} /> {tx('Finished — tick it off', 'انتهيت — علّمها منجزة')}</button>
               )}
               <button className="ghost sm" onClick={() => setFocus(null)}>
-                {windowOpen ? tx('End early (Rhythm locks again)', 'إنهاء مبكر (سيُقفل التطبيق مجددًا)') : allDone ? tx('Done', 'تم') : tx('End early', 'إنهاء مبكر')}
+                {windowOpen ? tx('End early (Dawam locks again)', 'إنهاء مبكر (سيُقفل التطبيق مجددًا)') : allDone ? tx('Done', 'تم') : tx('End early', 'إنهاء مبكر')}
               </button>
             </div>
           </div>
@@ -4450,7 +4450,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
             {liveNow.length > 1 && (
               <span className="gate-time">{tx('Also now:', 'أيضًا الآن:')} {liveNow.slice(1).map((t) => t.title).join(' · ')}</span>
             )}
-            <p className="gate-note">{tx('Rhythm stays locked until you are focusing on it.', 'يبقى التطبيق مقفلًا حتى تركّز عليها.')}</p>
+            <p className="gate-note">{tx('Dawam stays locked until you are focusing on it.', 'يبقى التطبيق مقفلًا حتى تركّز عليها.')}</p>
             <button className="primary gate-btn" onClick={() => startFocus(timeLockTask, null, true)}>
               <Play size={16} /> {tx('Start focusing', 'ابدأ التركيز')}
             </button>
@@ -4530,7 +4530,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
               <p className="nowlock-held">
                 {heldBy === 'locked'
                   ? tx('The phone is held here. Home, Recents and Settings are all closed until something is done.', 'الهاتف مثبّت هنا. الرئيسية والتطبيقات الأخيرة والإعدادات كلها مغلقة حتى يُنجز شيء.')
-                  : tx('The phone is pinned here. Holding Back and Overview together still lets you out — that is Android\u2019s own escape, not a setting Rhythm can take away.', 'الهاتف مثبّت هنا. الضغط المطوّل على «رجوع» و«الأخيرة» معًا ما زال يخرجك — هذا مخرج أندرويد نفسه، ولا يمكن لـRhythm إزالته.')}
+                  : tx('The phone is pinned here. Holding Back and Overview together still lets you out — that is Android\u2019s own escape, not a setting Dawam can take away.', 'الهاتف مثبّت هنا. الضغط المطوّل على «رجوع» و«الأخيرة» معًا ما زال يخرجك — هذا مخرج أندرويد نفسه، ولا يمكن لـDawam إزالته.')}
               </p>
             )}
             <p className="nowlock-note">{tx('You asked for this in Settings → The Now lock. You can turn it off there once one thing is done.', 'طلبت هذا من الإعدادات ← قفل «الآن». يمكنك إيقافه من هناك بعد إنجاز شيء واحد.')}</p>

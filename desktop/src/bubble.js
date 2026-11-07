@@ -202,7 +202,7 @@ function inBubble(sample, items, words = []) {
 }
 
 /* The sites a bubble lets a browser open, for the browsers that enforce it
-   themselves: Rhythm's own bubble browser and the Brave extension. Null means
+   themselves: Dawam's own bubble browser and the Brave extension. Null means
    no limit at all — the bubble has no sites and no keywords that could name
    one, so a browser in it is not judged by address. */
 function siteRules(items, words = []) {

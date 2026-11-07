@@ -44,7 +44,7 @@
              is here for exactly one capability: lock task mode that cannot be
              escaped by holding Back and Overview, which is what makes the Now
              lock mean something on a phone rather than on a laptop. Declaring
-             this does not make Rhythm a device owner and has no effect at all
+             this does not make Dawam a device owner and has no effect at all
              on an ordinary install — the adb command is the only route in, on
              a device with no accounts on it yet. See RhythmLockPlugin. -->
         <receiver

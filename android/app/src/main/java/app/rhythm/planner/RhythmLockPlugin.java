@@ -41,7 +41,7 @@ import com.getcapacitor.annotation.CapacitorPlugin;
                confirmation and the person can leave by holding Back and
                Overview together. A speed bump with a name, not a cage.
 
-     LOCKED    Rhythm is the device owner. Nothing leaves, including Settings,
+     LOCKED    Dawam is the device owner. Nothing leaves, including Settings,
                and only stopLockTask() releases it. Provisioned once, by hand,
                from a computer, on a device with no accounts on it yet:
 

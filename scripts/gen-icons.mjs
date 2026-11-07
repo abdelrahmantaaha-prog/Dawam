@@ -1,4 +1,4 @@
-/* Generates PWA icons (PNG) + favicon.svg for Rhythm.
+/* Generates PWA icons (PNG) + favicon.svg for Dawam.
    The mark matches the in-app AppIcon: verdigris rounded square,
    white sun disc, white horizon bar. Pure pngjs — no native deps. */
 import { PNG } from 'pngjs';

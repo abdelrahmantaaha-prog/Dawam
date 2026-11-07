@@ -5,7 +5,7 @@
 /*  rules follow from that, and they are the same rule seen from each  */
 /*  side:                                                              */
 /*                                                                     */
-/*    when its time comes, Rhythm is covered until you are focusing on */
+/*    when its time comes, Dawam is covered until you are focusing on */
 /*      it. Not ticking it, not looking at it — a round on that task,  */
 /*      running. Ending the round early brings the cover back for as   */
 /*      long as the window is still open.                              */

@@ -1,9 +1,9 @@
 {
-  "name": "rhythm-desktop",
-  "productName": "Rhythm",
-  "version": "1.19.0",
+  "name": "dawam-desktop",
+  "productName": "Dawam",
+  "version": "1.20.0",
   "private": true,
-  "description": "Rhythm on the desktop — the planner window plus the focus suite (the app formerly known as Anchor).",
+  "description": "Dawam on the desktop — the planner window plus the focus suite (the app formerly known as Anchor).",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
@@ -23,7 +23,7 @@
   },
   "build": {
     "appId": "com.abdelrahmantaha.rhythm",
-    "productName": "Rhythm",
+    "productName": "Dawam",
     "directories": {
       "output": "release"
     },
@@ -55,10 +55,10 @@
         }
       ],
       "icon": "assets/icon.png",
-      "artifactName": "Rhythm-Setup-${version}.${ext}"
+      "artifactName": "Dawam-Setup-${version}.${ext}"
     },
     "portable": {
-      "artifactName": "Rhythm-${version}-portable.${ext}"
+      "artifactName": "Dawam-${version}-portable.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -66,7 +66,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Rhythm",
+      "shortcutName": "Dawam",
       "deleteAppDataOnUninstall": false
     },
     "extraResources": [

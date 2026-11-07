@@ -1,6 +1,6 @@
-# Rhythm Desktop — the planner and the focus suite in one app
+# Dawam Desktop — the planner and the focus suite in one app
 
-This is Rhythm on Windows: the same planner you use in the browser, in its own
+This is Dawam on Windows: the same planner you use in the browser, in its own
 window, plus everything **Anchor** used to be — the always-on-top overlay, focus
 modes, the break blackout, chair detection, hard blocks and free times. Anchor is not a separate app any more; this is where it lives.
 
@@ -8,7 +8,7 @@ The point of putting them together is the seam between them:
 
 - A focus round can be started **from a task you actually planned**. The task's
   own slot sizes the round, or — when it has no slot — whatever past rounds
-  taught Rhythm the task takes.
+  taught Dawam the task takes.
 - "Focus this" anywhere in the planner (a task, a habit) now starts a real
   round with the overlay, instead of the plain countdown
   the web build falls back to.
@@ -45,15 +45,15 @@ npm run desktop:dev         # in this folder (or `npm run desktop:dev` from the 
 | `src/bubbles.js` | Everything around a bubble: the wall, the dock, drops, the bubble browser, Brave's extensions, the bridge to the Brave extension |
 | `src/poller.js` + `src/active-window.ps1` | The foreground-window watcher, a PowerShell sidecar so there are no native modules to build. Event-driven (Windows says when the window in front changes) with a 1.5 s heartbeat |
 | `src/enforcer.ps1` | Minimize-the-offender / refocus-your-work window commands, plus `activate` and `list` for the dock and the drag palette |
-| `../brave-extension/` | The Rhythm extension for Brave (loaded unpacked; copied to `%APPDATA%/Rhythm/brave-extension` on launch) |
-| `src/store.js` | Settings, templates and history in `%APPDATA%/Rhythm/rhythm-focus-data.json` |
+| `../brave-extension/` | The Dawam extension for Brave (loaded unpacked; copied to `%APPDATA%/Dawam/brave-extension` on launch) |
+| `src/store.js` | Settings, templates and history in `%APPDATA%/Dawam/rhythm-focus-data.json` |
 | `src/preload.js` | The one bridge, `window.rhythmFocus`, shared by every window |
 | `src/windows/` | Overlay, break blackout, away blackout, and the hidden presence worker |
 | `smoke.mjs` | End-to-end test of the seam, driven over the DevTools protocol |
 
 ### Why the planner is served from `rhythm://app`
 
-Rhythm keeps everything in `localStorage`, and `localStorage` is keyed by
+Dawam keeps everything in `localStorage`, and `localStorage` is keyed by
 origin. `file://` hands every document its own opaque origin, and a localhost
 server moves the data whenever the port changes — either way a plan written
 today could be gone tomorrow. A registered standard scheme is one fixed, secure
@@ -89,7 +89,7 @@ It launches the app against a throwaway user-data directory, starts a real
 one-minute round from the planner window, pauses it, resumes it, stops it past
 the thirty seconds a stopped round needs to count, and checks that the finished
 round arrives back in the planner carrying its task id and its measured time.
-About 45 seconds. Rhythm must not already be running — the single-instance lock
+About 45 seconds. Dawam must not already be running — the single-instance lock
 would send the test's copy straight back out.
 
 ## Commitment mode
@@ -120,13 +120,13 @@ npm run desktop:dist
 From the repo root. It builds the planner with `RHYTHM_DESKTOP=1` and then runs
 electron-builder, leaving two files in `desktop/release/`:
 
-- **`Rhythm-Setup-<version>.exe`** — the installer. Pick this one. It asks where
+- **`Dawam-Setup-<version>.exe`** — the installer. Pick this one. It asks where
   to install, makes the desktop and Start-menu shortcuts, and installs per-user
   so it needs no administrator. Uninstalling deliberately leaves your data
   behind (`deleteAppDataOnUninstall: false`).
-- **`Rhythm-<version>-portable.exe`** — one self-extracting file, nothing
+- **`Dawam-<version>-portable.exe`** — one self-extracting file, nothing
   installed. Slower to start, because it unpacks itself on every launch. Your
-  plan still lives in `%APPDATA%/Rhythm`, not next to the exe, so the two
+  plan still lives in `%APPDATA%/Dawam`, not next to the exe, so the two
   builds share one set of data.
 
 `npm run desktop:pack` skips the installers and just writes
@@ -149,7 +149,7 @@ Verify a build the same way the source is verified — the smoke test takes a
 binary:
 
 ```bash
-RHYTHM_SMOKE_BIN=desktop/release/win-unpacked/Rhythm.exe node desktop/smoke.mjs
+RHYTHM_SMOKE_BIN=desktop/release/win-unpacked/Dawam.exe node desktop/smoke.mjs
 ```
 
 ## Bubbles
@@ -179,7 +179,7 @@ typed site or keyword.
   let through). It can load the extensions installed in Brave, straight from
   Brave's folder; ones whose background half needs Chrome APIs Electron lacks
   are reported as only partly working.
-- **Brave** is held to the bubble by `brave-extension/`. Rhythm serves the
+- **Brave** is held to the bubble by `brave-extension/`. Dawam serves the
   running bubble on `127.0.0.1:47615` (47616, 47617 if taken), read-only; the
   extension long-polls it and turns it into `declarativeNetRequest` rules that
   swap an outside page for its own "not in this bubble" page. When it is
@@ -191,7 +191,7 @@ typed site or keyword.
 - Under a bubble, any window not in it is minimized the moment it comes to the
   front and you are put back on the last allowed window; allowed windows are
   simply open. There is no distraction list, grace period, nudge or "work or
-  distraction?" question. A round without a bubble blocks nothing. Rhythm
+  distraction?" question. A round without a bubble blocks nothing. Dawam
   itself, the Windows shell, Task Manager and a blank browser tab are never
   blocked.
 - **Always allowed** (Bubble settings → Lists) is inside every bubble, matched

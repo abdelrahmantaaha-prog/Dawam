@@ -18,7 +18,7 @@ function render(s) {
   if (s.phase === 'idle') {
     card.classList.add('idle');
     taskEl.textContent = 'Ready to focus';
-    subEl.textContent = 'Open Rhythm and pick a task';
+    subEl.textContent = 'Open Dawam and pick a task';
     return;
   }
 

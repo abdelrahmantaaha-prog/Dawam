@@ -13,12 +13,12 @@ const { BROWSERS, normalizeItems, itemKey, inBubble, siteRules, isBrowserProcess
    blocks nothing.
 
    A few windows are never judged, or the machine could not be used at all:
-   Rhythm's own, the Windows shell (desktop, taskbar, Start, search, the
+   Dawam's own, the Windows shell (desktop, taskbar, Start, search, the
    on-screen keyboard, the lock screen), Task Manager, and a browser's blank
    new tab — the page you type an allowed address into. */
 const SHELL = new Set([
   'searchhost', 'searchapp', 'searchui', 'startmenuexperiencehost', 'shellexperiencehost',
-  'textinputhost', 'lockapp', 'taskmgr', 'rhythm', 'electron'
+  'textinputhost', 'lockapp', 'taskmgr', 'dawam', 'rhythm', 'electron'
 ]);
 const NEW_TAB = /^(new tab|new incognito tab|new private tab|new inprivate tab|start page|speed dial)\b/i;
 
@@ -26,7 +26,7 @@ function isNeutral(title, process, host) {
   const proc = (process || '').toLowerCase();
   if (!title && !proc) return true;
   if (SHELL.has(proc)) return true;
-  if (title === 'Rhythm' || title === 'Anchor') return true;
+  if (title === 'Dawam' || title === 'Rhythm' || title === 'Anchor') return true;
   /* File Explorer, folder windows included. It is the Windows shell: putting
      a folder window away while it is still building its ribbon crashes
      explorer.exe — and with it the taskbar — which is exactly what happened
@@ -122,7 +122,7 @@ class SessionManager extends EventEmitter {
     return this.items.length > 0;
   }
 
-  /* What a browser that enforces the bubble itself (Rhythm's bubble browser,
+  /* What a browser that enforces the bubble itself (Dawam's bubble browser,
      the Brave extension) may open right now. Null: no limit. */
   siteRules() {
     if (this.phase !== 'work' || !this.strict()) return null;

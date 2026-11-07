@@ -1,8 +1,8 @@
 /* ------------------------------------------------------------------ */
-/*  Preparing for a meeting Rhythm cannot change.                      */
+/*  Preparing for a meeting Dawam cannot change.                      */
 /*                                                                     */
-/*  A calendar entry stays read-only: Rhythm never writes back to       */
-/*  Google or to an .ics. But everything AROUND it is Rhythm's to keep  */
+/*  A calendar entry stays read-only: Dawam never writes back to       */
+/*  Google or to an .ics. But everything AROUND it is Dawam's to keep  */
 /*  — whether you attended, what it is for, and the page of notes you   */
 /*  wrote before walking in.                                            */
 /*                                                                     */

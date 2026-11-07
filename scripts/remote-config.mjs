@@ -1,7 +1,7 @@
 /* Point the APK's WebView at a deployment.
 
    WHY THIS EXISTS: the APK serves the bundled build from https://localhost —
-   its own WebView asset server. That is what makes Rhythm work with no network,
+   its own WebView asset server. That is what makes Dawam work with no network,
    but it also means a relative "/api/me" never leaves the phone, so sync can
    never see a backend however the deployment is configured. Setting a
    server.url makes the origin the deployment itself, so the API, the session

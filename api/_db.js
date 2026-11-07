@@ -1,6 +1,6 @@
 /* Neon Postgres access for the sync endpoints.
 
-   One row per user holding the whole Rhythm document as jsonb, plus a revision
+   One row per user holding the whole Dawam document as jsonb, plus a revision
    counter. The counter is what makes concurrent writes safe: a push updates
    only when the revision it merged against is still current, so a second
    device that slipped in between is never silently overwritten — the loser

@@ -5,7 +5,7 @@
    point Newport says a declutter fails at. This closes that: Bawwab offers
    whatever Now is pointing at instead of stopping at no.
 
-   Rhythm's plan lives in the WebView's localStorage and nothing outside can
+   Dawam's plan lives in the WebView's localStorage and nothing outside can
    read it, so the bridge is a file. Same payload the home widget already gets,
    written to Documents, where Bawwab is pointed once through the system folder
    picker. No permission is asked for on either side and nothing else in there
@@ -19,6 +19,8 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 
 const FILE = 'now.json';
+// Still 'Rhythm' after the rename to Dawam: Bawwab was pointed at this exact
+// folder once, through the system picker, and has no way to follow a move.
 const FOLDER = 'Rhythm';
 
 function nativeNow() {

@@ -38,7 +38,7 @@ public class RhythmWidget extends AppWidgetProvider {
     }
 
     /* The launch intent, optionally carrying something for the app to do on
-       arrival. ACTION_MAIN + CATEGORY_LAUNCHER so an already-running Rhythm
+       arrival. ACTION_MAIN + CATEGORY_LAUNCHER so an already-running Dawam
        comes forward instead of starting a second copy. */
     static Intent openIntent(Context context, String action) {
         Intent open = new Intent(context, MainActivity.class);
@@ -72,7 +72,7 @@ public class RhythmWidget extends AppWidgetProvider {
             v.setViewVisibility(R.id.widget_upcoming, upcoming.isEmpty() ? android.view.View.GONE : android.view.View.VISIBLE);
         }
 
-        // Tapping anywhere opens Rhythm. singleTask + the launch intent means an
+        // Tapping anywhere opens Dawam. singleTask + the launch intent means an
         // already-running app comes forward rather than starting a second copy.
         int flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE;
         v.setOnClickPendingIntent(R.id.widget_root, PendingIntent.getActivity(context, 0, openIntent(context, null), flags));

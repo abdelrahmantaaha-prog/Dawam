@@ -35,7 +35,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onNewIntent(Intent intent) {
-        // singleTask: an already-running Rhythm gets the widget's tap here
+        // singleTask: an already-running Dawam gets the widget's tap here
         // rather than through onCreate, which is the common case by far.
         remember(intent);
         setIntent(intent);

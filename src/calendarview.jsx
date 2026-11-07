@@ -1,7 +1,7 @@
 /* ------------------------------------------------------------------ */
 /*  The calendar view — Day, Week, Month.                              */
 /*                                                                     */
-/*  Rhythm's own day is six prayer-anchored periods, not a column of    */
+/*  Dawam's own day is six prayer-anchored periods, not a column of    */
 /*  hours, and that stays the way the Plan page works. This is the      */
 /*  other thing a planner needs: seeing where the hours actually go,    */
 /*  with meetings and slotted tasks in one grid, because a task that    */
@@ -9,7 +9,7 @@
 /*                                                                     */
 /*  Feeds are read-only and stay that way. The one thing that CAN be    */
 /*  written about a calendar entry is which project it belongs to, and  */
-/*  that is Rhythm's own note kept in Rhythm's own storage.             */
+/*  that is Dawam's own note kept in Dawam's own storage.             */
 /* ------------------------------------------------------------------ */
 import React, { useMemo, useRef, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Target, X } from 'lucide-react';
@@ -317,8 +317,8 @@ function AssignSheet({ ev, projects, current, onAssign, onClose }) {
           <p className="hint-text">
             {ev.allDay ? tx('All day', 'طوال اليوم') : `${clock(ev.startMs)}–${clock(ev.endMs)}`}
             {' · '}
-            {tx('The calendar itself is never changed — this is Rhythm’s own note, and it files every occurrence of this entry.',
-              'لا يُعدَّل التقويم نفسه أبدًا — هذه ملاحظة خاصة بريذم، وتُسنِد كل تكرارات هذا الموعد.')}
+            {tx('The calendar itself is never changed — this is Dawam’s own note, and it files every occurrence of this entry.',
+              'لا يُعدَّل التقويم نفسه أبدًا — هذه ملاحظة خاصة بـ«دوام»، وتُسنِد كل تكرارات هذا الموعد.')}
           </p>
           <div className="calv-picklist">
             <button className={`calv-pick${!current ? ' on' : ''}`} onClick={() => { onAssign(key, null); onClose(); }}>

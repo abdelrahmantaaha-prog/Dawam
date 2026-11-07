@@ -13,7 +13,7 @@
 /*    after an hour and the day gets interrupted to consent again —      */
 /*    which is exactly what this was not allowed to do.                  */
 /*                                                                      */
-/*  Read-only, both of them. Rhythm never writes to your calendar.       */
+/*  Read-only, both of them. Dawam never writes to your calendar.       */
 /* ------------------------------------------------------------------ */
 
 import React, { useState, useEffect } from 'react';
@@ -29,7 +29,7 @@ const clockOf = (ms) => { const d = new Date(ms); return fmtTime(`${pad(d.getHou
    person can actually do about it. */
 function explain(code) {
   const map = {
-    'host-not-allowed': tx('That host is not one Rhythm will fetch from. Google, iCloud, Outlook and Fastmail feeds work.', 'هذا المضيف ليس ضمن ما يجلبه ريذم. تعمل تغذيات جوجل وآي كلاود وأوتلوك وفاست ميل.'),
+    'host-not-allowed': tx('That host is not one Dawam will fetch from. Google, iCloud, Outlook and Fastmail feeds work.', 'هذا المضيف ليس ضمن ما يجلبه «دوام». تعمل تغذيات جوجل وآي كلاود وأوتلوك وفاست ميل.'),
     'https-only': tx('The address has to be https.', 'يجب أن يكون العنوان https.'),
     'not-a-calendar': tx('That address answered with a page, not a calendar — check you copied the iCal link and not the calendar page.', 'ردّ هذا العنوان بصفحة لا بتقويم — تأكد أنك نسخت رابط iCal لا صفحة التقويم.'),
     'bad-url': tx('That does not look like a web address.', 'لا يبدو هذا عنوانًا صحيحًا.'),
@@ -216,8 +216,8 @@ export function CalendarSettings({ feeds, onFeedsChange, report, onRefresh, refr
           ) : (
             <>
               <p className="hint-text">
-                {tx('This needs an OAuth client of your own — Google Cloud Console → Credentials → Create client → Desktop app. Rhythm asks only for read access to your calendars.',
-                  'يتطلب هذا عميل OAuth خاصًا بك — Google Cloud Console ← بيانات الاعتماد ← إنشاء عميل ← تطبيق سطح مكتب. يطلب ريذم صلاحية القراءة فقط.')}
+                {tx('This needs an OAuth client of your own — Google Cloud Console → Credentials → Create client → Desktop app. Dawam asks only for read access to your calendars.',
+                  'يتطلب هذا عميل OAuth خاصًا بك — Google Cloud Console ← بيانات الاعتماد ← إنشاء عميل ← تطبيق سطح مكتب. يطلب «دوام» صلاحية القراءة فقط.')}
               </p>
               <input className="cal-input" value={cs.googleClientId || ''} onChange={(e) => onCalSettings({ googleClientId: e.target.value.trim() })}
                 placeholder={tx('Client ID', 'معرّف العميل')} aria-label={tx('Google client ID', 'معرّف عميل جوجل')} />
