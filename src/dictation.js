@@ -307,7 +307,12 @@ export async function transcribe({ blob, lang = 'en', apiKey, broker, signal } =
  * `mode` is reported ('live' | 'clip' | null) purely so the UI can be honest:
  * on the recorded lane there is a pause at the end while the model listens,
  * and a button that pretends otherwise reads as broken. */
-export function useDictation({ lang = 'en', apiKey, broker, onText, onError } = {}) {
+/* `autoStop` (Tera's hands-free talk) ends a take by itself: once speech has
+ * been heard, `silenceMs` of quiet stops and transcribes it; if nothing is
+ * heard within `waitMs` the take is dropped with a 'no-speech' error. Off by
+ * default — the planner's own mic buttons stop when they are pressed. */
+export const SPEECH_LEVEL = 0.14;
+export function useDictation({ lang = 'en', apiKey, broker, onText, onError, autoStop = null } = {}) {
   const [state, setState] = useState('idle'); // idle | listening | transcribing
   const [level, setLevel] = useState(0);
   const liveRef = useRef(null);
@@ -317,6 +322,10 @@ export function useDictation({ lang = 'en', apiKey, broker, onText, onError } = 
   const stopRef = useRef(null);
   const cbRef = useRef({ onText, onError });
   cbRef.current = { onText, onError };
+  const autoRef = useRef(autoStop);
+  autoRef.current = autoStop;
+  const cancelRef = useRef(null);
+  const liveQuietRef = useRef(null);
 
   const available = liveLaneUsable() || recordingSupported();
   const mode = liveLaneUsable() ? 'live' : recordingSupported() ? 'clip' : null;
@@ -324,7 +333,8 @@ export function useDictation({ lang = 'en', apiKey, broker, onText, onError } = 
   const finish = useCallback(() => { liveRef.current = null; clipRef.current = null; setLevel(0); setState('idle'); }, []);
 
   const stop = useCallback(async () => {
-    if (liveRef.current) { const h = liveRef.current; liveRef.current = null; h.stop(); setState('idle'); return; }
+    clearTimeout(liveQuietRef.current);
+    if (liveRef.current) { const h = liveRef.current; h.stop(); liveRef.current = null; setState('idle'); return; }
     const clip = clipRef.current;
     if (!clip) return;
     clipRef.current = null;
@@ -333,7 +343,7 @@ export function useDictation({ lang = 'en', apiKey, broker, onText, onError } = 
     try {
       const blob = await clip.stop();
       const text = await transcribe({ blob, lang, apiKey, broker });
-      if (text) cbRef.current.onText?.(text, true);
+      if (text) cbRef.current.onText?.(text, true, 'done');
       else cbRef.current.onError?.(new Error('no-speech'));
     } catch (e) {
       cbRef.current.onError?.(e);
@@ -346,7 +356,20 @@ export function useDictation({ lang = 'en', apiKey, broker, onText, onError } = 
   const startClip = useCallback(async () => {
     if (!recordingSupported()) { setState('idle'); cbRef.current.onError?.(new Error('unsupported')); return; }
     try {
-      const clip = await record({ onLevel: setLevel, onCap: () => stopRef.current?.() });
+      const auto = autoRef.current;
+      const began = Date.now();
+      let heard = false;
+      let loudAt = 0;
+      let ended = false;
+      const onLevel = (v) => {
+        setLevel(v);
+        if (!auto || ended) return;
+        const now = Date.now();
+        if (v >= SPEECH_LEVEL) { heard = true; loudAt = now; return; }
+        if (heard && now - loudAt > (auto.silenceMs || 1300)) { ended = true; stopRef.current?.(); return; }
+        if (!heard && now - began > (auto.waitMs || 8000)) { ended = true; cancelRef.current?.(); cbRef.current.onError?.(new Error('no-speech')); }
+      };
+      const clip = await record({ onLevel, onCap: () => stopRef.current?.() });
       clipRef.current = clip;
       setState('listening');
     } catch (e) {
@@ -361,10 +384,23 @@ export function useDictation({ lang = 'en', apiKey, broker, onText, onError } = 
     if (state !== 'idle') return;
     if (liveLaneUsable()) {
       setState('listening');
+      const auto = autoRef.current;
+      const quiet = () => {
+        if (!auto) return;
+        clearTimeout(liveQuietRef.current);
+        liveQuietRef.current = setTimeout(() => stopRef.current?.(), auto.silenceMs || 1300);
+      };
+      if (auto) {
+        liveQuietRef.current = setTimeout(() => {
+          if (!liveRef.current) return;
+          const h0 = liveRef.current; liveRef.current = null; h0.abort(); setState('idle');
+          cbRef.current.onError?.(new Error('no-speech'));
+        }, auto.waitMs || 8000);
+      }
       const h = listen({
         lang,
-        onText: (t, final) => cbRef.current.onText?.(t, final),
-        onDone: () => { liveRef.current = null; setState('idle'); },
+        onText: (t, final) => { quiet(); cbRef.current.onText?.(t, final); },
+        onDone: (text) => { clearTimeout(liveQuietRef.current); liveRef.current = null; setState('idle'); if (auto && text) cbRef.current.onText?.(text, true, 'done'); },
         onError: (e) => {
           liveRef.current = null;
           /* The lane broke its promise. Retire it and start recording in the
@@ -394,6 +430,7 @@ export function useDictation({ lang = 'en', apiKey, broker, onText, onError } = 
   const toggle = useCallback(() => { if (state === 'idle') start(); else if (state === 'listening') stop(); }, [state, start, stop]);
 
   const cancel = useCallback(() => {
+    clearTimeout(liveQuietRef.current);
     if (liveRef.current) { liveRef.current.abort(); liveRef.current = null; }
     if (clipRef.current) { clipRef.current.cancel(); clipRef.current = null; }
     finish();
@@ -404,6 +441,8 @@ export function useDictation({ lang = 'en', apiKey, broker, onText, onError } = 
     if (liveRef.current) liveRef.current.abort();
     if (clipRef.current) clipRef.current.cancel();
   }, []);
+
+  cancelRef.current = cancel;
 
   return { state, level, mode, available, start, stop, toggle, cancel, busy: state !== 'idle' };
 }

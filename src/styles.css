@@ -1900,3 +1900,74 @@ button.bubble-tile:hover{border-color:var(--verdigris);background:var(--soft)}
 .bubble-brave .bubble-pick-del{padding:0 4px;vertical-align:middle}
 .bubble-site-row{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:8px}
 .bubble-site-row .bubble-chip{cursor:pointer}
+
+/* ------------------------------------------------------------------ */
+/*  Tera — the secretary's screen (src/teraview.jsx)                   */
+/* ------------------------------------------------------------------ */
+.tera-btn{padding:0;overflow:hidden}
+.tera-btn img{width:100%;height:100%;object-fit:cover;display:block}
+.tera-btn.on{border-color:var(--verdigris);box-shadow:0 0 0 2px rgba(62,138,108,.35)}
+.tera{position:relative;z-index:1;max-width:640px;margin:0 auto;display:flex;flex-direction:column;
+  min-height:calc(100vh - 190px);border:1px solid var(--line);border-radius:18px;background:var(--panel);
+  box-shadow:0 10px 26px rgba(23,48,39,.10);overflow:hidden}
+.tera-head{display:flex;align-items:center;gap:12px;padding:14px 14px 12px;border-bottom:1px solid var(--line)}
+.tera-face{--lvl:0;position:relative;width:58px;height:58px;border-radius:50%;flex-shrink:0;background:var(--soft);
+  box-shadow:0 0 0 2px var(--verdigris);transition:box-shadow .12s ease}
+.tera-face img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
+.tera-face.hearing{box-shadow:0 0 0 calc(2px + var(--lvl) * 7px) rgba(156,66,33,.55)}
+.tera-face.talking{animation:tera-talk 1.1s ease-in-out infinite}
+@keyframes tera-talk{0%,100%{box-shadow:0 0 0 2px var(--verdigris)}50%{box-shadow:0 0 0 7px rgba(62,138,108,.35)}}
+.tera-id{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px}
+.tera-id strong{font-size:17px;color:var(--ink)}
+.tera-id span{font-size:12.5px;color:var(--muted)}
+.tera-setup{display:flex;align-items:center;gap:9px;margin:10px 12px 0;padding:9px 12px;border-radius:12px;
+  background:rgba(62,138,108,.10);border:1px solid rgba(62,138,108,.35);color:var(--ink);font-size:12.5px;line-height:1.45}
+.tera-setup span{flex:1}
+.tera-setup svg{color:var(--verdigris);flex-shrink:0}
+.tera-log{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding:14px 14px 8px;max-height:calc(100vh - 290px)}
+.tera-empty{color:var(--muted);font-size:13.5px;line-height:1.65}
+.tera-empty p{margin:0 0 10px}
+.tera .chat-msg{position:relative}
+.tera .chat-msg.assistant .chat-bubble{font-size:15px}
+.tera .chat-msg.popup .chat-bubble{border:1px dashed var(--verdigris)}
+.tera-replay{align-self:flex-start;display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;border:none;
+  background:transparent;color:var(--faint);cursor:pointer;margin-top:-4px}
+.tera-replay:hover{color:var(--verdigris)}
+.tera-undo{align-self:flex-start;display:inline-flex;align-items:center;gap:5px;font-weight:700}
+.tera-err{color:#9C4221}
+.tera-foot{display:flex;align-items:center;gap:8px;padding:12px;border-top:1px solid var(--line);background:var(--panel)}
+.tera-foot .chat-input{flex:1;min-width:0}
+.tera-send{flex-shrink:0}
+.tera-mic{--mic-level:0;flex-shrink:0;width:60px;height:60px;border-radius:50%;border:none;display:grid;place-items:center;cursor:pointer;
+  background:var(--verdigris);color:#fff;box-shadow:0 6px 16px rgba(62,138,108,.35);transition:transform .12s ease,box-shadow .12s ease,background-color .15s ease}
+.tera-mic:active{transform:scale(.95)}
+.tera-mic.listening{background:#9C4221;box-shadow:0 0 0 calc(4px + var(--mic-level) * 12px) rgba(156,66,33,.25)}
+.tera-mic.speaking{background:#2C5D4A}
+.tera-mic:disabled{opacity:.7;cursor:default}
+.tera-hang{flex-shrink:0}
+.tera-settings{flex:1;overflow-y:auto;padding:6px 14px 16px;max-height:calc(100vh - 230px)}
+.tera-settings h4{margin:16px 0 6px;font-size:11px;letter-spacing:1.1px;text-transform:uppercase;color:var(--muted)}
+.tera-phone-only{text-transform:none;letter-spacing:0;font-weight:400;color:var(--faint)}
+.tera-row{display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--soft)}
+.tera-row-text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:13.5px;color:var(--ink)}
+.tera-row-text small{font-size:11.5px;color:var(--muted);line-height:1.4}
+.tera-row-ctl{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.tera-row-ctl select,.tera-row-ctl input[type=time]{max-width:150px;padding:5px 7px;border-radius:8px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font:inherit;font-size:12.5px}
+.tera-row-ctl input[type=range]{width:120px;accent-color:var(--verdigris)}
+.tera-dash{color:var(--muted)}
+.tera-ok{color:var(--verdigris)}
+.tera-toggle{position:relative;width:42px;height:24px;border-radius:12px;border:none;background:var(--line);cursor:pointer;padding:0;flex-shrink:0}
+.tera-toggle span{position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:#fff;transition:transform .15s ease;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.tera-toggle.on{background:var(--verdigris)}
+.tera-toggle.on span{transform:translateX(18px)}
+.rhythm[dir="rtl"] .tera-toggle span{left:auto;right:3px}
+.rhythm[dir="rtl"] .tera-toggle.on span{transform:translateX(-18px)}
+.tera-tests{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+@media (max-width:520px){
+  .tera{min-height:calc(100vh - 170px);border-radius:14px}
+  /* A row breaks only when its controls do not fit beside the words. */
+  .tera-row{flex-wrap:wrap;row-gap:6px}
+  .tera-row-text{flex:1 1 150px}
+  .tera-row-ctl{margin-inline-start:auto}
+}
+@media (prefers-reduced-motion:reduce){ .tera-face.talking{animation:none} }

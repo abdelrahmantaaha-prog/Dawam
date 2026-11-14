@@ -9,13 +9,18 @@ import { backupKind, backupWhere, dailyName, listBackups, openBackupFolder, preR
 import { takeWidgetAction, updateWidget } from './widget.js';
 import { writeNowFile } from './nowfile.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence, scheduleWakeAlarm, cancelWakeAlarm, pendingWakeAlarm } from './notify.js';
-import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, describeProposal, parseAssistantReply, parseEstimates, callAssistant, seriesDates } from './assistant.js';
+import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, describeProposal, parseAssistantReply, parseEstimates, callAssistant, seriesDates, validateProposal } from './assistant.js';
 import { useDictation } from './dictation.js';
+import TeraView from './teraview.jsx';
+import { TERA_TOOL_SYSTEM, TERA_TOOL_ASKING, POPUP_BATCH_SYSTEM, popupBatchPrompt, parsePopupBatch, teraSettings, buildBrief, briefAppointments, commandToActions, detectLang, loadChat, saveChat, historyFor, LANG_KEY } from './tera.js';
+import { runTeraTurn, teraComplete, loadClaudeKey } from './teraclaude.js';
+import { buildTeraTools } from './teratools.js';
+import { teraNative, teraStatus, teraSync, teraReportDone, teraTakeCommands, teraTestPopup, teraOpenOverlaySettings, teraOpenExactAlarmSettings, onTeraCommand } from './teranative.js';
 import { loadDurations, durationFor, rememberDuration } from './durations.js';
 import { FocusView, isDesktop, useFocusLive, useFocusModes, useFocusTaskId, useRoundEnded } from './focus.jsx';
 import { focusModeFor, modeKey } from './focusmode.js';
 import { focusVerdict, liveTasks, timeLockDue, timeLockOn } from './timelock.js';
-import { loadFeeds, saveFeeds, refreshAll, loadInstances, busyOn, eventsOn } from './calsync.js';
+import { loadFeeds, saveFeeds, refreshAll, loadInstances, busyOn, eventsOn, newFeed } from './calsync.js';
 import { calKey, loadCalDone, toggleCalDone, pruneCalDone } from './caldone.js';
 import { DayEvents } from './calview.jsx';
 import { CalendarView } from './calendarview.jsx';
@@ -144,11 +149,19 @@ export default function Dawam() {
   const [locked, setLocked] = useState(false);          // PIN lock screen
   const [foldedTasks, setFoldedTasks] = useState(() => new Set()); // collapsed subtask lists (Now/Overdue)
   const [editingTpl, setEditingTpl] = useState(null); // recurring task edited from the plan sidebar
-  const [chatOpen, setChatOpen] = useState(false);   // planning assistant
-  const [chatMsgs, setChatMsgs] = useState([]);      // [{role:'user'|'assistant', text, proposals?, applied?}]
-  const [chatInput, setChatInput] = useState('');
+  /* Tera — the planning assistant as a secretary with a voice (src/tera.js).
+     The conversation is kept on this device only; `undo` snapshots on it
+     stay in memory (see saveChat). */
+  const [chatMsgs, setChatMsgs] = useState(() => loadChat());      // [{role, text, lang?, proposals?, applied?, auto?, undo?, undone?, popup?}]
   const [chatBusy, setChatBusy] = useState(false);
   const [chatErr, setChatErr] = useState('');
+  useEffect(() => { saveChat(chatMsgs); }, [chatMsgs]);
+  // The language she is speaking in: whatever she was last spoken to in.
+  const [teraLang, setTeraLangState] = useState(() => { try { return localStorage.getItem(LANG_KEY) === 'en' ? 'en' : 'ar'; } catch { return 'ar'; } });
+  const setTeraLang = (l) => { setTeraLangState(l); try { localStorage.setItem(LANG_KEY, l); } catch { /* not kept */ } };
+  const [teraStat, setTeraStat] = useState(null);     // the phone's view of her (permissions, next check-in)
+  const [teraTalk, setTeraTalk] = useState(0);        // bumped to make her start listening
+  const refreshTeraStatus = useCallback(async () => { const s = await teraStatus(); if (s) setTeraStat(s); return s; }, []);
 
   /* ---- dictation ----------------------------------------------------
      Two microphones, one engine. Where the browser has SpeechRecognition
@@ -174,16 +187,6 @@ export default function Dawam() {
     if (m === 'rate') return tx('Rate limit hit — wait a moment and try again.', 'تم بلوغ حد المعدل — انتظر قليلًا وأعد المحاولة.');
     if (m === 'network' || m === 'service-not-allowed') return tx('Speech recognition is unavailable right now.', 'خدمة التعرف على الكلام غير متاحة الآن.');
     return tx(`Dictation failed (${m}).`, `فشل الإملاء (${m}).`);
-  };
-  const chatBaseRef = useRef('');
-  const chatMic = useDictation({
-    lang: settings.lang, apiKey: settings.apiKey, broker: brokerFrom(settings),
-    onText: (t) => setChatInput(chatBaseRef.current ? `${chatBaseRef.current} ${t}` : t),
-    onError: (e) => setChatErr(dictationError(e)),
-  });
-  const toggleChatMic = () => {
-    if (chatMic.state === 'idle') { chatBaseRef.current = chatInput.trim(); setChatErr(''); }
-    chatMic.toggle();
   };
   const dumpBaseRef = useRef('');
   const dumpMic = useDictation({
@@ -217,7 +220,9 @@ export default function Dawam() {
      state on purpose: it is a measure of THIS sitting, and reopening the app
      tomorrow should not inherit yesterday's silence. */
   const [lastDoneAt, setLastDoneAt] = useState(() => Date.now());
-  const marked = () => setLastDoneAt(Date.now());
+  // Tera counts her two hours from the same moment, and on the phone she
+  // runs while the app is closed, so she is told directly.
+  const marked = () => { setLastDoneAt(Date.now()); teraReportDone(); };
   const [notifyState, setNotifyState] = useState({ supported: false, state: 'unsupported' });
   const [quickAdd, setQuickAdd] = useState(false);   // the one-line add sheet
   const pendingEditRef = useRef(null);                  // open editor after jumping to an overdue task's week
@@ -571,14 +576,16 @@ export default function Dawam() {
     }
     return JSON.stringify({ app: 'rhythm-planner', version: 3, exportedAt: new Date().toISOString(), window: { from: fmtISO(winStart), to: fmtISO(winEnd) }, storageOk, data }, null, 2);
   };
-  const applyImport = async (text) => {
+  // `backup: false, quiet: true` is Tera's Undo: a restore of a snapshot taken
+  // a moment ago needs neither its own pre-restore backup nor the banner.
+  const applyImport = async (text, { backup = true, quiet = false } = {}) => {
     let parsed;
     try { parsed = JSON.parse(text); } catch { return { ok: false, msg: "That isn't valid JSON." }; }
     if (!parsed || parsed.app !== 'rhythm-planner' || !parsed.data) return { ok: false, msg: "This doesn't look like a Dawam backup." };
     /* A restore REPLACES the planner, and restoring the wrong file is an
        easy mistake with no undo — so the planner as it stands is snapshotted
        first, and shows up in the list of automatic backups to go back to. */
-    try { await writeBackup(preRestoreName(), await buildExport()); } catch { /* the restore still stands on its own */ }
+    if (backup) { try { await writeBackup(preRestoreName(), await buildExport()); } catch { /* the restore still stands on its own */ } }
     const d = parsed.data;
     let n = 0;
     for (const [k, v] of Object.entries(d)) {
@@ -599,7 +606,7 @@ export default function Dawam() {
     setTemplates(Array.isArray(d['planner:templates']) ? d['planner:templates'] : []);
     setWeekStart(wsNew);
     const w = await readWeek(fmtISO(wsNew)); adoptWeek(fmtISO(wsNew), w);
-    flash(tx('Backup imported.', 'تم استيراد النسخة الاحتياطية.'));
+    if (!quiet) flash(tx('Backup imported.', 'تم استيراد النسخة الاحتياطية.'));
     return { ok: true, msg: tx(`Imported ${n} item${n !== 1 ? 's' : ''}. Your planner has been refreshed.`, `تم استيراد ${n} عنصرًا. تم تحديث مخططك.`) };
   };
 
@@ -1148,8 +1155,8 @@ export default function Dawam() {
     return placed;
   };
   const addTaskOnDate = async (dateISO, blockId, title, extra = {}) => {
-    if (!title || !title.trim()) return;
-    await putTaskOnDate(dateISO, {
+    if (!title || !title.trim()) return null;
+    return putTaskOnDate(dateISO, {
       id: uid(), title: title.trim(), day: 0, block: periodOf(extra, blockId),
       projectId: extra.projectId || null, projectRef: projectFor(extra),
       time: extra.time || '', start: extra.start || '', end: extra.end || '',
@@ -2671,27 +2678,86 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       options: { lang: settings.lang, theme: settings.theme || 'auto', time24: !!settings.time24 },
     });
   };
-  const sendChat = async () => {
-    const q = chatInput.trim();
-    if (!q || chatBusy) return;
-    if (!settings.apiKey && !settings.groqKey && !brokerFrom(settings)) { setChatErr(tx('The assistant needs an API key — add one under Settings → Backup → AI sorting (Gemini has a free tier).', 'يحتاج المساعد إلى مفتاح — أضفه من الإعدادات ← النسخ ← الفرز الذكي (لدى Gemini خطة مجانية).')); return; }
-    setChatErr(''); setChatBusy(true);
-    const prior = chatMsgs.slice(-6).map((m) => ({ role: m.role, content: m.text }));
-    setChatMsgs((prev) => [...prev, { role: 'user', text: q }]);
-    setChatInput('');
+  /* One turn with Tera. Returns { reply, lang } for the screen to speak, or
+     null when the turn failed (the error is already on screen).
+
+     Since 2026-11-14 her brain is Claude, acting through tools that are this
+     component's own handlers (src/teratools.js, teraOps above): she reads
+     what she needs, changes what she was asked to, sees each result, and
+     keeps going until the job is done. Every change of the turn runs through
+     teraOps.change, which keeps a snapshot of the planner from just before
+     the first one — her message's Undo — and, with "Just do it" off, holds
+     the changes for a tap instead of making them. */
+  const teraBusyRef = useRef(false);
+  const sendChat = async (qIn) => {
+    const q = String(qIn || '').trim();
+    if (!q || teraBusyRef.current) return null;
+    const apiKey = loadClaudeKey();
+    if (!apiKey) { setChatErr(tx("Tera needs your Claude key first — tap the sliders above → Her brain.", 'تيرا محتاجة مفتاح Claude الأول — دوس على الإعدادات فوق ← دماغها.')); return null; }
+    const lang = detectLang(q, teraLang);
+    if (lang !== teraLang) setTeraLang(lang);
+    const tera = teraSettings(settings);
+    teraBusyRef.current = true;
+    setChatErr(''); setChatBusy(true); setTeraActivity('');
+    // Earlier turns as plain text only, starting with something the person said.
+    const past = chatMsgs.filter((m) => m.text);
+    while (past.length && past[0].role !== 'user') past.shift();
+    const history = historyFor(past, 10);
+    setChatMsgs((prev) => [...prev, { role: 'user', text: q, lang }]);
+    const run = { mode: tera.autonomous ? 'auto' : 'ask', log: [], undo: null, queue: Promise.resolve() };
+    teraRunRef.current = run;
+    let out = null;
     try {
-      const messages = [...prior, { role: 'user', content: `Current state of my planner:\n\n${buildSnapshot()}\n\n---\n${q}` }];
-      const text = await callAssistant({ apiKey: settings.apiKey, groqKey: settings.groqKey, broker: brokerFrom(settings), system: ASSISTANT_SYSTEM, messages });
-      const { reply, proposals } = parseAssistantReply(text, chatIds());
-      setChatMsgs((prev) => [...prev, { role: 'assistant', text: reply, proposals, applied: {} }]);
+      const now = new Date();
+      const nowLine = `NOW: ${fmtISO(now)} ${pad(now.getHours())}:${pad(now.getMinutes())} (${wdFull(now.getDay())}) — last thing reported done ${Math.round((Date.now() - lastDoneAt) / 60000)} min ago`;
+      const replyIn = lang === 'en' ? 'REPLY LANGUAGE: casual English.' : 'REPLY LANGUAGE: casual Egyptian colloquial Arabic.';
+      const res = await runTeraTurn({
+        apiKey, model: tera.model, effort: tera.effort,
+        system: tera.autonomous ? TERA_TOOL_SYSTEM : TERA_TOOL_ASKING,
+        history,
+        userContent: `${nowLine}\n\nSNAPSHOT OF TODAY AND THIS WEEK\n${buildSnapshot()}\n\n---\n${replyIn}\n\n${q}`,
+        tools: teraTools,
+        onToolCall: (name) => setTeraActivity(name),
+      });
+      await run.queue;
+      const reply = res.reply || (res.stop === 'refusal'
+        ? tx("I can't help with that one.", 'دي مش هقدر أساعد فيها.')
+        : run.log.length ? tx('Done.', 'تمام.') : tx('Hm?', 'إيه؟'));
+      const replyLang = detectLang(reply, lang);
+      const proposals = run.log.map((l) => ({ summary: l.summary, tool: l.tool, fn: l.fn }));
+      const applied = run.mode === 'auto' ? Object.fromEntries(run.log.map((l, i) => [i, l.state === 'fail' ? 'fail' : 'done'])) : {};
+      setChatMsgs((prev) => [...prev, { role: 'assistant', text: reply, lang: replyLang, proposals, applied, auto: run.mode === 'auto', undo: run.undo || null }]);
+      out = { reply, lang: replyLang };
     } catch (e) {
-      setChatErr(e.code === 'rate'
-        ? tx('Rate limit hit — wait a moment and try again.', 'تم بلوغ حد المعدل — انتظر قليلًا وأعد المحاولة.')
-        : e.code === 'pool_auth' ? POOL_AUTH_MSG()
-          : tx(`Assistant unavailable (${e.message || e}).`, `المساعد غير متاح (${e.message || e}).`));
+      await run.queue;
+      if (run.log.some((l) => l.state === 'done')) {
+        // Some changes landed before it failed: keep them visible, and undoable.
+        setChatMsgs((prev) => [...prev, { role: 'assistant', text: tx('Something went wrong halfway; this much is done.', 'حصلت مشكلة في النص؛ ده اللي اتعمل.'), proposals: run.log.map((l) => ({ summary: l.summary, tool: l.tool })), applied: Object.fromEntries(run.log.map((l, i) => [i, l.state === 'fail' ? 'fail' : 'done'])), auto: true, undo: run.undo || null }]);
+      }
+      setChatErr(e.code === 'auth' ? tx('Claude refused the key — check it in her settings.', 'Claude رفض المفتاح — راجعه في إعداداتها.')
+        : e.code === 'rate' ? tx('Claude says slow down — try again in a moment.', 'Claude بيقول استنى شوية — جرّب كمان لحظة.')
+          : e.code === 'network' ? tx('No connection to Claude.', 'مفيش اتصال بـClaude.')
+            : tx(`Tera is unavailable (${e.message || e}).`, `تيرا مش متاحة دلوقتي (${e.message || e}).`));
+    } finally {
+      teraRunRef.current = null;
+      teraBusyRef.current = false;
+      setChatBusy(false); setTeraActivity('');
     }
-    setChatBusy(false);
+    return out;
   };
+
+  /* Undo one of her turns: put the planner back as it was just before it. */
+  const undoTera = async (mi) => {
+    const m = chatMsgs[mi];
+    if (!m || !m.undo || m.undone || applyBusy) return;
+    setApplyBusy(true);
+    const r = await applyImport(m.undo, { backup: false, quiet: true });
+    setApplyBusy(false);
+    if (!r.ok) { flash(r.msg); return; }
+    setChatMsgs((prev) => prev.map((x, i) => (i === mi ? { ...x, undone: true, undo: null } : x)));
+    flash(tx('Undone.', 'اترجعت.'));
+  };
+
   /* ---------------------------------------------------------------- */
   /*  Applying what the assistant proposed                              */
   /* ---------------------------------------------------------------- */
@@ -2983,13 +3049,23 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const [applyBusy, setApplyBusy] = useState(false);
   const markApplied = (msgIdx, pIdx, state) => setChatMsgs((prev) => prev.map((m, i) => (i === msgIdx ? { ...m, applied: { ...(m.applied || {}), [pIdx]: state } } : m)));
 
+  /* A change Tera held for approval carries the function that makes it; one
+     from before a restart has lost it, and says so instead of pretending. */
+  const runHeld = async (msgIdx, prop) => {
+    if (!prop.fn) { flash(tx('That one expired — ask Tera again.', 'دي خلصت صلاحيتها — اطلبها من تيرا تاني.')); return false; }
+    const msg = chatMsgs[msgIdx];
+    if (!msg.undo) { try { const u = await buildExport(); setChatMsgs((prev) => prev.map((m, i) => (i === msgIdx ? { ...m, undo: u } : m))); } catch { /* no undo */ } }
+    await prop.fn();
+    await settle();
+    return true;
+  };
   const applyProposal = async (msgIdx, pIdx) => {
     const msg = chatMsgs[msgIdx];
     const prop = msg?.proposals?.[pIdx];
     if (!prop || applyBusy || (msg.applied || {})[pIdx]) return;
     setApplyBusy(true);
     let ok = false;
-    try { ok = await applyAction(prop); }
+    try { ok = prop.summary ? await runHeld(msgIdx, prop) : await applyAction(prop); }
     catch { flash(tx('Could not apply that.', 'تعذّر التطبيق.')); }
     setApplyBusy(false);
     if (!ok) return;
@@ -3011,7 +3087,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     let n = 0;
     for (let i = 0; i < list.length; i++) {
       if (applied[i]) continue;
-      try { if (await applyAction(list[i])) { applied[i] = 'done'; n++; } }
+      try { if (list[i].summary ? await runHeld(msgIdx, list[i]) : await applyAction(list[i])) { applied[i] = 'done'; n++; } }
       catch { /* leave it pending, and keep going */ }
     }
     setChatMsgs((prev) => prev.map((m, ix) => (ix === msgIdx ? { ...m, applied } : m)));
@@ -3317,6 +3393,674 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         : totalN > 0 ? { title: tx('All done for today. Rest easy.', 'أنجزت كل شيء اليوم. ارتَح.'), body: '' } : null;
   const ongoingKey = ongoingText ? `${ongoingText.title} ${ongoingText.body}` : '';
 
+  /* ---- Tera's hands (src/teratools.js) ----
+
+     Every tool Claude can call ends up here, in terms of this component's own
+     handlers, so a tool does exactly what the button does. Three rules the
+     handlers themselves do not keep, and these do:
+
+       any week   a task is found wherever it is stored (teraFind), not only
+                  in the week on screen;
+       set        "done: true" twice is still done — never a flip;
+       one at a   changes run one after another, with a wait for React to
+       time       commit between them, because several handlers read values
+                  (settings, balance, the week) that only refresh on render.
+
+     The ops object is rebuilt on every render and reached through a ref, so a
+     tool that runs after the turn's first change sees the planner as it is
+     now, not as it was when the turn began. */
+  const only = (o, keys) => Object.fromEntries(Object.entries(o || {}).filter(([k, v]) => keys.includes(k) && v !== undefined));
+  const commitWaitersRef = useRef([]);
+  useEffect(() => { const w = commitWaitersRef.current; commitWaitersRef.current = []; w.forEach((r) => r()); });
+  // A commit, then a beat for the effects that copy state into refs; never
+  // longer than 400 ms, since a change that renders nothing commits nothing.
+  const settle = () => new Promise((r) => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; setTimeout(r, 30); } };
+    commitWaitersRef.current.push(finish);
+    setTimeout(finish, 400);
+  });
+
+  const teraRunRef = useRef(null);       // the turn in progress: { mode, log, undo, queue }
+  const teraOpsRef = useRef(null);
+  const teraTools = useMemo(() => buildTeraTools(new Proxy({}, { get: (_, k) => teraOpsRef.current[k] })), []);
+  const [teraActivity, setTeraActivity] = useState('');
+  /* Development only: run Tera's tools by hand against the live planner,
+     without spending a model call — how the ops layer is checked. */
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    window.__tera = {
+      tools: teraTools,
+      begin: (mode = 'auto') => { teraRunRef.current = { mode, log: [], undo: null, queue: Promise.resolve() }; },
+      end: async () => { const r = teraRunRef.current; if (r) await r.queue; teraRunRef.current = null; return r && r.log.map(({ fn, ...x }) => x); },
+      call: async (name, input) => { const t = teraTools.find((x) => x.name === name); if (!t) throw new Error(`no tool ${name}`); return t.run(input); },
+    };
+  }
+
+  const htmlText = (html) => String(html || '').replace(/<\/(p|div|li|h\d)>/gi, '\n').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/\n{3,}/g, '\n\n').trim();
+  const textHtml = (text) => String(text || '').split(/\n{2,}/).map((p) => `<p>${p.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</p>`).join('');
+  const projOf = (v) => {
+    if (v == null || v === '') return null;
+    const ps = settingsRef.current.projects || [];
+    const s = String(v).trim().toLowerCase();
+    return ps.find((p) => p.id === v) || ps.find((p) => String(p.name || '').trim().toLowerCase() === s) || null;
+  };
+  const needProj = (v) => { const p = projOf(v); if (!p) throw new Error(`no project "${v}" — get_projects lists them`); return p; };
+  const labelOf = (v) => {
+    const ls = settingsRef.current.labels || [];
+    const s = String(v || '').trim().toLowerCase();
+    return ls.find((l) => l.id === v) || ls.find((l) => String(l.name || '').trim().toLowerCase() === s) || null;
+  };
+  const labelName = (id) => ((settingsRef.current.labels || []).find((l) => l.id === id) || {}).name || '';
+  const projName = (id) => ((settingsRef.current.projects || []).find((p) => p.id === id) || {}).name || '';
+  const allWeekISOs = async () => (await rawList('planner:week:')).map((k) => k.slice(13)).filter((s) => /^\d{4}-\d{2}-\d{2}$/.test(s)).sort().reverse();
+  /* Wherever the task lives: the week on screen, a loaded week, or a week
+     only in storage (which this loads, so the any-week handlers reach it). */
+  const teraFind = async (id) => {
+    let o = weekOwning(id);
+    if (!o) {
+      for (const ws of await allWeekISOs()) {
+        const d = await readWeek(ws);
+        if ((d.tasks || []).some((t) => t.id === id)) { o = weekOwning(id) || { wsISO: ws, doc: d }; break; }
+      }
+    }
+    if (!o) throw new Error(`no task with id ${id}`);
+    const t = (o.doc.tasks || []).find((x) => x.id === id);
+    return { wsISO: o.wsISO, doc: o.doc, t, date: fmtISO(addDays(parseISO(o.wsISO), Number(t.day) || 0)) };
+  };
+  const shownWeek = (wsISO) => wsISO === weekDocISORef.current;
+  const writeTasks = async (wsISO, fn) => {
+    if (shownWeek(wsISO)) { const w = weekRef.current; persistWeek({ ...w, tasks: fn(w.tasks || []) }); return; }
+    const cur = await readWeek(wsISO);
+    await writeWeek(wsISO, { ...cur, tasks: fn(cur.tasks || []) });
+  };
+  const weekOfDate = (iso) => { const d = parseISO(iso); const ws = startOfWeek(d, settingsRef.current.weekStartDay); return { wsISO: fmtISO(ws), idx: Math.round((d - ws) / 86400000), d }; };
+  const docFor = async (wsISO) => (shownWeek(wsISO) ? weekRef.current : await readWeek(wsISO));
+  const taskOut = (t, date) => ({
+    id: t.id, title: t.title, date, block: t.block, start: t.start || '', end: t.end || '',
+    ...(t.duration ? { minutes: t.duration } : {}), done: !!t.done,
+    ...(t.projectId ? { label: labelName(t.projectId) } : {}), ...(t.projectRef ? { project: projName(t.projectRef), projectId: t.projectRef } : {}),
+    ...(t.until ? { until: t.until } : {}), ...(t.focusTarget ? { focusTarget: t.focusTarget } : {}), ...(t.worth ? { worth: t.worth } : {}), ...(t.board ? { column: t.board } : {}),
+    ...((t.subtasks || []).length ? { steps: t.subtasks.map((s, i) => ({ n: i + 1, title: s.title, done: !!s.done })) } : {}),
+    ...((t.notes || []).filter((n) => n.type !== 'image').length ? { notes: t.notes.filter((n) => n.type !== 'image').map((n) => ({ type: n.type, content: n.content })) } : {}),
+  });
+  const dayTasks = async (iso) => { const { wsISO, idx } = weekOfDate(iso); const doc = await docFor(wsISO); return { doc, idx, tasks: spansOn(iso, (doc.tasks || []).filter((t) => t.day === idx)) }; };
+  const meetingsOn = (iso) => {
+    const done = calDone[iso] || {};
+    return eventsOn(calInstances, parseISO(iso)).map((e) => ({ key: calKey(e), title: e.summary || '', allDay: !!e.allDay, start: e.allDay ? '' : new Date(e.startMs).toTimeString().slice(0, 5), end: e.allDay ? '' : new Date(e.endMs).toTimeString().slice(0, 5), done: !!done[calKey(e)] }));
+  };
+  const eventOn = (iso, key) => { const e = eventsOn(calInstances, parseISO(iso)).find((x) => calKey(x) === key); if (!e) throw new Error('no meeting with that key on that date'); return e; };
+  const allIds = () => {
+    const ids = chatIds();
+    const loaded = [...(weekRef.current.tasks || []), ...Object.values(weeksRef.current).flatMap((w) => (w && w.tasks) || [])].map((t) => t.id);
+    return { ...ids, taskIds: [...new Set([...ids.taskIds, ...loaded, ...(poolRef.current || []).map((p) => p.id)])] };
+  };
+
+  teraOpsRef.current = {
+    /* how every change runs — see buildTeraTools */
+    change: async (meta, fn) => {
+      const run = teraRunRef.current;
+      if (!run) throw new Error('not in a turn');
+      if (run.mode === 'ask') { run.log.push({ ...meta, fn, state: null }); return `Held for the person's approval: ${meta.summary}`; }
+      const p = run.queue.then(async () => {
+        if (run.undo == null) { try { run.undo = await buildExport(); } catch { run.undo = false; } }
+        const res = await fn();
+        await settle();
+        return res;
+      });
+      run.queue = p.catch(() => {});
+      try {
+        const res = await p;
+        run.log.push({ ...meta, state: 'done' });
+        return res == null ? 'done' : res;
+      } catch (e) {
+        run.log.push({ ...meta, state: 'fail' });
+        throw e;
+      }
+    },
+    apply: async (p) => {
+      const v = validateProposal(p, allIds());
+      if (!v) throw new Error('that does not match anything — check the ids and values with a get_* tool');
+      if (!(await applyAction(v))) throw new Error('the app could not do that (the item may have changed or be on another week)');
+      return 'done';
+    },
+
+    /* ---- reading ---- */
+    getDay: async (iso) => {
+      const { doc, idx, tasks } = await dayTasks(iso);
+      const prayers = (doc.prayers || {})[idx] || {};
+      return {
+        date: iso, weekday: wdFull(parseISO(iso).getDay()),
+        tasks: tasks.slice().sort((a, b) => (BLOCKS.findIndex((x) => x.id === a.block) - BLOCKS.findIndex((x) => x.id === b.block)) || (a.order - b.order)).map((t) => taskOut(t, iso)),
+        prayers: Object.fromEntries(PRAYER_BLOCKS.map((b) => [b, !!prayers[b]])),
+        habits: (settingsRef.current.habits || []).map((h) => ({ id: h.id, name: h.name, block: h.block, done: habitDoneOn(h, iso) })),
+        meetings: meetingsOn(iso),
+      };
+    },
+    getDays: async (from, to) => {
+      const out = [];
+      for (let d = parseISO(from), n = 0; fmtISO(d) <= to && n < 31; d = addDays(d, 1), n++) {
+        const iso = fmtISO(d);
+        const { tasks } = await dayTasks(iso);
+        out.push({ date: iso, tasks: tasks.map((t) => ({ id: t.id, title: t.title, block: t.block, start: t.start || '', end: t.end || '', done: !!t.done })), meetings: meetingsOn(iso).map((m) => `${m.start} ${m.title}`) });
+      }
+      return out;
+    },
+    findTasks: async ({ text = '', from, to, done }) => {
+      const s = String(text || '').trim().toLowerCase();
+      const hits = [];
+      for (const ws of await allWeekISOs()) {
+        const doc = await docFor(ws);
+        for (const t of doc.tasks || []) {
+          const date = fmtISO(addDays(parseISO(ws), Number(t.day) || 0));
+          if (from && date < from) continue;
+          if (to && date > to) continue;
+          if (done != null && !!t.done !== !!done) continue;
+          if (s && !String(t.title || '').toLowerCase().includes(s)) continue;
+          hits.push({ id: t.id, title: t.title, date, block: t.block, start: t.start || '', done: !!t.done });
+          if (hits.length >= 60) return { results: hits, more: true };
+        }
+      }
+      return { results: hits.sort((a, b) => a.date.localeCompare(b.date)) };
+    },
+    getOverdue: async () => (overdue || []).map((o) => ({ id: o.t.id, title: o.t.title, date: fmtISO(o.date), block: o.t.block })),
+    getBacklog: async () => (poolRef.current || []).map((p) => ({ id: p.id, title: p.title, done: !!p.done, ...(p.projectId ? { label: labelName(p.projectId) } : {}), ...(p.projectRef ? { project: projName(p.projectRef) } : {}), ...(p.duration ? { minutes: p.duration } : {}), ...((p.subtasks || []).length ? { steps: p.subtasks.map((x) => ({ title: x.title, done: !!x.done })) } : {}) })),
+    getRecurring: async () => (templates || []).map((t) => ({ id: t.id, title: t.title, block: t.block, start: t.start || '', end: t.end || '', repeat: t.repeat || null, autoAdd: !!t.autoAdd, ...(t.projectId ? { label: labelName(t.projectId) } : {}), ...(t.projectRef ? { project: projName(t.projectRef) } : {}), steps: t.subtasks || [] })),
+    getHabits: async (days) => (settingsRef.current.habits || []).map((h) => {
+      const log = {};
+      for (let i = 0; i < days; i++) { const iso = fmtISO(addDays(todayMid, -i)); const m = (h.log || {})[iso]; if (m) log[iso] = m === TINY ? 'tiny' : 'done'; }
+      return { id: h.id, name: h.name, block: h.block, color: h.color, identity: h.identity || '', cue: h.cue || '', tiny: h.tiny || '', after: h.after || '', reward: h.reward || '', streak: habitStreak(h, fmtISO(todayMid)), log };
+    }),
+    getProjects: async (idOrName) => {
+      const list = idOrName ? [needProj(idOrName)] : (settingsRef.current.projects || []);
+      return list.map((p) => {
+        const pc = projectPace(p);
+        return {
+          id: p.id, name: p.name, goal: p.goal || '', unit: p.unit || '', target: p.target || 0, done: pc.done, startDate: p.startDate || '', deadline: p.deadline || '',
+          completed: !!p.completedAt, onPace: pc.onPace, perDay: pc.perDay ? Math.ceil(pc.perDay) : null, daysLeft: pc.daysLeft,
+          plan: p.plan || null, columns: columnsOf(p).map((c) => ({ id: c.id, name: c.name })),
+          recentEntries: (p.entries || []).slice(-(idOrName ? 30 : 5)).map((e) => ({ id: e.id, date: e.date, amount: e.amount, note: e.note || '' })),
+        };
+      });
+    },
+    getBoard: async (idOrName) => {
+      const p = needProj(idOrName);
+      const cols = columnsOf(p);
+      const cards = projectTaskList(p.id).tasks;
+      return cols.map((c) => ({ id: c.id, name: c.name, cards: cards.filter((k) => (c.id === DONE_COL ? k.done : !k.done && (k.board || cols[0].id) === c.id)).map((k) => ({ id: k.id, title: k.title, date: k.date ? fmtISO(k.date) : null })) }));
+    },
+    getPoints: async () => {
+      const today = fmtISO(lateCtx().today);
+      return {
+        balance,
+        today: (ledgerRef.current || []).filter((e) => e.iso === today || (e.ts && fmtISO(new Date(e.ts)) === today)).map((e) => ({ kind: e.kind, amount: e.amount, title: e.title })),
+        rewards: (settingsRef.current.rewards || []).map((r) => ({ id: r.id, name: r.name, cost: r.cost })),
+        penalties: (settingsRef.current.penalties || []).map((r) => ({ id: r.id, name: r.name, cost: r.cost, wipe: !!r.wipe })),
+      };
+    },
+    getNotes: async ({ query, tag }) => {
+      const q = String(query || '').toLowerCase();
+      return (notes || []).filter((n) => (!tag || (n.tags || []).includes(tag)) && (!q || `${n.title} ${htmlText(n.body)}`.toLowerCase().includes(q)))
+        .slice(0, 50).map((n) => ({ id: n.id, title: n.title, tags: n.tags || [], pinned: !!n.pinned, start: htmlText(n.body).slice(0, 120), ...(n.taskId ? { taskId: n.taskId } : {}) }));
+    },
+    getNote: async (id) => { const n = (notes || []).find((x) => x.id === id); if (!n) throw new Error('no note with that id'); return { id: n.id, title: n.title, tags: n.tags || [], pinned: !!n.pinned, colour: n.colour || '', text: htmlText(n.body) }; },
+    getCalendar: async (from, to) => {
+      const out = [];
+      for (let d = parseISO(from), n = 0; fmtISO(d) <= to && n < 62; d = addDays(d, 1), n++) { const iso = fmtISO(d); for (const m of meetingsOn(iso)) out.push({ date: iso, ...m }); }
+      return { feeds: (calFeeds || []).map((f) => ({ id: f.id, name: f.name || f.url, enabled: f.enabled !== false, kind: f.kind })), events: out };
+    },
+    getSettings: async () => {
+      const s = settingsRef.current;
+      return {
+        lang: s.lang, theme: s.theme, time24: !!s.time24, weekStartDay: s.weekStartDay ?? 6, leadMin: s.leadMin, nowLock: s.nowLock, timeLock: !!s.timeLock,
+        prayer: { useLive: s.prayer?.useLive !== false, customTimes: s.prayer?.customTimes || {} }, calendar: { includeAllDay: !!s.calendar?.includeAllDay, prayerReserveMin: s.calendar?.prayerReserveMin },
+        autoBackup: s.autoBackup !== false, labels: (s.labels || []).map((l) => ({ id: l.id, name: l.name, color: l.color, ...(l.project ? { project: projName(l.project) } : {}) })),
+        tera: (({ model, effort, ...rest }) => rest)(teraSettings(s)), hasPin: !!s.pin,
+      };
+    },
+    listBackups: async () => { try { return await listBackups(); } catch { return []; } },
+
+    /* ---- tasks ---- */
+    createTask: async (i) => {
+      const labelId = i.label ? labelIdFor(i.label) : null;
+      const proj = i.project ? needProj(i.project) : null;
+      const notesList = [...(i.note ? [{ id: uid(), type: 'text', content: i.note }] : []), ...(i.links || []).map((u) => ({ id: uid(), type: 'link', content: u }))];
+      const placed = await addTaskOnDate(i.date, i.block || 'morning', i.title, { start: i.start || '', end: i.end || '', duration: i.duration, subtasks: i.steps || null, projectId: labelId, projectRef: proj ? proj.id : null, notes: notesList });
+      if (!placed) throw new Error('that date could not be opened');
+      if (i.until) { await settle(); mutateTask(placed.id, (t) => ({ ...t, until: i.until })); }
+      return { created: { ...taskOut({ ...placed, ...(i.until ? { until: i.until } : {}) }, i.date), ...(i.label ? { label: i.label } : {}) } };
+    },
+    updateTask: async (id, ch) => {
+      const f = await teraFind(id);
+      const patch = {};
+      if (ch.title) patch.title = ch.title.trim();
+      if (ch.block) patch.block = ch.block;
+      if (ch.start != null) { patch.start = ch.start; patch.time = ''; patch.autoSlot = null; }
+      if (ch.end != null) { patch.end = ch.end; patch.time = ''; patch.autoSlot = null; }
+      if (ch.duration != null) patch.duration = ch.duration;
+      if (ch.until != null) patch.until = ch.until || undefined;
+      if (ch.label != null) patch.projectId = ch.label ? labelIdFor(ch.label) : null;
+      if (ch.project != null) patch.projectRef = ch.project ? needProj(ch.project).id : null;
+      if (ch.focusTarget != null) patch.focusTarget = ch.focusTarget || undefined;
+      if (ch.worth != null) patch.worth = ch.worth || undefined;
+      if (ch.column != null) {
+        const proj = projOf(f.t.projectRef);
+        if (!proj) throw new Error('that task is not on a project board');
+        const col = columnsOf(proj).find((c) => c.id === ch.column || String(c.name).toLowerCase() === String(ch.column).toLowerCase());
+        if (!col) throw new Error(`no column "${ch.column}" on ${proj.name}`);
+        Object.assign(patch, patchFor(col.id));
+      }
+      if (Object.keys(patch).length) {
+        mutateTask(id, (t) => { const n = { ...t, ...patch }; Object.keys(n).forEach((k) => n[k] === undefined && delete n[k]); return n; });
+        await settle();
+      }
+      if (ch.date && ch.date !== f.date) {
+        const g = await teraFind(id);
+        if (shownWeek(g.wsISO)) await moveTaskToDate(id, ch.date);
+        else { await writeTasks(g.wsISO, (ts) => ts.filter((t) => t.id !== id)); await putTaskOnDate(ch.date, { ...g.t }); }
+        await settle();
+      }
+      const now = await teraFind(id);
+      return { task: taskOut(now.t, now.date) };
+    },
+    setTaskDone: async (id, done) => {
+      const f = await teraFind(id);
+      if (!!f.t.done !== done) toggleDone(id);
+      return { id, title: f.t.title, done };
+    },
+    deleteTask: async (id) => { const f = await teraFind(id); await writeTasks(f.wsISO, (ts) => ts.filter((t) => t.id !== id)); return { deleted: f.t.title }; },
+    taskToBacklog: async (id) => {
+      const f = await teraFind(id);
+      await writeTasks(f.wsISO, (ts) => ts.filter((t) => t.id !== id));
+      const t = f.t;
+      persistPool([...poolRef.current, { id: uid(), title: t.title, projectId: t.projectId || null, projectRef: t.projectRef || null, ...(taskDuration(t) != null ? { duration: taskDuration(t) } : {}), subtasks: t.subtasks || [], notes: t.notes || [], order: Date.now() }]);
+      return { movedToBacklog: t.title };
+    },
+    setSteps: async (id, steps) => {
+      const f = await teraFind(id);
+      const old = f.t.subtasks || [];
+      const next = steps.map((s) => { const same = old.find((o) => o.title === s.title); return { id: same ? same.id : uid(), title: String(s.title).trim(), done: !!s.done }; }).filter((s) => s.title);
+      mutateTask(id, (t) => ({ ...t, subtasks: next }));
+      return { steps: next.map((s, i) => ({ n: i + 1, title: s.title, done: s.done })) };
+    },
+    tickStep: async (id, n, done) => {
+      const f = await teraFind(id);
+      const sub = (f.t.subtasks || [])[n - 1];
+      if (!sub) throw new Error(`that task has ${(f.t.subtasks || []).length} subtasks`);
+      if (!!sub.done !== done) toggleSub(id, sub.id);
+      return { step: n, title: sub.title, done };
+    },
+    setTaskNotes: async (id, list) => { await teraFind(id); mutateTask(id, (t) => ({ ...t, notes: [...(t.notes || []).filter((x) => x.type === 'image'), ...list.map((x) => ({ id: uid(), type: x.type, content: x.content }))] })); return 'done'; },
+    reorderTasks: async (iso, block, ids) => {
+      const { wsISO, idx } = weekOfDate(iso);
+      const order = new Map(ids.map((id, i) => [id, i + 1]));
+      await writeTasks(wsISO, (ts) => ts.map((t) => (t.day === idx && t.block === block && order.has(t.id) ? { ...t, order: order.get(t.id) } : t)));
+      return 'done';
+    },
+    clearDay: async (iso) => { const { wsISO, idx } = weekOfDate(iso); let n = 0; await writeTasks(wsISO, (ts) => ts.filter((t) => (t.day === idx ? (n++, false) : true))); return { deleted: n }; },
+    completeOverdue: async (ids) => {
+      if (!ids.length) { await completeAllOverdue(); return 'all overdue marked done'; }
+      let n = 0;
+      for (const id of ids) { const it = (overdue || []).find((o) => o.t.id === id); if (it) { await completeOverdue(it); n++; } }
+      return { markedDone: n };
+    },
+    deleteAllOverdue: async () => { await deleteAllOverdue(); return 'deleted'; },
+    slotDay: async (iso) => {
+      if (dayIdxOf(iso) < 0) { selectDate(parseISO(iso)); await settle(); await settle(); }
+      return teraOpsRef.current.slotShown(iso, false);
+    },
+    clearSlots: async (iso) => {
+      if (dayIdxOf(iso) < 0) { selectDate(parseISO(iso)); await settle(); await settle(); }
+      return teraOpsRef.current.slotShown(iso, true);
+    },
+    slotShown: async (iso, clear) => {
+      const i = dayIdxOf(iso);
+      if (i < 0) throw new Error('could not open that week');
+      if (clear) clearSlots(i); else await structureSelectedDay(i);
+      return 'done';
+    },
+
+    /* ---- backlog ---- */
+    createBacklog: async (i) => {
+      const it = addPoolItem(i.title, { projectId: i.label ? labelIdFor(i.label) : null, projectRef: i.project ? needProj(i.project).id : null, subtasks: i.steps || null, ...(i.duration ? { duration: i.duration } : {}), notes: i.note ? [{ id: uid(), type: 'text', content: i.note }] : [] });
+      return { created: { id: it && it.id, title: i.title } };
+    },
+    updateBacklog: async (id, ch) => {
+      if (!(poolRef.current || []).some((p) => p.id === id)) throw new Error('no backlog item with that id');
+      mutatePoolItem(id, (p) => ({
+        ...p,
+        ...(ch.title ? { title: ch.title } : {}),
+        ...(ch.label != null ? { projectId: ch.label ? labelIdFor(ch.label) : null } : {}),
+        ...(ch.project != null ? { projectRef: ch.project ? needProj(ch.project).id : null } : {}),
+        ...(ch.duration != null ? { duration: ch.duration || undefined } : {}),
+        ...(ch.steps ? { subtasks: ch.steps.map((s) => ({ id: uid(), title: s.title, done: !!s.done })) } : {}),
+        ...(ch.done != null ? { done: !!ch.done } : {}),
+      }));
+      return 'done';
+    },
+    clearDoneBacklog: async () => { clearDonePool(); return 'done'; },
+
+    /* ---- recurring ---- */
+    createRecurring: async (i) => {
+      const before = new Set((templates || []).map((t) => t.id));
+      addTemplate({ title: i.title, block: i.block, start: i.start || '', end: i.end || '', duration: i.duration, projectId: i.label ? labelIdFor(i.label) : null, projectRef: i.project ? needProj(i.project).id : null, repeat: i.repeat, subtasks: i.steps || [] });
+      await settle();
+      const made = (teraOpsRef.current.templatesNow() || []).find((t) => !before.has(t.id));
+      if (made && i.autoAdd) updTemplate(made.id, { autoAdd: true });
+      return { created: made ? { id: made.id, title: made.title } : i.title };
+    },
+    templatesNow: () => templates,
+    updateRecurring: async (id, ch) => {
+      if (!(templates || []).some((t) => t.id === id)) throw new Error('no recurring task with that id');
+      const patch = {};
+      for (const k of ['title', 'block', 'start', 'end', 'duration', 'repeat', 'autoAdd']) if (ch[k] !== undefined) patch[k] = ch[k];
+      if (ch.start != null || ch.end != null) patch.time = '';
+      if (ch.label != null) patch.projectId = ch.label ? labelIdFor(ch.label) : null;
+      if (ch.project != null) patch.projectRef = ch.project ? needProj(ch.project).id : null;
+      if (ch.steps) patch.subtasks = ch.steps;
+      updTemplate(id, patch);
+      return 'done';
+    },
+    recurringToBacklog: async (id) => { if (!(templates || []).some((t) => t.id === id)) throw new Error('no recurring task with that id'); templateToPool(id); return 'done'; },
+
+    /* ---- habits and prayers ---- */
+    createHabit: async (i) => {
+      const h = addHabit();
+      updHabit(h.id, { name: i.name, block: i.block, ...only(i, ['color', 'identity', 'cue', 'tiny', 'reward']), ...(i.after != null ? { after: i.after || null } : {}) });
+      return { created: { id: h.id, name: i.name } };
+    },
+    updateHabit: async (id, ch) => {
+      if (!(settingsRef.current.habits || []).some((h) => h.id === id)) throw new Error('no habit with that id');
+      updHabit(id, { ...ch, ...(ch.after != null ? { after: ch.after || null } : {}) });
+      return 'done';
+    },
+    setHabitDone: async (id, iso, state) => {
+      const h = (settingsRef.current.habits || []).find((x) => x.id === id);
+      if (!h) throw new Error('no habit with that id');
+      const cur = (h.log || {})[iso] || 0;
+      const want = state === 'done' ? 1 : state === 'tiny' ? TINY : 0;
+      if (cur === want) return { habit: h.name, date: iso, state };
+      if (want === TINY) { markHabitTiny(id, iso); marked(); return { habit: h.name, date: iso, state }; }
+      persistHabits((prev) => prev.map((x) => { if (x.id !== id) return x; const log = { ...(x.log || {}) }; if (want) log[iso] = want; else delete log[iso]; return { ...x, log }; }));
+      if (want && !cur) { marked(); awardHabitDay(h, iso); }
+      if (!want && cur) revokeRef(`habit:${id}:${iso}`);
+      return { habit: h.name, date: iso, state };
+    },
+    setPrayer: async (prayer, iso, done) => {
+      const { wsISO, idx } = weekOfDate(iso);
+      const doc = await docFor(wsISO);
+      const cur = !!(((doc.prayers || {})[idx] || {})[prayer]);
+      if (cur !== done) await togglePrayer(prayer, parseISO(iso));
+      return { prayer, date: iso, prayed: done };
+    },
+
+    /* ---- projects ---- */
+    createProject: async (i) => {
+      const np = addProjectItem();
+      updProjectItem(np.id, only(i, ['name', 'goal', 'unit', 'target', 'color', 'startDate', 'deadline']));
+      return { created: { id: np.id, name: i.name } };
+    },
+    updateProject: async (idOrName, ch) => {
+      const p = needProj(idOrName);
+      const patch = only(ch, ['name', 'goal', 'unit', 'target', 'color', 'startDate', 'deadline']);
+      if (ch.completed != null) patch.completedAt = ch.completed ? fmtISO(new Date()) : null;
+      if (ch.plan) patch.plan = { ...(p.plan || {}), ...ch.plan };
+      updProjectItem(p.id, patch);
+      return 'done';
+    },
+    deleteProject: async (idOrName) => { const p = needProj(idOrName); delProjectItem(p.id); return { deleted: p.name }; },
+    logProgress: async (i) => { const p = needProj(i.projectId); logProgress(p.id, i.amount, i.note || '', i.date ? { date: i.date } : {}); return { project: p.name, logged: i.amount }; },
+    deleteProgress: async (idOrName, entryId) => {
+      const p = needProj(idOrName);
+      if (!(p.entries || []).some((e) => e.id === entryId)) throw new Error('no such entry on that project');
+      updProjectItem(p.id, { entries: (p.entries || []).filter((e) => e.id !== entryId) });
+      return 'done';
+    },
+    moveCard: async (taskId, column) => {
+      if (!(poolRef.current || []).some((p) => p.id === taskId)) await teraFind(taskId);
+      return teraOpsRef.current.apply({ kind: 'move_card', taskId, column });
+    },
+    reorderColumns: async (idOrName, wanted) => {
+      const p = needProj(idOrName);
+      const cols = columnsOf(p).filter((c) => c.id !== DONE_COL);
+      const pick = (v) => cols.find((c) => c.id === v || String(c.name).toLowerCase() === String(v).toLowerCase());
+      const ordered = wanted.map(pick).filter(Boolean);
+      const rest = cols.filter((c) => !ordered.includes(c));
+      updProjectItem(p.id, { columns: toStored([...ordered, ...rest]) });
+      return 'done';
+    },
+
+    /* ---- points ---- */
+    createReward: async (i) => { const r = { id: uid(), name: i.name, cost: i.cost, ...(i.minutes ? { minutes: i.minutes } : {}) }; persistRewards((prev) => [...prev, r]); return { created: r }; },
+    updateReward: async (id, ch) => { if (!(settingsRef.current.rewards || []).some((r) => r.id === id)) throw new Error('no reward with that id'); updReward(id, ch); return 'done'; },
+    deleteReward: async (id) => { delReward(id); return 'done'; },
+    cashIn: async (id) => {
+      const r = (settingsRef.current.rewards || []).find((x) => x.id === id);
+      if (!r) throw new Error('no reward with that id');
+      if (Number(r.cost) > balance) throw new Error(`not enough points: ${balance} of ${r.cost}`);
+      await cashIn(r);
+      return { spent: r.cost, on: r.name };
+    },
+    createPenalty: async (i) => { const r = { id: uid(), name: i.name, cost: i.cost, wipe: !!i.wipe }; persistPenalties((prev) => [...prev, r]); return { created: r }; },
+    updatePenalty: async (id, ch) => { updPenalty(id, ch); return 'done'; },
+    deletePenalty: async (id) => { delPenalty(id); return 'done'; },
+    chargePenalty: async (id) => { const p = (settingsRef.current.penalties || []).find((x) => x.id === id); if (!p) throw new Error('no penalty with that id'); await chargePenalty(p); return { charged: p.name }; },
+    resetPoints: async () => { await resetPoints(); return 'points reset to zero'; },
+
+    /* ---- notes ---- */
+    createNote: async (i) => {
+      const n = await saveNote(newNote({ title: i.title, body: textHtml(i.text || ''), tags: i.tags || [], pinned: !!i.pinned, ...(i.colour ? { colour: i.colour } : {}), ...(i.taskId ? { taskId: i.taskId } : {}) }));
+      setNotes((prev) => [n, ...prev]);
+      return { created: { id: n.id, title: n.title } };
+    },
+    updateNote: async (id, ch) => {
+      const cur = (notes || []).find((n) => n.id === id);
+      if (!cur) throw new Error('no note with that id');
+      const patch = only(ch, ['title', 'tags', 'pinned', 'colour']);
+      if (ch.text != null) patch.body = textHtml(ch.text);
+      if (ch.append) patch.body = `${patch.body ?? cur.body ?? ''}${textHtml(ch.append)}`;
+      await patchNote(id, patch);
+      return 'done';
+    },
+    deleteNote: async (id) => { if (!(notes || []).some((n) => n.id === id)) throw new Error('no note with that id'); await removeNote(id); return 'done'; },
+
+    /* ---- calendar ---- */
+    setMeetingDone: async (iso, key, done) => { eventOn(iso, key); const cur = !!((calDone[iso] || {})[key]); if (cur !== done) await toggleMeeting(iso, key); return { done }; },
+    assignMeetingProject: async (iso, key, pid) => { const ev = eventOn(iso, key); await assignCalProject(calSeriesKey(ev), pid ? needProj(pid).id : null); return 'done'; },
+    setMeetingPurpose: async (iso, key, text) => { const ev = eventOn(iso, key); await setMeetingDesc(ev, String(text).slice(0, 500)); return 'done'; },
+    addFeed: async (url, name) => { const feeds = await persistFeeds([...(calFeedsRef.current || []), newFeed(url.replace(/^webcal:/i, 'https:'), name || '')]); refreshCalendars(feeds, { force: true }); return 'connected; events load in a moment'; },
+    updateFeed: async (id, ch) => { const fs = calFeedsRef.current || []; if (!fs.some((f) => f.id === id)) throw new Error('no calendar with that id'); const feeds = await persistFeeds(fs.map((f) => (f.id === id ? { ...f, ...ch } : f))); refreshCalendars(feeds, { force: true }); return 'done'; },
+    removeFeed: async (id) => { await persistFeeds((calFeedsRef.current || []).filter((f) => f.id !== id)); return 'done'; },
+
+    /* ---- labels ---- */
+    createLabel: async (i) => {
+      if (labelOf(i.name)) throw new Error('a label with that name exists');
+      const cur = settingsRef.current.labels || [];
+      const l = { id: uid(), name: i.name, color: i.color || LABEL_SWATCHES[cur.length % LABEL_SWATCHES.length], ...(i.project ? { project: needProj(i.project).id } : {}) };
+      patchSettings({ labels: [...cur, l] });
+      return { created: l };
+    },
+    updateLabel: async (idOrName, ch) => {
+      const l = labelOf(idOrName); if (!l) throw new Error('no such label');
+      const patch = only(ch, ['name', 'color']);
+      if (ch.project != null) patch.project = ch.project ? needProj(ch.project).id : undefined;
+      patchSettings({ labels: (settingsRef.current.labels || []).map((x) => (x.id === l.id ? { ...x, ...patch } : x)) });
+      return 'done';
+    },
+    deleteLabel: async (idOrName) => { const l = labelOf(idOrName); if (!l) throw new Error('no such label'); patchSettings({ labels: (settingsRef.current.labels || []).filter((x) => x.id !== l.id) }); return 'done'; },
+
+    /* ---- settings ---- */
+    updateSettings: async (i) => {
+      const s = settingsRef.current;
+      if (i.lang) changeLang(i.lang);
+      const patch = only(i, ['theme', 'time24', 'weekStartDay', 'leadMin', 'timeLock', 'autoBackup']);
+      if (i.nowLock) patch.nowLock = { ...(s.nowLock || {}), ...i.nowLock };
+      if (i.prayerUseLive != null || i.prayerTimes) patch.prayer = { ...(s.prayer || {}), ...(i.prayerUseLive != null ? { useLive: i.prayerUseLive } : {}), ...(i.prayerTimes ? { customTimes: { ...((s.prayer || {}).customTimes || {}), ...i.prayerTimes } } : {}) };
+      if (i.calendarAllDay != null || i.calendarPrayerReserve != null) patch.calendar = { ...(s.calendar || {}), ...(i.calendarAllDay != null ? { includeAllDay: i.calendarAllDay } : {}), ...(i.calendarPrayerReserve != null ? { prayerReserveMin: i.calendarPrayerReserve } : {}) };
+      if (i.tera) patch.tera = { ...teraSettings(s), ...i.tera };
+      if (Object.keys(patch).length) patchSettings(patch);
+      return 'done';
+    },
+
+    /* ---- moments ---- */
+    startFocus: async (id, minutes) => { const f = await teraFind(id); const ok = startFocus(f.t, minutes, false); if (ok === false) throw new Error('a focus round cannot start on that now'); return 'focusing'; },
+    show: async (v, iso) => { if (iso) selectDate(parseISO(iso)); setView(v); return 'shown'; },
+    backupNow: async () => { const r = await takeAutoBackup(); if (r && r.ok === false) throw new Error(r.error || 'backup failed'); return 'backed up'; },
+    restoreBackup: async (name) => { const r = await restoreAutoBackup(name); if (!r.ok) throw new Error(r.msg); return r.msg; },
+  };
+
+  /* ---- Tera on the phone (every call is a no-op elsewhere) ----
+
+     The phone's half of her runs while the app is closed, from a BRIEF of the
+     day this keeps current: today's open tasks, appointments for the next day
+     and a half (timed tasks and calendar events), calendar time as "busy",
+     her settings, the model keys and her wording. See src/tera.js and
+     android/.../tera/. */
+  const teraT = teraSettings(settings);
+  const teraOwnsAppts = teraNative() && teraT.enabled && teraT.appts;
+  /* Pop-up lines, written by Claude while the planner is open, about the
+     tasks and appointments actually in the brief. Rewritten when that list
+     changes, at most every twenty minutes; kept across restarts. */
+  const FRESH_KEY = 'rhythm:tera:fresh';
+  const [teraFresh, setTeraFresh] = useState(() => { try { return JSON.parse(localStorage.getItem(FRESH_KEY) || 'null'); } catch { return null; } });
+  const teraBriefInputsRef = useRef(null);
+  const teraFreshBusy = useRef(false);
+  const teraBriefKey = JSON.stringify([
+    fmtISO(todayMid), teraLang, teraT,
+    todayTasks.map((t) => [t.id, t.title, t.start, t.end, t.time, t.done]),
+    (todayData?.tasks || []).length, (week.tasks || []).length,
+    calInstances.length, Object.keys(calDone[fmtISO(todayMid)] || {}).length,
+    settings.apiKey, settings.groqKey, settings.brokerUrl, settings.brokerToken,
+    Math.floor(Date.now() / 1800000), // and every half hour, for the calendar's sake
+    teraFresh && teraFresh.at,
+  ]);
+  useEffect(() => {
+    if (!ready || !teraNative()) return undefined;
+    const id = setTimeout(async () => {
+      const inp = teraBriefInputsRef.current;
+      const apiKey = loadClaudeKey();
+      if (!inp || !apiKey || teraFreshBusy.current) return;
+      const sig = JSON.stringify([inp.lang, inp.open.map((t) => t.title), inp.appts.map((a) => a.key + a.at)]);
+      const prev = teraFresh;
+      if (prev && prev.sig === sig) return;
+      if (prev && Date.now() - prev.at < 20 * 60000 && prev.lang === inp.lang) return;
+      if (!inp.open.length && !inp.appts.length) return;
+      teraFreshBusy.current = true;
+      try {
+        const text = await teraComplete({ apiKey, model: teraT.model, system: POPUP_BATCH_SYSTEM, prompt: popupBatchPrompt({ lang: inp.lang, open: inp.open, appts: inp.appts }), maxTokens: 6000 });
+        const parsed = parsePopupBatch(text, inp.appts.map((a) => a.key));
+        if (parsed) {
+          const next = { ...parsed, sig, lang: inp.lang, at: Date.now() };
+          setTeraFresh(next);
+          try { localStorage.setItem(FRESH_KEY, JSON.stringify(next)); } catch { /* memory only */ }
+        }
+      } catch { /* the bank covers it */ }
+      teraFreshBusy.current = false;
+    }, 5000);
+    return () => clearTimeout(id);
+  }, [ready, teraBriefKey]); // eslint-disable-line
+  useEffect(() => {
+    if (!ready || !teraNative()) return undefined;
+    let stop = false;
+    const id = setTimeout(async () => {
+      const day0 = todayMid;
+      const day1 = addDays(day0, 1);
+      // A clock time on a logical day: before Fajr it is already the next date.
+      const atOf = (day, t) => {
+        const st = tStartMin(t);
+        if (st == null) return NaN;
+        const d = new Date(day); d.setHours(0, 0, 0, 0);
+        return d.getTime() + st * 60000 + (fajrMin != null && st < fajrMin ? 86400000 : 0);
+      };
+      const endOf = (day, t) => {
+        const st = tStartMin(t); const en = tEndMin(t);
+        return st == null || en == null ? NaN : atOf(day, t) + (((en - st) + 1440) % 1440) * 60000;
+      };
+      // Tomorrow may be in next week's document, which may not be loaded yet.
+      const ws1 = fmtISO(startOfWeek(day1, settings.weekStartDay));
+      let wk1 = weekDocFor(day1);
+      if (!(wk1.tasks || []).length && !weeksRef.current[ws1]) { try { wk1 = await readWeek(ws1); } catch { /* today alone, then */ } }
+      const col1 = Math.round((day1 - startOfWeek(day1, settings.weekStartDay)) / 86400000);
+      const tomorrowTasks = spansOn(fmtISO(day1), (wk1.tasks || []).filter((t) => t.day === col1));
+      const asAppt = (day) => (t) => ({ id: t.id, title: t.title, done: !!t.done, at: atOf(day, t), end: endOf(day, t) });
+      const done0 = calDone[fmtISO(day0)] || {};
+      const events = [
+        ...eventsOn(calInstances, day0).map((e) => { const key = calKey(e); return { ...e, key, done: !!done0[key] }; }),
+        ...eventsOn(calInstances, day1).map((e) => ({ ...e, key: calKey(e) })),
+      ];
+      const brief = buildBrief({
+        settings,
+        talkLang: teraLang,
+        open: todayTasks.filter((t) => !t.done).map((t) => ({ id: t.id, title: t.title, start: t.start || '', end: t.end || '' })),
+        openUntil: (() => { const d = new Date(day1); d.setHours(0, 0, 0, 0); return d.getTime() + (fajrMin != null ? fajrMin : 300) * 60000; })(),
+        appts: briefAppointments({ tasks: [...todayTasks.map(asAppt(day0)), ...tomorrowTasks.map(asAppt(day1))], events, now: Date.now() }),
+        busy: events.filter((e) => !e.allDay && Number.isFinite(e.startMs) && Number.isFinite(e.endMs)).map((e) => ({ from: e.startMs, to: e.endMs })),
+        fresh: teraFresh,
+      });
+      teraBriefInputsRef.current = { open: brief.open, appts: brief.appts, lang: brief.talkLang };
+      if (stop) return;
+      const st = await teraSync(brief);
+      if (!stop && st) setTeraStat(st);
+    }, 700);
+    return () => { stop = true; clearTimeout(id); };
+  }, [ready, teraBriefKey]); // eslint-disable-line
+
+  /* What she did from the floating face while the planner was closed (or in
+     the background): ticked a task off, pushed one back. Applied through the
+     same helpers the buttons use, so a tick still pays its points. */
+  const applyTeraCommands = async (cmds) => {
+    const names = [];
+    for (const cmd of cmds || []) {
+      const acts = commandToActions(cmd, {
+        taskOf: (id) => taskById(id),
+        dateOf: (t) => fmtISO(dateOfTask(t)),
+        addDaysISO: (iso, k) => fmtISO(addDays(parseISO(iso), k)),
+      });
+      for (const a of acts) {
+        const t = taskById(a.taskId);
+        if (!t) continue;
+        if (a.kind === 'complete_task') { if (!t.done) toggleDone(t.id); }
+        else if (a.kind === 'edit_task') mutateTask(t.id, (x) => ({ ...x, start: a.start, ...(a.end ? { end: a.end } : {}), time: '', autoSlot: null }));
+        else if (a.kind === 'move_task') await moveTaskToDate(t.id, a.date);
+        if (!names.includes(t.title)) names.push(t.title);
+      }
+    }
+    if (names.length) flash(tx(`Tera updated: ${names.join(', ')}`, `تيرا عدّلت: ${names.join('، ')}`));
+  };
+  const applyTeraCommandsRef = useRef(applyTeraCommands);
+  applyTeraCommandsRef.current = applyTeraCommands;
+  useEffect(() => {
+    if (!ready || !teraNative()) return undefined;
+    let draining = false;
+    const drain = async () => {
+      if (draining) return;
+      draining = true;
+      try { const c = await teraTakeCommands(); if (c.length) await applyTeraCommandsRef.current(c); } finally { draining = false; }
+    };
+    drain();
+    refreshTeraStatus();
+    const onShow = () => { if (document.visibilityState === 'visible') { drain(); refreshTeraStatus(); } };
+    document.addEventListener('visibilitychange', onShow);
+    const off = onTeraCommand(() => drain());
+    return () => { document.removeEventListener('visibilitychange', onShow); off(); };
+  }, [ready]); // eslint-disable-line
+
+  /* "Talk" on the floating face opens her here, with what she just said on
+     the face as the first line, and the microphone already listening. */
+  const openTeraTalk = async () => {
+    setView('tera');
+    const st = await refreshTeraStatus();
+    const line = st && st.lastLine;
+    if (line) {
+      setChatMsgs((prev) => (prev.length && prev[prev.length - 1].text === line ? prev
+        : [...prev, { role: 'assistant', text: line, lang: detectLang(line, teraLang), popup: true }]));
+    }
+    setTeraTalk(Date.now());
+  };
+  const openTeraTalkRef = useRef(openTeraTalk);
+  openTeraTalkRef.current = openTeraTalk;
+  // Her view talks about today, so opening it brings today into view.
+  useEffect(() => { if (view === 'tera') { goToday(); refreshTeraStatus(); } }, [view]); // eslint-disable-line
+
   /* Home-screen widget. Same headline as the ongoing notification, plus the
      next couple of items so the widget answers "and then what?" at a glance
      without becoming the full list the Now page deliberately refuses to be. */
@@ -3335,6 +4079,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
     const collect = async () => {
       const a = await takeWidgetAction();
       if (!stop && a === 'quick-add') { setView('now'); setQuickAdd(true); }
+      if (!stop && a === 'tera-talk') openTeraTalkRef.current();
     };
     collect();
     const onShow = () => { if (document.visibilityState === 'visible') collect(); };
@@ -3361,7 +4106,9 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
       if ((await permissionState()) !== 'granted') return; // never prompt from an effect
       if (stop) return;
       const day = todayMid;
-      await syncReminders(todayTasks
+      // Tera asks about appointments herself (with push-back buttons), so the
+      // plain "starts now" reminders stand down while she does.
+      await syncReminders(teraOwnsAppts ? [] : todayTasks
         .filter((t) => !t.done && tStartMin(t) != null && tEndMin(t) != null)
         .map((t) => {
           const at = new Date(day); at.setHours(0, 0, 0, 0); at.setMinutes(tStartMin(t));
@@ -3369,7 +4116,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         }));
     })();
     return () => { stop = true; };
-  }, [ready, reminderPlan]); // eslint-disable-line
+  }, [ready, reminderPlan, teraOwnsAppts]); // eslint-disable-line
 
   useEffect(() => {
     if (!ready) return;
@@ -3489,7 +4236,7 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
           <button className="icon pts-chip" onClick={() => setShowPoints(true)} aria-label={tx('Points', 'النقاط')} title={tx('Points', 'النقاط')}><Coins size={16} /><span>{balance}</span></button>
           <button className="icon today-jump" onClick={() => { goToday(); setView('plan'); }} aria-label={tx('Jump to today', 'انتقل إلى اليوم')} title={tx('Jump to today', 'انتقل إلى اليوم')}><Calendar size={16} /><span>{tx('Today', 'اليوم')}</span></button>
           <button className="icon lang-toggle" onClick={() => changeLang(LANG === 'ar' ? 'en' : 'ar')} aria-label={tx('Switch language', 'تبديل اللغة')} title={tx('Switch language', 'تبديل اللغة')}><Languages size={17} /><span>{LANG === 'ar' ? 'EN' : 'ع'}</span></button>
-          <button className="icon" onClick={() => setChatOpen(true)} aria-label={tx('Planning assistant', 'مساعد التخطيط')} title={tx('Planning assistant', 'مساعد التخطيط')}><Sparkles size={17} /></button>
+          <button className={`icon tera-btn ${view === 'tera' ? 'on' : ''}`} onClick={() => setView(view === 'tera' ? 'now' : 'tera')} aria-label={tx('Tera, your secretary', 'تيرا، سكرتيرتك')} title={tx('Tera', 'تيرا')}><img src="/tera.png" alt="" onError={(e) => { e.currentTarget.replaceWith(document.createTextNode('✦')); }} /></button>
           <button className="icon" onClick={() => setShowSettings(true)} aria-label={tx('Settings', 'الإعدادات')}><Settings size={18} /></button>
         </div>
       </header>
@@ -4335,83 +5082,25 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
         );
       })()}
 
-      {chatOpen && (
-        <div className="overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setChatOpen(false); }}>
-          <div className="modal chat-modal">
-            <div className="modal-head plain">
-              <strong><Sparkles size={15} /> {tx('Planning assistant', 'مساعد التخطيط')}</strong>
-              <button className="icon" onClick={() => setChatOpen(false)}><X size={18} /></button>
-            </div>
-            <div className="modal-body chat-body">
-              {chatMsgs.length === 0 && (
-                <div className="chat-empty">
-                  <p>{tx('Ask about your day, or just say what you want changed — tasks, backlog, recurring tasks, habits, prayers, projects, points, the alarm, even the settings. Every change is proposed, and nothing happens until you approve it.', 'اسأل عن يومك، أو قل ببساطة ما تريد تغييره — المهام وقائمة الانتظار والمهام المتكررة والعادات والصلوات والمشاريع والنقاط والمنبه وحتى الإعدادات. كل تغيير يُقترح فقط، ولا يحدث شيء قبل موافقتك.')}</p>
-                  <div className="chat-suggests">
-                    {[tx('What should I focus on today?', 'على ماذا أركّز اليوم؟'), tx('Am I overcommitted?', 'هل حمّلت نفسي أكثر من اللازم؟'), tx('Move everything left today to tomorrow', 'انقل ما تبقى اليوم إلى الغد'), tx('Slot my day', 'وزّع يومي')].map((sg) => (
-                      <button key={sg} className="ghost sm" onClick={() => setChatInput(sg)}>{sg}</button>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {chatMsgs.map((m, mi) => (
-                <div key={mi} className={`chat-msg ${m.role}`}>
-                  <div className="chat-bubble">{m.text}</div>
-                  {m.role === 'assistant' && (m.proposals || []).length > 0 && (
-                    <div className="chat-props">
-                      {(m.proposals || []).filter((_, i) => !(m.applied || {})[i]).length > 1 && (
-                        <button className="ghost sm chat-apply-all" onClick={() => applyAllProposals(mi)} disabled={applyBusy}>
-                          <ListChecks size={13} /> {tx('Approve all', 'وافق على الكل')} ({(m.proposals || []).filter((_, i) => !(m.applied || {})[i]).length})
-                        </button>
-                      )}
-                      {m.proposals.map((p, pi) => {
-                        const state = (m.applied || {})[pi];
-                        return (
-                          <div key={pi} className={`chat-prop ${state || ''}`}>
-                            <div className="chat-prop-main">
-                              <span className="chat-prop-desc">{describeProposal(p, proposalNames)}</span>
-                              {p.why && <span className="chat-prop-why">{p.why}</span>}
-                            </div>
-                            {state === 'done' ? <span className="chat-prop-state"><CheckCircle2 size={14} /> {tx('applied', 'طُبّق')}</span>
-                              : state === 'skip' ? <span className="chat-prop-state muted">{tx('dismissed', 'تم التجاهل')}</span>
-                                : (
-                                  <span className="chat-prop-actions">
-                                    <button className="primary sm" onClick={() => applyProposal(mi, pi)} disabled={applyBusy}>{tx('Approve', 'موافقة')}</button>
-                                    <button className="ghost sm" onClick={() => dismissProposal(mi, pi)} disabled={applyBusy}>{tx('No', 'لا')}</button>
-                                  </span>
-                                )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              ))}
-              {chatBusy && <div className="chat-msg assistant"><div className="chat-bubble thinking"><Loader2 size={14} className="spin" /> {tx('Thinking…', 'يفكّر…')}</div></div>}
-              {chatErr && <p className="hint-text" style={{ color: '#9C4221' }}>{chatErr}</p>}
-            </div>
-            <div className="modal-foot chat-foot">
-              {chatMic.available && (
-                <button
-                  className={`mic-btn ${chatMic.state}`}
-                  onClick={toggleChatMic}
-                  disabled={chatMic.state === 'transcribing' || chatBusy}
-                  style={chatMic.state === 'listening' ? { '--mic-level': chatMic.level } : undefined}
-                  aria-label={chatMic.state === 'listening' ? tx('Stop dictating', 'أوقف الإملاء') : tx('Dictate', 'إملاء')}
-                  title={chatMic.state === 'listening' ? tx('Stop dictating', 'أوقف الإملاء') : tx('Dictate', 'إملاء')}
-                >
-                  {chatMic.state === 'transcribing' ? <Loader2 size={16} className="spin" />
-                    : chatMic.state === 'listening' ? <Square size={14} />
-                      : <Mic size={17} />}
-                </button>
-              )}
-              <input className="chat-input" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-                placeholder={chatMic.state === 'listening' ? tx('Listening…', 'أستمع…') : chatMic.state === 'transcribing' ? tx('Writing it down…', 'أكتب ما قلته…') : tx('Ask, or tell it what to change…', 'اسأل، أو قل ما تريد تغييره…')}
-                aria-label={tx('Message', 'رسالة')} />
-              <button className="primary" onClick={sendChat} disabled={chatBusy || chatMic.busy || !chatInput.trim()}>{tx('Send', 'إرسال')}</button>
-            </div>
-          </div>
-        </div>
+      {view === 'tera' && (
+        <TeraView
+          t={teraSettings(settings)}
+          patchTera={(patch) => patchSettings({ tera: { ...teraSettings(settingsRef.current), ...patch } })}
+          msgs={chatMsgs} busy={chatBusy} err={chatErr} setErr={setChatErr}
+          talkLang={teraLang}
+          onSend={sendChat}
+          onUndo={undoTera}
+          onApprove={applyProposal} onDismiss={dismissProposal} onApproveAll={applyAllProposals} applyBusy={applyBusy}
+          describe={(p) => p.summary || describeProposal(p, proposalNames)}
+          activity={teraActivity}
+          native={teraNative()} status={teraStat} refreshStatus={refreshTeraStatus}
+          onTest={async (kind) => { await teraTestPopup(kind); refreshTeraStatus(); }}
+          onOpenOverlay={teraOpenOverlaySettings} onOpenExact={teraOpenExactAlarmSettings}
+          onClear={() => { setChatMsgs([]); setChatErr(''); }}
+          apiKey={settings.apiKey} broker={brokerFrom(settings)} dictationError={dictationError}
+          talkToken={teraTalk}
+          onClose={() => setView('now')}
+        />
       )}
 
       {view === 'focus' && isDesktop() && (
@@ -4542,8 +5231,10 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
 
       {/* One line, from anywhere. Sits above the nav on the side the language
           does not start from, so it never covers the first tab; hidden while
-          the lock is up, which is the one moment adding work is not the point. */}
-      {!nowLocked && !locked && !timeLocked && (
+          the lock is up, which is the one moment adding work is not the point.
+          Not on Tera's screen either: her microphone sits there, and telling
+          her is already the quickest way to add something. */}
+      {!nowLocked && !locked && !timeLocked && view !== 'tera' && (
         <button className="qa-fab" onClick={() => setQuickAdd(true)} aria-label={tx('Quick add', 'إضافة سريعة')} title={tx('Quick add', 'إضافة سريعة')}>
           <Plus size={22} />
         </button>

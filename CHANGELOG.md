@@ -9,6 +9,89 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+## [3.13] — 2026-11-14 · Tera on Claude · Desktop 1.21.0
+
+"Tera using Gemini is quite stupid… switch her to Claude and give her 100%
+control over anything the user can do by hand."
+
+- **Her brain is Claude** (Opus 5.5 by default; Sonnet 5.5 or Haiku 5.5 in her
+  settings, with low/medium/high thinking). She no longer answers with a list
+  of proposals: she calls tools, sees what each did, fixes mistakes and keeps
+  going until the job is done (`src/teraclaude.js`, the SDK's tool runner).
+  Refusal fallbacks are on, so a safety decline is retried on another model
+  instead of going silent.
+- **Every action, as a tool** — 84 of them (`src/teratools.js`), taken from an
+  inventory of every handler in the app: tasks (any field, any week, steps,
+  descriptions, order, series, clear a day), overdue, the backlog, recurring
+  tasks (repeat rules, auto-add), habits (done / two-minute / not) and
+  prayers, projects (fields, work plan, progress, entries), boards (cards,
+  columns, order), points (rewards, cashing in, penalties, reset), notebooks,
+  meetings (attended, filed, purpose), calendars, labels, settings, the alarm,
+  focus, backups and restore — plus reading tools for any day, range, search,
+  project, board, note or setting.
+- Tools **set** rather than toggle (ticking twice stays ticked), reach **any
+  week** (several app handlers only reach the week on screen), and **report**
+  what is now true. Changes run one at a time, and the whole turn shares one
+  Undo. "Just do it" off holds every change for a tap instead.
+- Out of her reach on purpose: API keys, the PIN, sync sign-in and device
+  linking, Trello/Google credentials. Deleting a day, overdue, a project,
+  points or restoring a backup needs an explicit `confirm`.
+- **Your own Anthropic key**, pasted in her settings, kept on that device only
+  (`rhythm:tera:claudeKey`, never in the synced settings). The shared key pool
+  only holds Gemini and Groq, and still does dictation.
+- **The phone no longer calls any model.** While the planner is open, Claude
+  writes a batch of pop-up lines about the actual tasks and appointments, and
+  the phone picks from them (falling back to the written lines). No key of any
+  kind is copied to the phone's native storage any more.
+- Her tone: jokes about the situation, never about you — no "finally", "did
+  you actually", "شاطر", no counting how often she asked.
+- **Funnier** (owner: "I want her personality to be more funny"): one real joke
+  in almost every reply — tasks and meetings as characters with feelings,
+  deadpan exaggeration, herself as the punchline, callbacks, Egyptian timing —
+  with worked examples in both languages, and new pop-up and fallback lines.
+  She drops the jokes when the news is bad or you sound stressed.
+- New look: an original auburn executive assistant (the earlier portraits are
+  in `docs/tera-avatars/`).
+
+## [3.12] — 2026-11-13 · Tera (first released with 3.13)
+
+The planning assistant is now **Tera (تيرا)**: a sarcastic Egyptian secretary
+you talk to, who talks back, and who turns up on her own when you go quiet.
+
+- **She talks.** Microsoft's Edge neural voices — Salma (Egyptian) for Arabic,
+  Ava for English, both changeable — spoken by the phone itself
+  (`android/.../tera/EdgeVoice.java`, a Java port of edge-tts 7.3.1 checked
+  token-for-token against the Python). Offline, the phone's own voice stands in.
+  In a browser she uses whatever voices the browser has.
+- **Hands-free.** Tap the mic once: you talk, the take ends when you go quiet,
+  she answers aloud, and listens again. Silence for a few seconds hangs up;
+  tapping while she talks cuts her off. (`useDictation` gained `autoStop`.)
+- **She just does it.** What she proposes is applied at once — deletes
+  included — with **Undo** on her message, which puts the planner back as it
+  was a moment before. "Just do it" off in her settings brings back
+  approve-first.
+- **Egyptian Arabic, mirroring you.** Speak English and she answers in English;
+  the language is decided from what you said, not left to the model.
+- **She checks on you (phone).** Nothing ticked off for two hours (and open
+  tasks left today) and her face pops up over whatever app is open, with a
+  fresh line about the actual task that has been sitting there, read aloud
+  when the ringer is on. Answers: *I did something ✓* (pick it from today's
+  list), *1 more hour*, *Talk*, ✕. Ignored, she comes back every hour. Never
+  in quiet hours (00:00–09:00 by default) or during a calendar event, and the
+  count starts again when quiet hours end.
+- **Appointments (phone).** Fifteen minutes before a timed task or calendar
+  event she asks whether you are going: *On it*, *+15 min*, *+1 hour*,
+  *Tomorrow*, *Done ✓*, *Talk*. Pushing a task moves it in the planner;
+  pushing a calendar event (which Dawam only reads) reminds you again instead.
+  The plain "starts now" reminders stand down while she does this.
+- All of it works with the app closed: an exact alarm, a floating-face
+  service, and a brief of the day the planner keeps current. What you answer on
+  the face is queued and applied the next time the planner runs, and Tera
+  stops nagging about it at once.
+- Needs "Display over other apps" for the face (asked for on her screen);
+  without it she falls back to notifications with the same buttons.
+- The old assistant overlay is gone; the button in the header is Tera.
+
 ## Desktop 1.20.1 — 2026-11-07
 
 - The data folder actually moves now. Electron creates an empty

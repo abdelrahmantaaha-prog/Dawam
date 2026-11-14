@@ -59,6 +59,32 @@
             </intent-filter>
         </receiver>
 
+        <!-- Tera, the secretary. Her face over other apps is a foreground
+             service (a window drawn over other apps belongs to a process, and
+             only a foreground service keeps it alive while it is on screen);
+             special use, because no other foreground-service type describes
+             "an assistant that appears when you have gone quiet". -->
+        <service
+            android:name=".tera.TeraHeadService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Floating assistant: shows the user's own reminders and check-ins over other apps until dismissed." />
+        </service>
+
+        <!-- Her alarm, the phone restarting, and her notification buttons.
+             Not exported: only the system's own broadcasts and her own
+             pending intents ever reach it. -->
+        <receiver
+            android:name=".tera.TeraReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -104,4 +130,19 @@
     -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+
+    <!--
+      Tera. SYSTEM_ALERT_WINDOW is the floating face over other apps — granted
+      by the person under "Display over other apps", asked for from Tera's
+      settings, never at launch. Without it she falls back to notifications.
+      The foreground-service pair keeps that face's process alive while it is
+      on screen. RECEIVE_BOOT_COMPLETED re-arms her alarm after a restart (the
+      notifications plugin declares it too; saying so here keeps Tera's needs
+      in one place).
+    -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

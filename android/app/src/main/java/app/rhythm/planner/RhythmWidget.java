@@ -26,7 +26,7 @@ public class RhythmWidget extends AppWidgetProvider {
     static final String K_UPDATED = "updatedAt";
     /* The extra the + puts on its launch intent, read once by the web layer
        through RhythmWidgetPlugin.takeAction(). */
-    static final String K_ACTION = "rhythm_action";
+    public static final String K_ACTION = "rhythm_action";
 
     /* Re-render every placed instance. Called from onUpdate (Android's own
        schedule and on add) and from the plugin the moment Now changes. */

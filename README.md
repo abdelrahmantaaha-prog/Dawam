@@ -228,6 +228,53 @@ one backup, zero configuration to get wrong. When you use these features, your
 text is sent to the provider — an opt-in exception to local-only; the rest of
 the app never touches the network.
 
+## Tera (تيرا) — the secretary
+
+The ✦ button in the header (her face, once the art is in) opens **Tera**, the
+planning assistant with a personality: a sarcastic, warm Egyptian secretary.
+She answers in casual Egyptian Arabic, or in English when you speak English,
+and her answers are spoken aloud. Tap the big mic once and it is a
+conversation: talk, go quiet, she answers, she listens again.
+
+**Her brain is Claude** (since 3.13), with your own Anthropic key pasted into
+her settings — kept on that device only, never in the synced settings. She
+works through **tools**, one for everything you can do by hand (84 of them,
+`src/teratools.js`, built on the app's own handlers in App.jsx's `teraOps`):
+she reads what she needs, makes the changes, checks the results and keeps
+going until the job is done. Keys, the PIN and sync credentials are out of
+her reach; wiping a day, the overdue list, a project or the points, and
+restoring a backup, need an explicit confirmation from her side.
+
+**She acts without asking.** What she decides to do is applied at once, and her
+message carries an **Undo** that restores the planner as it was just before.
+Turning off "Just do it" in her settings holds every change for a tap.
+
+**On the phone she checks on you**, with the app closed:
+
+- nothing ticked off for two hours while today still has open tasks → her face
+  pops up over whatever app is open, with a line about the task that has been
+  waiting, read aloud if the ringer is on; ignored, again every hour;
+- fifteen minutes before a timed task or calendar event → "going, or shall I
+  push it?", with +15 min / +1 hour / Tomorrow buttons;
+- never in quiet hours (00:00–09:00 unless changed) or during a calendar event.
+
+That half is native (`android/app/src/main/java/app/rhythm/planner/tera/`):
+the planner hands the phone a *brief* of the day whenever it changes
+(`src/tera.js` → `buildBrief`), an exact alarm wakes `TeraReceiver`, and
+`TeraHeadService` draws the face. The phone calls no model itself: while the planner is
+open, Claude writes a batch of pop-up lines about the day's actual tasks and
+appointments, and they travel in the brief — no key is copied to the phone's
+own storage. What you tap on the face is queued and applied by the planner the
+next time it runs.
+
+The voice is Microsoft's Edge read-aloud service (`EdgeVoice.java`, a port of
+the edge-tts Python package). It is unofficial; if it changes its token again
+and starts answering 403, compare `EdgeToken.java` against a newer edge-tts.
+Until then the phone's own text-to-speech speaks instead.
+
+Her face needs **Display over other apps** (her screen offers the switch);
+without it she uses notifications with the same buttons.
+
 ## Cross-device sync
 
 Optional, and off unless a deployment configures it. localStorage stays the

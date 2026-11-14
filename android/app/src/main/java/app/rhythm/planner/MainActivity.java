@@ -51,6 +51,7 @@ public class MainActivity extends BridgeActivity {
         // "not implemented".
         registerPlugin(RhythmWidgetPlugin.class);
         registerPlugin(RhythmLockPlugin.class);
+        registerPlugin(app.rhythm.planner.tera.TeraPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }
