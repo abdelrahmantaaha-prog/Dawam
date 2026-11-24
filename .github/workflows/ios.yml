@@ -13,6 +13,10 @@ name: Build iPad app
 on:
   workflow_dispatch:
   push:
+    # Both lists are needed: with `tags` alone GitHub ignores every branch
+    # push, whatever it touches. `paths` narrows the branch pushes only — a
+    # tag push is never checked against it.
+    branches: ['**']
     tags: ['v*']
     paths:
       - 'ios/**'
