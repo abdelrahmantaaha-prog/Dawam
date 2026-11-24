@@ -9,7 +9,7 @@ mkdirSync('public', { recursive: true });
 const BG = [0x3e, 0x8a, 0x6c]; // verdigris
 const FG = [0xf8, 0xfc, 0xf9]; // off-white
 
-function makeIcon(size, { pad = 0, rounded = true } = {}) {
+function makeIcon(size, { pad = 0, rounded = true, canvas = null } = {}) {
   const png = new PNG({ width: size, height: size });
   const s = size;
   const inset = Math.round(s * pad);          // maskable icons need safe-zone padding
@@ -40,9 +40,11 @@ function makeIcon(size, { pad = 0, rounded = true } = {}) {
   for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
     const i = (s * y + x) << 2;
     // maskable variant fills the whole square with BG (no transparency), others keep rounded alpha
-    const inside = pad > 0 ? true : inRoundedBox(x + 0.5, y + 0.5);
+    // `canvas` (the iOS launch image) keeps the rounded mark and paints everything around it
+    const inBox = inRoundedBox(x + 0.5, y + 0.5);
+    const inside = canvas || pad > 0 ? true : inBox;
     const fg = inSun(x + 0.5, y + 0.5) || inBar(x + 0.5, y + 0.5);
-    const c = fg ? FG : BG;
+    const c = canvas && !inBox ? canvas : fg ? FG : BG;
     png.data[i] = c[0]; png.data[i + 1] = c[1]; png.data[i + 2] = c[2];
     png.data[i + 3] = inside ? 255 : 0;
   }
@@ -109,4 +111,27 @@ try {
   console.log('android launcher icons written to', ANDROID_RES);
 } catch (e) {
   console.log('skipped android icons (no android/ project):', e.message);
+}
+
+/* ---- iOS app icon and launch image ----------------------------------
+   Same story as Android: without this the iPad app carries Capacitor's stock
+   icon and opens on Capacitor's logo. iOS wants ONE 1024px icon, square and
+   opaque (it cuts the corners itself; an alpha channel is refused), and the
+   launch screen (LaunchScreen.storyboard) centre-crops one square image to
+   whatever shape the screen is, so the mark sits small in the middle of the
+   app's own paper colour with nothing near the edges to lose. */
+const IOS_ASSETS = 'ios/App/App/Assets.xcassets';
+const PAPER = [0xf4, 0xfa, 0xf6]; // --panel, the colour the app opens on
+
+try {
+  // colorType 2 = RGB with no alpha channel at all, not merely alpha at 255
+  const opaque = (buf) => PNG.sync.write(PNG.sync.read(buf), { colorType: 2 });
+  writeFileSync(`${IOS_ASSETS}/AppIcon.appiconset/AppIcon-512@2x.png`, opaque(makeIcon(1024, { rounded: false })));
+  const splash = opaque(makeIcon(2732, { pad: 0.445, canvas: PAPER }));
+  for (const name of ['splash-2732x2732.png', 'splash-2732x2732-1.png', 'splash-2732x2732-2.png']) {
+    writeFileSync(`${IOS_ASSETS}/Splash.imageset/${name}`, splash);
+  }
+  console.log('ios icon and launch image written to', IOS_ASSETS);
+} catch (e) {
+  console.log('skipped ios assets (no ios/ project):', e.message);
 }

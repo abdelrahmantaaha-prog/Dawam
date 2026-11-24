@@ -529,6 +529,53 @@ Two things worth knowing:
   the background, so it refreshes when the app is open or resumed. Making it
   update live while closed needs a native foreground service.
 
+## iPad app (Capacitor) — iPadOS 15 and up
+
+The same planner as the APK, wrapped for iOS (`ios/`). The floor is **iPadOS
+15** on purpose: that is as far as an iPad Air 2 goes, and it is the iPad this
+build was made for. It also installs on an iPhone, where it is the phone
+layout.
+
+**Building it.** An iOS app can only be built on a Mac, so GitHub builds it:
+**Actions → Build iPad app** (`.github/workflows/ios.yml`). It runs when
+`ios/` changes, on a version tag, and by hand — not on every push, because Mac
+minutes cost ten times Linux ones on a private repository. When the planner
+has moved and the iPad should have it, run the workflow by hand. Then:
+
+```bash
+npm run ios:fetch     # newest successful build of this branch -> dist-ios/Dawam.ipa
+```
+
+**Installing it.** The `.ipa` is unsigned; [AltStore](https://altstore.io)
+signs it with your own Apple ID as it installs it (My Apps → **+** → the
+file). With a free Apple ID the signature lasts seven days — AltStore renews
+it when the iPad and the PC running AltServer are on the same Wi-Fi — and
+three sideloaded apps can be installed at a time, AltStore itself among them.
+
+**What it has, and what it does not.**
+
+- Reminders and the wake alarm are real iOS notifications: they fire with the
+  app closed. iOS holds at most 64 pending notifications per app, so on a day
+  with more timed tasks than that the soonest sixty are kept.
+- Backups go through the share sheet (Files, AirDrop, Mail); automatic
+  backups go to the app's own storage, as on Android.
+- Sync works as in the APK: Google will not sign in inside an app, so link
+  the iPad with a code from a device that is signed in (Settings → Sync).
+- No ongoing "Now" card (iOS has no ongoing notifications), no home-screen
+  widget, no Bawwab file, no Tera pop-ups — those are Android's. `src/platform.js`
+  is where the two shells are told apart.
+- The Now lock covers the app and nothing more. iOS has a kiosk mode (Guided
+  Access), but an app may only start it on a supervised device. To make the
+  lock hold, start Guided Access yourself: turn it on once in Settings →
+  Accessibility, then triple-click Home.
+
+**Safari 15.** The app runs in the iPad's own WebKit, which on iPadOS 15 is
+Safari 15's. Two things in the web code exist for it: `color-mix()` has plain
+fallbacks at the end of `src/styles.css` (without them a tinted card loses its
+whole background, not just the tint), and everything pinned to the top edge
+keeps clear of the status bar with `env(safe-area-inset-top)`. Regenerate the
+icon and launch image with `npm run icons`.
+
 ## Slotting the day
 
 **Plan → "Slot the day"** gives every remaining task a strict start–end time in

@@ -8,6 +8,7 @@ import { readLedger, balanceOf, award, revoke, spend, penalise, wipe } from './p
 import { backupKind, backupWhere, dailyName, listBackups, openBackupFolder, preRestoreName, readBackup, writeBackup } from './autobackup.js';
 import { takeWidgetAction, updateWidget } from './widget.js';
 import { writeNowFile } from './nowfile.js';
+import { matchStatusBar } from './statusbar.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence, scheduleWakeAlarm, cancelWakeAlarm, pendingWakeAlarm } from './notify.js';
 import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, describeProposal, parseAssistantReply, parseEstimates, callAssistant, seriesDates, validateProposal } from './assistant.js';
 import { useDictation } from './dictation.js';
@@ -2612,6 +2613,8 @@ Existing tasks this day (for add_subtask/add_note): ${existing || '(none)'}`;
   const isNight = curMin >= maghribMin || curMin < sunriseMin;
   const theme = settings.theme || (settings.autoDark === false ? 'light' : 'auto');
   const darkOn = theme === 'dark' || (theme === 'auto' && isNight);
+  // The iPad's clock is drawn over the sky; tell iOS which colour it needs.
+  useEffect(() => { matchStatusBar(darkOn); }, [darkOn]);
   setTime24(settings.time24 === true);
   setLang(settings.lang === 'ar' ? 'ar' : 'en');
   const topLuma = 0.299 * sky.top[0] + 0.587 * sky.top[1] + 0.114 * sky.top[2];

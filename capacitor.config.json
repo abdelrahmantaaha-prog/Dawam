@@ -5,6 +5,10 @@
   "android": {
     "allowMixedContent": false
   },
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#F4FAF6"
+  },
   "plugins": {
     "LocalNotifications": {
       "iconColor": "#3E8A6C"

@@ -1,0 +1,97 @@
+name: Build iPad app
+
+# Dawam for the iPad (ios/): built on GitHub's Mac, because Xcode exists nowhere
+# else, and left UNSIGNED — AltStore signs it with your own Apple ID when it
+# installs it. Nothing secret goes into the build, so unlike a signed release
+# there is no keystore or certificate to keep here.
+#
+# Mac minutes are billed at ten times the Linux rate on a private repository,
+# so this does NOT run on every push to main the way the APK does. It runs when
+# the iOS project or this file changes, on a version tag, and by hand
+# (Actions → Build iPad app → Run workflow) when the planner itself has moved
+# and the iPad should have it.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios.yml'
+
+permissions:
+  contents: write   # needed only by the release step on tags
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Fail fast on logic regressions before spending Mac minutes on Xcode.
+      - name: Unit tests
+        run: npm test
+
+      # Vite build first: `cap sync` copies dist/ into the app, and dist/ is
+      # gitignored so it never exists at checkout time.
+      - name: Build web assets
+        run: npm run build
+
+      # Copies dist/ and capacitor.config.json into ios/App/App, rewrites the
+      # plugin list in the Podfile and runs `pod install`, which is also what
+      # creates App.xcworkspace — none of that is in git.
+      - name: Capacitor sync
+        run: npx cap sync ios
+
+      # Unsigned on purpose. iPadOS 15 is the floor (ios/App/Podfile): it is as
+      # far as an iPad Air 2 goes.
+      - name: Build (unsigned)
+        working-directory: ios/App
+        run: |
+          set -o pipefail
+          xcodebuild -version
+          xcodebuild -workspace App.xcworkspace -scheme App -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee xcodebuild.log | tail -60
+
+      # The tail above can end before the line that matters.
+      - name: What went wrong
+        if: failure()
+        working-directory: ios/App
+        run: |
+          test -f xcodebuild.log || exit 0
+          grep -n -E "error:|fatal error|\*\* BUILD FAILED" xcodebuild.log | head -60 || true
+
+      # An .ipa is a zip with the .app under Payload/.
+      - name: Package the .ipa
+        working-directory: ios/App
+        run: |
+          app=build/Build/Products/Release-iphoneos/App.app
+          test -d "$app"
+          rm -rf Payload && mkdir Payload
+          cp -R "$app" Payload/
+          zip -qry "$GITHUB_WORKSPACE/Dawam.ipa" Payload
+          ls -la "$GITHUB_WORKSPACE/Dawam.ipa"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' -c 'Print :MinimumOSVersion' "$app/Info.plist"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dawam-ipa
+          path: Dawam.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Attach .ipa to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Dawam.ipa

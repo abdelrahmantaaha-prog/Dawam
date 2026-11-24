@@ -1971,3 +1971,49 @@ button.bubble-tile:hover{border-color:var(--verdigris);background:var(--soft)}
   .tera-row-ctl{margin-inline-start:auto}
 }
 @media (prefers-reduced-motion:reduce){ .tera-face.talking{animation:none} }
+
+/* ================================================================== */
+/* The iPad shell: clear of the status bar.
+   The iOS app draws the page under the status bar (viewport-fit=cover, as the
+   bottom nav already assumes for the home indicator). Everything pinned to the
+   top edge moves down by its height. In a browser and in the Android app the
+   inset is 0 and none of this changes anything. */
+:root{--sat:env(safe-area-inset-top, 0px)}
+.rhythm{padding-top:calc(14px + var(--sat))}
+.hdr{top:calc(8px + var(--sat))}
+.plan-side{top:calc(12px + var(--sat))}
+.kb-head,.calv-head{top:calc(var(--hdr-h) + 8px + var(--sat))}
+.kb-col{height:calc(100dvh - var(--hdr-h) - 236px - var(--sat))}
+.note-sheet{padding-top:var(--sat)}
+@media (min-width:768px){ .note-sheet{padding-top:0} }
+@media (max-width:640px){
+  .kb-head{top:calc(var(--hdr-h) + 4px + var(--sat))}
+  .kb-col{height:calc(100dvh - var(--hdr-h) - 250px - var(--sat))}
+}
+
+/* ================================================================== */
+/* Without color-mix (Safari before 16.2 — an iPad Air 2 stops at iPadOS 15).
+   A declaration that mixes a var() is not skipped where color-mix is unknown:
+   it is accepted, fails when the variable is filled in, and takes the whole
+   property down to its initial value — no background, no border. So each one
+   needs a plain answer here, not just an earlier line to fall back on. What is
+   lost is the tint, never the element. */
+@supports not (color: color-mix(in srgb, red 50%, transparent)){
+  .prj-tag{border:1px solid var(--line)}
+  .habit-card{border-inline-start:3px solid var(--hcolor,var(--line))}
+  .habit-card.glow-2,.habit-card.glow-3,.habit-card.glow-4,.habit-card.glow-5,.habit-card.glow-6,
+  .habit-card.glow-7,.rhythm.dark .habit-card.glow-7{background:var(--panel)}
+  .habit-pill.on{background:var(--panel)}
+  .habit-pill.on.glow-3,.habit-pill.on.glow-4,.habit-pill.on.glow-5,.habit-pill.on.glow-6,
+  .habit-pill.on.glow-7{box-shadow:0 1px 10px -3px rgba(23,48,39,.28)}
+  .habit-line{border-inline-start:3px solid var(--hcolor,var(--verdigris))}
+  .habit-line.on{background:var(--soft)}
+  .habit-line.glow-4,.habit-line.glow-5{border-inline-start-color:var(--hcolor,var(--verdigris))}
+  .habit-prize.ready{background:var(--soft)}
+  /* The tally's heat: the project's colour at --heat opacity, as a layer
+     behind the number instead of a mixed background. */
+  .tally-grid tbody td{position:relative;isolation:isolate;background:var(--surface)}
+  .tally-grid tbody td::before{content:"";position:absolute;inset:0;z-index:-1;border-radius:inherit;
+    background:var(--pcolor,var(--verdigris));opacity:var(--heat,0);pointer-events:none}
+  .tally-grid .tally-sum::before,.tally-grid .tally-proj::before{content:none}
+}

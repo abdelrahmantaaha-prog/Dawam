@@ -9,6 +9,35 @@ and this project uses a simple incrementing version number (0.1 per release).
 
 ## [Unreleased]
 
+### Added — Dawam on the iPad
+
+"Create an iPad Air 2 version of Dawam."
+
+- **An iOS app** (`ios/`, Capacitor), with **iPadOS 15** as its floor: as far
+  as an iPad Air 2 goes. GitHub builds it unsigned on a Mac
+  (`.github/workflows/ios.yml`: when `ios/` changes, on a tag, or by hand —
+  not on every push, Mac minutes being ten times Linux ones);
+  `npm run ios:fetch` brings the `.ipa` down and AltStore installs it.
+- **Reminders and the wake alarm** are iOS notifications there and fire with
+  the app closed. iOS keeps at most 64 pending per app, so a day with more
+  keeps its soonest sixty.
+- **Native is no longer taken to mean Android** (`src/platform.js`). The lock
+  task mode, the widget, Bawwab's `now.json` and the ongoing Now card each
+  asked only "is this the app?", and on an iPad would have found a plugin with
+  nothing behind it and called themselves supported. They are Android's; the
+  iPad has none of them, and Settings says so in its own words.
+- **The clock stays readable**: the page is drawn under the iPad's status bar,
+  and the app tells iOS whether its theme is dark (`src/statusbar.js`) —
+  otherwise the clock follows the system's mode, not the planner's nightfall.
+
+### Fixed
+
+- **Tinted cards on Safari before 16.2** (any iPad on iPadOS 15). `color-mix()`
+  with a variable inside is not skipped where it is unknown: the declaration
+  is accepted, fails when the variable is filled in, and takes the whole
+  property with it — habit cards with a streak lost their background, the
+  focus tally its heat. Each one now has a plain fallback.
+
 ## [3.13] — 2026-11-14 · Tera on Claude · Desktop 1.21.0
 
 "Tera using Gemini is quite stupid… switch her to Claude and give her 100%

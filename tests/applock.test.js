@@ -59,6 +59,7 @@ describe('on a phone', () => {
     globalThis.window = {
       Capacitor: {
         isNativePlatform: () => true,
+        getPlatform: () => 'android',
         Plugins: { RhythmLock: { start: async () => { throw new Error('unsupported'); }, stop: async () => { throw new Error('nope'); }, status: async () => { throw new Error('nope'); } } },
       },
     };
@@ -66,5 +67,21 @@ describe('on a phone', () => {
     expect(await holdDevice()).toMatchObject({ supported: true, held: false });
     expect(await releaseDevice()).toMatchObject({ supported: true, held: false });
     expect(await lockStatus()).toMatchObject({ supported: true, held: false });
+  });
+});
+
+/* Native is not the same as Android. The iPad shell has a bridge too, and no
+   RhythmLock behind it: registerPlugin would hand back a proxy whose every
+   method is refused, and the Now page would say the device can be held. */
+describe('on an iPad', () => {
+  it('reports no support and calls nothing', async () => {
+    nativeShell();
+    globalThis.window.Capacitor.getPlatform = () => 'ios';
+    const { lockSupported, holdDevice, releaseDevice, lockStatus } = await load();
+    expect(lockSupported()).toBe(false);
+    expect(await holdDevice()).toMatchObject({ supported: false, held: false });
+    expect(await releaseDevice()).toMatchObject({ supported: false, held: false });
+    expect(await lockStatus()).toMatchObject({ supported: false, held: false });
+    expect(calls).toEqual([]);
   });
 });

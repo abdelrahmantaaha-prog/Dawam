@@ -18,7 +18,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: () => false, getPlatform: () => 'web' } }));
 vi.mock('@capacitor/local-notifications', () => ({ LocalNotifications: {} }));
 
-import { permissionState, pendingCount, isNative } from '../src/notify.js';
+import { permissionState, pendingCount, isNative, setOngoing, syncReminders, testNotification } from '../src/notify.js';
 
 /* Mimics registerPlugin: known methods work; every OTHER property — `then`
    included — returns an invoker that never calls the callbacks it was given. */
@@ -81,5 +81,51 @@ describe('notify — plugin proxy never passes through promise machinery', () =>
     await expect(isNative()).resolves.toBe(false);
     await expect(permissionState()).resolves.toBe('unsupported');
     await expect(pendingCount()).resolves.toBe(null);
+  });
+});
+
+/* The iPad shell runs the same plugin, and two things about iOS would turn a
+   straight reuse into a nuisance or a silent loss. */
+describe('notify — on an iPad', () => {
+  const iosWindow = (impl) => {
+    const w = nativeWindow(impl);
+    w.Capacitor.getPlatform = () => 'ios';
+    return w;
+  };
+
+  it('posts no ongoing card: iOS would show it as a banner on every resume', async () => {
+    const posted = [];
+    globalThis.window = iosWindow({
+      schedule: (o) => { posted.push(o); return Promise.resolve({}); },
+      cancel: (o) => { posted.push(o); return Promise.resolve(); },
+    });
+    await setOngoing({ title: 'Dhuhr prayer', body: 'Happening now' });
+    await setOngoing(null);
+    expect(posted).toEqual([]);
+  });
+
+  it('asks for no channels: iOS has none', async () => {
+    const asked = [];
+    globalThis.window = iosWindow({
+      checkPermissions: () => Promise.resolve({ display: 'granted' }),
+      createChannel: (c) => { asked.push(c.id); return Promise.reject(new Error('not implemented on ios')); },
+      schedule: () => Promise.resolve({}),
+    });
+    await expect(testNotification()).resolves.toBe('sent');
+    expect(asked).toEqual([]);
+  });
+
+  it('keeps the soonest reminders when a day has more than iOS will hold', async () => {
+    let scheduled = [];
+    globalThis.window = iosWindow({
+      getPending: () => Promise.resolve({ notifications: [] }),
+      schedule: (o) => { scheduled = o.notifications; return Promise.resolve({}); },
+    });
+    const base = Date.now() + 60_000;
+    // handed over latest-first, so "the first sixty" would be the wrong sixty
+    const items = Array.from({ length: 80 }, (_, i) => ({ id: `t${i}`, title: `Task ${i}`, at: new Date(base + (79 - i) * 60_000) }));
+    await syncReminders(items);
+    expect(scheduled).toHaveLength(60);
+    expect(Math.max(...scheduled.map((n) => n.schedule.at.getTime()))).toBe(base + 59 * 60_000);
   });
 });

@@ -15,22 +15,17 @@
    pass through promise machinery it did not create. Filesystem is a normal
    async plugin so awaiting it is fine, but the platform probe stays synchronous
    for the same reason it is in widget.js. */
-import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
+import { onAndroid } from './platform.js';
 
 const FILE = 'now.json';
 // Still 'Rhythm' after the rename to Dawam: Bawwab was pointed at this exact
 // folder once, through the system picker, and has no way to follow a move.
 const FOLDER = 'Rhythm';
 
-function nativeNow() {
-  try {
-    const g = typeof window !== 'undefined' ? window.Capacitor : null;
-    if (g && typeof g.isNativePlatform === 'function') return g.isNativePlatform();
-    if (g && typeof g.getPlatform === 'function') return g.getPlatform() !== 'web';
-    return Capacitor.isNativePlatform();
-  } catch { return false; }
-}
+// Android, not "native": Bawwab is an Android app, and on an iPad nothing
+// reads the file.
+const nativeNow = () => onAndroid();
 
 let last = '';
 

@@ -11,18 +11,13 @@
    promise machinery. Awaiting it makes the engine probe `.then`, the proxy
    answers with a native invoker, and the promise never settles. get() is
    synchronous by design. */
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { registerPlugin } from '@capacitor/core';
+import { onAndroid } from './platform.js';
 
 const RhythmWidget = registerPlugin('RhythmWidget');
 
-function nativeNow() {
-  try {
-    const g = typeof window !== 'undefined' ? window.Capacitor : null;
-    if (g && typeof g.isNativePlatform === 'function') return g.isNativePlatform();
-    if (g && typeof g.getPlatform === 'function') return g.getPlatform() !== 'web';
-    return Capacitor.isNativePlatform();
-  } catch { return false; }
-}
+// Android, not "native": the iPad build has no widget and no such plugin.
+const nativeNow = () => onAndroid();
 
 /* Synchronous — see the iron rule above. */
 function get() {

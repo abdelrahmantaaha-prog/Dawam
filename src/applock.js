@@ -29,20 +29,18 @@
    lookup makes the engine probe `.then`, the proxy answers with a native
    invoker, and the promise never settles. Finding the plugin is synchronous;
    only its methods are awaited. */
-import { Capacitor, registerPlugin } from '@capacitor/core';
+import { registerPlugin } from '@capacitor/core';
+import { onAndroid } from './platform.js';
 
 const RhythmLock = registerPlugin('RhythmLock');
 
 const OUT = { mode: 'none', held: false, escapable: true, supported: false };
 
-function nativeNow() {
-  try {
-    const g = typeof window !== 'undefined' ? window.Capacitor : null;
-    if (g && typeof g.isNativePlatform === 'function') return g.isNativePlatform();
-    if (g && typeof g.getPlatform === 'function') return g.getPlatform() !== 'web';
-    return Capacitor.isNativePlatform();
-  } catch { return false; }
-}
+/* Android, not "native": the iPad build has no such plugin. iOS has a kiosk
+   mode of its own (Guided Access), but an app may only start it on a
+   supervised device, so on an iPad the Now lock is the app's own overlay and
+   nothing more — as it is in a browser. */
+const nativeNow = () => onAndroid();
 
 /* Synchronous — see the iron rule above. */
 function get() {

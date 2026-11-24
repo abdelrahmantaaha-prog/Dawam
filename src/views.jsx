@@ -888,7 +888,7 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                     way in there, so lead with it rather than offering a door
                     that is painted on. */}
                 {sync.inAppShell ? (
-                  <p className="hint-text" style={{ marginTop: 10 }}>{tx('Google sign-in cannot run inside the Android app — Google refuses embedded browsers. Link this phone with a code instead, from a device where you are already signed in.', 'لا يمكن تشغيل تسجيل دخول جوجل داخل تطبيق أندرويد — ترفض جوجل المتصفحات المدمجة. اربط هذا الهاتف برمز من جهاز سجّلت الدخول عليه.')}</p>
+                  <p className="hint-text" style={{ marginTop: 10 }}>{tx('Google sign-in cannot run inside the app — Google refuses embedded browsers. Link this device with a code instead, from a device where you are already signed in.', 'لا يمكن تشغيل تسجيل دخول جوجل داخل التطبيق — ترفض جوجل المتصفحات المدمجة. اربط هذا الجهاز برمز من جهاز سجّلت الدخول عليه.')}</p>
                 ) : (<>
                   <div className="io-actions" style={{ marginTop: 10 }}>
                     <button className="primary" onClick={sync.signIn}><KeyRound size={14} /> {tx('Continue with Google', 'المتابعة بحساب Google')}</button>
@@ -896,7 +896,7 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                   <p className="hint-text" style={{ marginTop: 8 }}>{tx('Staying signed out keeps Dawam exactly as it is: local-only.', 'البقاء دون تسجيل دخول يُبقي التطبيق كما هو: محلي بالكامل.')}</p>
                 </>)}
                 <div className="sect-h" style={{ marginTop: 16 }}><KeyRound size={13} /> {sync.inAppShell ? tx('Link with a code', 'اربط برمز') : tx('Or link with a code', 'أو اربط برمز')}</div>
-                <p className="hint-text" style={{ marginTop: 0 }}>{tx('On a device where you are already signed in, open Settings → Sync → "Code for another device" and paste it here. Made for the Android app, where Google sign-in cannot run.', 'من جهاز سجّلت الدخول عليه، افتح الإعدادات ← المزامنة ← «رمز لجهاز آخر» والصقه هنا. مصمم لتطبيق أندرويد حيث لا يعمل تسجيل دخول جوجل.')}</p>
+                <p className="hint-text" style={{ marginTop: 0 }}>{tx('On a device where you are already signed in, open Settings → Sync → "Code for another device" and paste it here. Made for the Android and iPad apps, where Google sign-in cannot run.', 'من جهاز سجّلت الدخول عليه، افتح الإعدادات ← المزامنة ← «رمز لجهاز آخر» والصقه هنا. مصمم لتطبيقَي أندرويد وآيباد حيث لا يعمل تسجيل دخول جوجل.')}</p>
                 <div className="cal-add">
                   <input value={linkCode} onChange={(e) => { setLinkCode(e.target.value); setLinkMsg(''); }} placeholder="dt1.…" aria-label={tx('Link code', 'رمز الربط')} />
                   <button className="primary sm" disabled={!linkCode.trim()} onClick={async () => {
@@ -920,7 +920,7 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                 <p className="hint-text" style={{ marginTop: 6 }}>{tx('Stopping deletes the cloud copy only — this device keeps everything.', 'الإيقاف يحذف النسخة السحابية فقط — يحتفظ هذا الجهاز بكل شيء.')}</p>
                 {!sync.user.linked && (<>
                   <div className="sect-h" style={{ marginTop: 16 }}><KeyRound size={13} /> {tx('Code for another device', 'رمز لجهاز آخر')}</div>
-                  <p className="hint-text" style={{ marginTop: 0 }}>{tx('For the Android app: generate a code here, paste it there under Settings → Sync. It works like a password for your planner data — share it with no one.', 'لتطبيق أندرويد: أنشئ رمزًا هنا والصقه هناك في الإعدادات ← المزامنة. يعمل كلمة سر لبيانات مخططك — لا تشاركه مع أحد.')}</p>
+                  <p className="hint-text" style={{ marginTop: 0 }}>{tx('For the Android or iPad app: generate a code here, paste it there under Settings → Sync. It works like a password for your planner data — share it with no one.', 'لتطبيق أندرويد أو آيباد: أنشئ رمزًا هنا والصقه هناك في الإعدادات ← المزامنة. يعمل كلمة سر لبيانات مخططك — لا تشاركه مع أحد.')}</p>
                   {phoneCode ? (
                     <div className="vault-row open">
                       <code className="vault-value" style={{ overflowWrap: 'anywhere' }}>{phoneCode}</code>
@@ -941,14 +941,20 @@ function SettingsPanel({ settings, onChange, templates, onAddTemplate, onUpdTemp
                   from. It costs one dull line in the browser and is the only
                   way to see what the app actually believes on a device. */}
               {notify && (<>
-                <div className="sect-h" style={{ marginTop: 20 }}><Clock size={13} /> {tx('Android reminders', 'تنبيهات أندرويد')}</div>
-                <p className="hint-text" style={{ marginTop: 0 }}>{tx('Get a notification when a timed task’s window opens, plus an ongoing card in the shade showing whatever Now is pointing at. Only in the Android app — the browser version is unaffected.', 'احصل على تنبيه عند بدء وقت مهمة موقّتة، بالإضافة إلى بطاقة دائمة في شريط الإشعارات تعرض ما تشير إليه صفحة الآن. في تطبيق أندرويد فقط — نسخة المتصفح لا تتأثر.')}</p>
+                {/* The iPad app has the reminders and not the card: iOS has no
+                    ongoing notifications (src/notify.js). */}
+                <div className="sect-h" style={{ marginTop: 20 }}><Clock size={13} /> {notify.platform === 'ios' ? tx('Reminders', 'التنبيهات') : tx('Android reminders', 'تنبيهات أندرويد')}</div>
+                <p className="hint-text" style={{ marginTop: 0 }}>{notify.platform === 'ios'
+                  ? tx('Get a notification when a timed task’s window opens, even with the app closed.', 'احصل على تنبيه عند بدء وقت مهمة موقّتة، حتى والتطبيق مغلق.')
+                  : tx('Get a notification when a timed task’s window opens, plus an ongoing card in the shade showing whatever Now is pointing at. Only in the Android app (the iPad app has the reminders, not the card) — the browser version is unaffected.', 'احصل على تنبيه عند بدء وقت مهمة موقّتة، بالإضافة إلى بطاقة دائمة في شريط الإشعارات تعرض ما تشير إليه صفحة الآن. في تطبيق أندرويد فقط (تطبيق آيباد فيه التنبيهات دون البطاقة) — نسخة المتصفح لا تتأثر.')}</p>
                 {!notify.supported ? (
-                  <p className="hint-text">{tx('Not running as the Android app — reminders are only available there.', 'لا يعمل كتطبيق أندرويد — التنبيهات متاحة هناك فقط.')}</p>
+                  <p className="hint-text">{tx('Not running as the Android or iPad app — reminders are only available there.', 'لا يعمل كتطبيق أندرويد أو آيباد — التنبيهات متاحة هناك فقط.')}</p>
                 ) : notify.state === 'granted' ? (
                   <p className="hint-text" style={{ color: 'var(--verdigris)', fontWeight: 700 }}><CheckCircle2 size={12} /> {tx('Reminders are on.', 'التنبيهات مفعّلة.')}</p>
                 ) : notify.state === 'denied' ? (
-                  <p className="hint-text vault-warn"><AlertCircle size={12} /> {tx('Blocked — turn notifications on for Dawam in Android settings.', 'محظورة — فعّل الإشعارات للتطبيق من إعدادات أندرويد.')}</p>
+                  <p className="hint-text vault-warn"><AlertCircle size={12} /> {notify.platform === 'ios'
+                    ? tx('Blocked — turn notifications on for Dawam in the iPad’s Settings → Notifications.', 'محظورة — فعّل الإشعارات للتطبيق من إعدادات الآيباد ← الإشعارات.')
+                    : tx('Blocked — turn notifications on for Dawam in Android settings.', 'محظورة — فعّل الإشعارات للتطبيق من إعدادات أندرويد.')}</p>
                 ) : (
                   <button className="primary" onClick={onEnableNotify}><Clock size={14} /> {tx('Enable reminders', 'تفعيل التنبيهات')}</button>
                 )}

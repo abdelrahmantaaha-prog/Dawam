@@ -13,6 +13,7 @@
     "android:open": "npm run android:sync && cap open android",
     "android:apk": "npm run android:sync && cd android && gradlew.bat assembleDebug",
     "android:remote": "npm run android:sync && node scripts/remote-config.mjs",
+    "ios:fetch": "node scripts/fetch-ipa.mjs",
     "desktop:build": "node scripts/build-desktop.mjs",
     "desktop": "npm run desktop:build && npm --prefix desktop start",
     "desktop:dev": "npm --prefix desktop run dev",
@@ -28,6 +29,7 @@
     "@capacitor/filesystem": "^6.0.4",
     "@capacitor/local-notifications": "^6.1.3",
     "@capacitor/share": "^6.0.4",
+    "@capacitor/status-bar": "^6.0.3",
     "@neondatabase/serverless": "^1.1.0",
     "express": "^4.22.2",
     "lucide-react": "0.383.0",
@@ -37,6 +39,7 @@
   "devDependencies": {
     "@capacitor/android": "^6.2.1",
     "@capacitor/cli": "^6.2.1",
+    "@capacitor/ios": "^6.2.3",
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^25.0.1",
     "pngjs": "^7.0.0",

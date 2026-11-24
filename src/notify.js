@@ -1,6 +1,10 @@
 /* ------------------------------------------------------------------ */
 /*  Android notifications (Capacitor local notifications).             */
 /*                                                                      */
+/*  The iPad build uses the same plugin for job 1 and the wake alarm:   */
+/*  iOS holds the scheduled notifications itself and fires them with    */
+/*  the app closed. Job 2 is Android's alone — see setOngoing().        */
+/*                                                                      */
 /*  Two jobs:                                                           */
 /*    1. Reminders that fire when a timed task's window opens. These    */
 /*       are real Android alarms — they fire with the app closed, with  */
@@ -38,6 +42,14 @@ const CH_ALARM = 'rhythm-alarm-v1';
    isNative() still gates every call, so nothing here ever runs in a browser. */
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { onIOS } from './platform.js';
+
+/* iOS keeps at most 64 pending local notifications per app and silently drops
+   the rest — which ones is not promised. A day rarely has that many timed
+   tasks, but the day that does should lose its latest reminders, not an
+   arbitrary handful: the soonest are kept, with room left for the wake alarm
+   and the test. */
+const IOS_PENDING_LIMIT = 60;
 
 /* Are we inside the Android shell? False in any browser, including an
    installed PWA — which is exactly what keeps the web build untouched. */
@@ -125,6 +137,9 @@ export async function permissionState() {
 let channelsReady = false;
 async function ensureChannels(ln) {
   if (channelsReady) return;
+  // iOS has no channels; asking would only be three refused bridge calls
+  // before every post.
+  if (onIOS()) { channelsReady = true; return; }
   try {
     // 4 = IMPORTANCE_HIGH: reminders must cut through.
     await ln.createChannel({ id: CH_REMIND, name: 'Task reminders', importance: 4, visibility: 1 });
@@ -158,7 +173,7 @@ export async function ensurePermission() {
    the scheduling logic. Returns a short string describing what happened. */
 export async function testNotification() {
   const ln = get();
-  if (!ln) return 'not the Android app';
+  if (!ln) return 'not the app';
   const state = (await ln.checkPermissions()).display;
   if (state !== 'granted') return `permission is "${state}"`;
   await ensureChannels(ln);
@@ -180,8 +195,11 @@ export async function syncReminders(items) {
     if (stale.length) await ln.cancel({ notifications: stale.map((n) => ({ id: n.id })) });
 
     const now = Date.now();
-    const due = items
-      .filter((it) => it.at instanceof Date && it.at.getTime() > now + 1000)
+    let upcoming = items.filter((it) => it.at instanceof Date && it.at.getTime() > now + 1000);
+    if (onIOS() && upcoming.length > IOS_PENDING_LIMIT) {
+      upcoming = upcoming.slice().sort((a, b) => a.at - b.at).slice(0, IOS_PENDING_LIMIT);
+    }
+    const due = upcoming
       .map((it) => ({
         id: idFor(it.id),
         title: it.title,
@@ -244,7 +262,10 @@ export function platformInfo() {
     // androidBridge is the object Capacitor's WebView injects natively. Plain
     // `window.Capacitor` exists on the web too, so it proves nothing; this is
     // the signal that says whether we're genuinely inside the Android shell.
-    const hasBridge = typeof window !== 'undefined' && !!window.androidBridge;
+    // On iOS the bridge is a WebKit message handler of the same name.
+    const w = typeof window !== 'undefined' ? window : null;
+    const hasBridge = !!w && (!!w.androidBridge
+      || !!(w.webkit && w.webkit.messageHandlers && w.webkit.messageHandlers.bridge));
     return { platform, hasBridge };
   } catch { return { platform: 'error', hasBridge: false }; }
 }
@@ -269,11 +290,17 @@ export async function pendingCount() {
    "Dawam is running" entry, and battery implications). Short of that, the
    strongest available approach is what we do here: post it sticky, keep the
    last text cached, and re-post on every resume and on every tap so a
-   dismissal heals the moment the app is touched. */
+   dismissal heals the moment the app is touched.
+
+   Android only. iOS has no ongoing notifications: a card posted there is an
+   ordinary banner, and one that re-posts on every resume and every change of
+   Now would be an alert each time the iPad is picked up. Nothing is posted on
+   iOS rather than that. */
 let lastOngoing = null;
 
 export async function setOngoing(text) {
   lastOngoing = text || null;   // cache for repostOngoing()
+  if (onIOS()) return;
   const ln = get();
   if (!ln) return;
   await ensureChannels(ln);
@@ -304,7 +331,7 @@ export async function repostOngoing() {
    thing that makes it disappear. Registered once. */
 let tapHooked = false;
 export function hookOngoingPersistence() {
-  if (tapHooked) return;
+  if (tapHooked || onIOS()) return;
   const ln = get();
   if (!ln || typeof ln.addListener !== 'function') return;
   tapHooked = true;
