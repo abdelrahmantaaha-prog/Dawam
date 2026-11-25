@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Plus, X, Check, Play, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Coins, AlarmClock, Rows3, Mic, Square, ListChecks, CalendarRange, Gift, Timer, Ban } from 'lucide-react';
-import {brokerFrom, taskDuration,blockForTime,taskUntil,spanLength,spanCovers,focusTargetMin,focusSpent,focusMet,addFocusMinutes,hasVault,vaultUnlocked,pushToToday,slotPassed,structureDay,taskTextSig,POINTS,goalWorth,goalCrossed,autoWorth,taskWorth,subtaskWorth,latePay,habitLevel,habitMultiplier,habitWorth,hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
-import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable, setSaveHook, onStorageHealth, writesFailing, storageStats, storageHeadroom, recheckWrites } from './storage.js';
+import { Plus, X, Play, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Clock, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, Languages, ChevronDown, Flame, Lock, Coins, AlarmClock, Rows3, Mic, Square, CalendarRange, Gift, Timer } from 'lucide-react';
+import { brokerFrom, taskDuration, blockForTime, taskUntil, spanLength, focusTargetMin, focusSpent, focusMet, addFocusMinutes, hasVault, vaultUnlocked, pushToToday, slotPassed, structureDay, taskTextSig, POINTS, goalWorth, goalCrossed, taskWorth, subtaskWorth, latePay, habitWorth, hashPin, APP_VERSION, BLOCKS, CAIRO, DEFAULT_SETTINGS, DEFAULT_TIMINGS, LABEL_SWATCHES, LANG, PRAYER_BLOCKS, activeBlockAt, addDays, bHint, bName, bSub, blockById, cleanTime, computePrayerTimes, fmtISO, fmtTime, glowLevel, habitDoneOn, habitStreak, inWindow, isRTL, migrateSettings, minutesOf, mkSubs, mm2, mon, newHabit, newProject, pad, parseISO, parseRange, projectPace, projectProgress, rgbaStr, sameDay, setLang, setTime24, skyAt, startOfWeek, tx, tEndMin, tStartMin, timeLabel, timeOrder, uid, vBlock, wd, wdFull, windowBounds } from './core.jsx';
+import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, setSaveHook, onStorageHealth, writesFailing, storageStats, storageHeadroom, recheckWrites } from './storage.js';
 import { isDerived } from '../shared/model.js';
 import { useSync, markDirty, markDeleted, apiBase, linkWithToken, mintPhoneCode, deviceToken, inAppShell } from './sync.js';
 import { readLedger, balanceOf, award, revoke, spend, penalise, wipe } from './points.js';
@@ -9,7 +9,7 @@ import { backupKind, backupWhere, dailyName, listBackups, openBackupFolder, preR
 import { takeWidgetAction, updateWidget } from './widget.js';
 import { writeNowFile } from './nowfile.js';
 import { isNative as nativeShell, ensurePermission, permissionState, pendingCount, platformInfo, testNotification, syncReminders, setOngoing, repostOngoing, hookOngoingPersistence, scheduleWakeAlarm, cancelWakeAlarm, pendingWakeAlarm } from './notify.js';
-import { ASSISTANT_SYSTEM, ESTIMATOR_SYSTEM, buildDaySnapshot, describeProposal, parseAssistantReply, parseEstimates, callAssistant, seriesDates, validateProposal } from './assistant.js';
+import { ESTIMATOR_SYSTEM, buildDaySnapshot, describeProposal, parseEstimates, callAssistant, seriesDates, validateProposal } from './assistant.js';
 import { useDictation } from './dictation.js';
 import TeraView from './teraview.jsx';
 import { TERA_TOOL_SYSTEM, TERA_TOOL_ASKING, POPUP_BATCH_SYSTEM, popupBatchPrompt, parsePopupBatch, teraSettings, buildBrief, briefAppointments, commandToActions, detectLang, loadChat, saveChat, historyFor, LANG_KEY } from './tera.js';
@@ -39,15 +39,15 @@ import { addProjectFocus } from './projectfocus.js';
 import { allNoteTags, loadNotes, saveNote, deleteNote, newNote, notesForTask, notesForEvent, isEmptyNote, fileDrop, excerpt as noteExcerpt } from './notes.js';
 import { MeetingSheet } from './meetingsheet.jsx';
 import { nextMark, TINY, stackGate, isPrayerAnchor, anchorLabel, moveHabit, mergeHabits, dropInMerged, applyHabitOrder } from './habits.js';
-import { dueProjects, dueSittings, paceStatus, sittingStreak, todayQuota, worksOn } from './quota.js';
-import { lockDue, lockEvery, lockOn, minutesToLock } from './nowlock.js';
+import { dueProjects, dueSittings, paceStatus, sittingStreak } from './quota.js';
+import { lockDue, lockEvery } from './nowlock.js';
 import { holdDevice, lockSupported, releaseDevice } from './applock.js';
-import { dueOn as recurDueOn, describeRepeat, isScheduled, normalizeRepeat } from './recur.js';
+import { dueOn as recurDueOn, normalizeRepeat } from './recur.js';
 import { TrelloCards } from './trelloview.jsx';
 import { refreshTrello, readCache as readTrelloCache, dueCards } from './trello.js';
 
-import { SittingLine,AppIcon,BlockRow,PaceStrip,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PointsPanel,PoolEditor,ProjectTag,QuickAdd,QuotaLine,SkyScene,SubtaskEditor,TaskEditor,TokenSuggest,pyramidPath } from './components.jsx';
-import { HabitCard,HabitsView,PinPad,PinScreen,ProjectCard,ProjectsView,SettingsPanel,TemplateEditor,describeOp } from './views.jsx';
+import { SittingLine, AppIcon, BlockRow, PaceStrip, FlameGlyph, HabitLine, PlanSide, PointsPanel, PoolEditor, ProjectTag, QuickAdd, QuotaLine, SkyScene, TaskEditor } from './components.jsx';
+import { HabitsView, PinScreen, ProjectsView, SettingsPanel, TemplateEditor, describeOp } from './views.jsx';
 
 /* The pool rejected this app's token. Said plainly, and pointing at the field
    that is wrong — the failure is indistinguishable from "the AI is broken"

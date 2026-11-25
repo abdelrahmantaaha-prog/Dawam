@@ -1,14 +1,13 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Timer, Plus, X, Check, ChevronLeft, ChevronRight, Settings, Sparkles, Trash2, Link as LinkIcon, Image as ImageIcon, StickyNote, Loader2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, Inbox, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Rows3, Coins } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Timer, Plus, X, Check, Settings, Sparkles, Trash2, CheckCircle2, Circle, AlertCircle, Tag, Clock, GripVertical, LayoutTemplate, CornerUpRight, Copy, Calendar, Target, TrendingUp, Flag, Languages, Repeat, ChevronDown, Flame, Lock, Shield, KeyRound, Delete, Rows3, Coins } from 'lucide-react';
 import { boardSummary, columnsOf } from './board.js';
 import { DAILY, WEEKLY, MONTHLY, normalizeRepeat } from './recur.js';
 import { normalizePlan, paceStatus, sittingsFor, todayQuota, withSittings } from './quota.js';
 import { fmtFocus, projectFocusBetween, projectFocusTotal } from './projectfocus.js';
-import { TINY, habitStats, isPrayerAnchor, stackShape, wouldCycle } from './habits.js';
-import { hashPin,APP_VERSION,BLOCKS,CAIRO,D2R,DEFAULT_LABELS,DEFAULT_SETTINGS,DEFAULT_TIMINGS,LABEL_ICON,LABEL_SWATCHES,LANG,LANGS,MONTHS,MONTHS_AR,PRAYER_BLOCKS,SKY_KEYFRAMES,TIME_24,WEEKDAYS,WEEKDAYS_AR,WEEKDAYS_FULL,WEEKDAYS_FULL_AR,activeBlockAt,addDays,bHint,bName,bSub,blockById,cleanTime,computePrayerTimes,darcsin,darctan2,dsin,firstJsonObject,fixAngle,fixHour,fmtISO,fmtTime,glowLevel,habitDoneOn,habitStreak,inWindow,isRTL,julianDay,lerpArr,lerpN,mdInline,migrateSettings,minutesOf,mkSubs,mm2,mon,newHabit,newProject,pad,parseISO,parseRange,projectPace,projectProgress,renderMarkdown,rgbStr,rgbaStr,sameDay,setLang,setTime24,skyAt,startOfWeek,sunPosition,tx,tEndMin,tStartMin,timeLabel,timeOrder,toHM,uid,vBlock,wd,wdFull,weekdayFullList,windowBounds } from './core.jsx';
-import { rawGet, rawSet, rawDelete, rawList, loadKey, saveKey, storageAvailable } from './storage.js';
+import { habitStats, isPrayerAnchor, stackShape, wouldCycle } from './habits.js';
+import { APP_VERSION, BLOCKS, DEFAULT_TIMINGS, LABEL_SWATCHES, LANG, LANGS, PRAYER_BLOCKS, addDays, bName, bSub, blockById, fmtISO, glowLevel, habitDoneOn, habitStreak, isRTL, mon, parseISO, projectPace, tx, uid, wd, weekdayFullList } from './core.jsx';
 
-import { AppIcon,BlockRow,DurationInput,FlameGlyph,HabitLine,Landscape,NoteBlock,NotesEditor,PlanSide,PoolEditor,SkyScene,SubtaskEditor,TaskEditor,pyramidPath } from './components.jsx';
+import { DurationInput, FlameGlyph, SkyScene } from './components.jsx';
 import { saveJson } from './files.js';
 import { CalendarSettings } from './calview.jsx';
 import { TrelloSettings } from './trelloview.jsx';

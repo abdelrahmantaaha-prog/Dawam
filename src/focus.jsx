@@ -15,7 +15,7 @@
 /* ------------------------------------------------------------------ */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Play, Pause, Square, SkipForward, Timer, ShieldCheck, AlertTriangle, Check, X, Trash2, Save, Settings as SettingsIcon, Flame, Eye, Plus, RefreshCw, Globe, AppWindow, FolderOpen } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Play, Pause, Square, SkipForward, Timer, ShieldCheck, AlertTriangle, Check, X, Trash2, Save, Settings as SettingsIcon, Flame, Plus, RefreshCw, Globe, AppWindow, FolderOpen } from 'lucide-react';
 import { tx, fmtTime } from './core.jsx';
 import { fmtFocus } from './projectfocus.js';
 import { modeKey } from './focusmode.js';

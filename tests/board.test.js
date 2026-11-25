@@ -5,7 +5,7 @@
    pinned here rather than left to be noticed. */
 import { describe, it, expect } from 'vitest';
 import {
-  DONE_COL, defaultColumns, columnsOf, toStored, newColumn,
+  DONE_COL, columnsOf, toStored, newColumn,
   columnOf, patchFor, isMove, groupByColumn, boardSummary,
 } from '../src/board.js';
 

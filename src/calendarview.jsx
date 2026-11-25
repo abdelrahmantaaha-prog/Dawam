@@ -14,7 +14,7 @@
 import React, { useMemo, useRef, useEffect } from 'react';
 import { ChevronLeft, ChevronRight, Target, X } from 'lucide-react';
 import {
-  addDays, fmtISO, fmtTime, mon, pad, sameDay, tx, wd, wdFull,
+  fmtISO, fmtTime, mon, pad, sameDay, tx, wd, wdFull,
   minutesOf, tStartMin, tEndMin,
 } from './core.jsx';
 import { MODES, layoutDay, monthGrid, rangeOf, step, taskToSpan, weekDates } from './calgrid.js';
