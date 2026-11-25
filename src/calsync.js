@@ -199,7 +199,3 @@ export function eventsOn(instances, date) {
     .filter((e) => e.endMs > dayStart && e.startMs < dayEnd)
     .sort((a, b) => (a.allDay === b.allDay ? a.startMs - b.startMs : a.allDay ? -1 : 1));
 }
-
-export async function dropCache(feedId) {
-  await saveKey(cacheKey(feedId), { fetchedAt: 0, instances: [] });
-}

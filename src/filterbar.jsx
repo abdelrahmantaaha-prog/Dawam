@@ -96,5 +96,3 @@ export function FilterBar({ filter, onChange, labels = [], projects = [], sorts 
     </div>
   );
 }
-
-export default FilterBar;

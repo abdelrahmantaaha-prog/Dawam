@@ -18,7 +18,7 @@ import {
   ArrowLeft, Bold, Check, Hash, Heading, Italic, Layers, Link as LinkIcon, List, ListOrdered,
   Pin, Plus, Search, StickyNote, Trash2, Underline, X,
 } from 'lucide-react';
-import { NOTE_COLOURS, addTags, allNoteTags, excerpt, groupByTag, hasTag, isEmptyNote, noteTags, removeTag, sanitise, tagKey } from './notes.js';
+import { NOTE_COLOURS, addTags, allNoteTags, excerpt, groupByTag, hasTag, noteTags, removeTag, sanitise, tagKey } from './notes.js';
 import { tx } from './core.jsx';
 import { applySort } from './filters.js';
 
@@ -301,5 +301,3 @@ export function NotesView({ notes, sky, stars, heroLight, SkyScene, filterBar, s
     </div>
   );
 }
-
-export { isEmptyNote };

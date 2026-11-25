@@ -77,5 +77,3 @@ export function MeetingSheet({
     </div>
   );
 }
-
-export default MeetingSheet;

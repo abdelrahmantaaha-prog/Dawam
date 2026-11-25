@@ -17,7 +17,7 @@
 /*  of this is optional, order does not matter, and plain prose parses  */
 /*  as a plain title.                                                   */
 /* ------------------------------------------------------------------ */
-import { BLOCKS, addDays, fmtISO, pad, parseISO } from './core.jsx';
+import { addDays, fmtISO, pad, parseISO } from './core.jsx';
 
 /* Arabic-Indic digits, because a phone keyboard set to Arabic produces them
    and "٣ عصر" should mean the same as "3 asr". */
@@ -322,8 +322,6 @@ export function describeParse(p, { blockName } = {}) {
   for (const t of p.labelNames) bits.push(`#${t}`);
   return bits.join(' · ');
 }
-
-export const BLOCK_IDS = BLOCKS.map((b) => b.id);
 
 /* ------------------------------------------------------------------ */
 /*  Finishing the token you are typing.                                */

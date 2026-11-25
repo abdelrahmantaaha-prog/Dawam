@@ -25,7 +25,6 @@ export const teraSync = (brief) => guard(() => Tera.sync({ brief }));
 export const teraReportDone = (at = Date.now()) => guard(() => Tera.reportDone({ at }));
 export const teraTakeCommands = async () => (await guard(() => Tera.takeCommands(), { commands: [] }))?.commands || [];
 export const teraTestPopup = (kind = 'nag') => guard(() => Tera.testPopup({ kind }));
-export const teraHideHead = () => guard(() => Tera.hideHead());
 export const teraOpenOverlaySettings = () => guard(() => Tera.openOverlaySettings());
 export const teraOpenExactAlarmSettings = () => guard(() => Tera.openExactAlarmSettings());
 

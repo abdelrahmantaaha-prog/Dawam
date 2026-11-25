@@ -35,7 +35,6 @@ const isoOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDat
    so leaving the app open all day still costs one slot, holding the latest. */
 export const dailyName = (d = new Date()) => `${DAY_PREFIX}${isoOf(d)}.json`;
 export const preRestoreName = (d = new Date()) => `${PRE_PREFIX}${isoOf(d)}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.json`;
-export const isDaily = (name) => String(name).startsWith(DAY_PREFIX);
 
 /* ---- which backend ---- */
 const desktopBridge = () => {
@@ -149,12 +148,6 @@ async function prune() {
   const all = await listBackups();
   const drop = all.slice(KEEP);
   for (const b of drop) { try { await backend().remove(b.name); } catch { /* next time */ } }
-}
-
-/* Has today's snapshot been taken? */
-export async function hasDailyFor(d = new Date()) {
-  const want = dailyName(d);
-  return (await listBackups()).some((b) => b.name === want);
 }
 
 /* Where they are, in words a person can act on. */

@@ -343,5 +343,3 @@ function AssignSheet({ ev, projects, current, onAssign, onClose }) {
     </div>
   );
 }
-
-export default CalendarView;

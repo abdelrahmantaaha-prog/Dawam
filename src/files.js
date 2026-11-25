@@ -36,8 +36,6 @@ function plugin(name, fallback) {
   return fallback;
 }
 
-export const canShareFiles = () => nativeNow();
-
 /* Save `text` as `filename`. Returns a short status string for the UI:
    'downloaded' | 'shared' | 'saved:<path>' | 'error: …' */
 export async function saveJson(filename, text) {

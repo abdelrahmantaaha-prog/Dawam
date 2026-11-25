@@ -76,6 +76,3 @@ export async function writeNowFile(payload) {
     console.warn('now.json write failed', e);
   }
 }
-
-/* Where to point Bawwab, for the settings screen to show. */
-export const NOW_FILE_LOCATION = `Documents/${FOLDER}/${FILE}`;
