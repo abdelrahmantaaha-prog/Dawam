@@ -140,3 +140,7 @@ lock, the sync merge, Android sync, Tera's tools, and notes for contributors.
 Dawam was called Rhythm until version 3.11. Storage keys, the `rhythm://`
 scheme, the Android package `app.rhythm.planner` and a few other identifiers
 keep the old name on purpose, so existing installs keep their data.
+
+## License
+
+[MIT](LICENSE): free to use, copy, change and redistribute, including commercially.
