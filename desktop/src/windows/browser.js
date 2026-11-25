@@ -1,10 +1,8 @@
 const b = window.rhythmFocus.browser;
 const $ = (id) => document.getElementById(id);
 const address = $('address');
-let tabs = [];
 
 function renderTabs(list) {
-  tabs = list;
   const nodes = list.map((t) => {
     const el = document.createElement('div');
     el.className = `tab${t.active ? ' on' : ''}${t.loading ? ' loading' : ''}`;

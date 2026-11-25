@@ -138,7 +138,6 @@ if (!app.requestSingleInstanceLock()) {
   let presenceWin = null;
   let awayWins = [];
   let lockWins = [];
-  let lockTimer = null;
   let lastPresentAt = Date.now();
   let awaySuppressed = false; // manual dismiss holds until the camera sees a face again
   let awayPaused = false; // we paused the session because the chair emptied

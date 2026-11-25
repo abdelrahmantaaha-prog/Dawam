@@ -129,8 +129,6 @@ export default function Dawam() {
   const [ledger, setLedger] = useState([]);
   const ledgerRef = useRef([]);
   const [showPoints, setShowPoints] = useState(false);
-  const [poolOpen, setPoolOpen] = useState(true);
-  const [templatesOpen, setTemplatesOpen] = useState(true);
   const [dumpOpen, setDumpOpen] = useState(true);
   const [wizard, setWizard] = useState(null); // { items:[{kind,id}], idx }
   const [focus, setFocus] = useState(null); // { title, endsAt }
@@ -233,7 +231,6 @@ export default function Dawam() {
   const weeksRef = useRef({});   // session cache: weekISO -> weekObj
   const stars = useMemo(() => Array.from({ length: 40 }, () => ({ x: Math.random() * 100, y: Math.random() * 92, base: 0.35 + Math.random() * 0.55, tw: 2.5 + Math.random() * 3.5, dl: Math.random() * 4 })), []);
   const birds = useMemo(() => Array.from({ length: 11 }, () => ({ x: 4 + Math.random() * 90, y: 4 + Math.random() * 66, scale: 0.6 + Math.random() * 0.7, dl: Math.random() * 5 })), []);
-  const weekKey = `planner:week:${fmtISO(weekStart)}`;
   const bumpRefresh = () => setRefresh((n) => n + 1);
   /* ---- which week is on screen, and which week the loaded document IS ----
 
@@ -1210,7 +1207,6 @@ export default function Dawam() {
     // lock only a big task can clear is a lock that gets solved by force-quit.
     if (sub && !sub.done) { marked(); awardSubDone(t, subId, dateOfTask(t)); } else revokeRef(`sub:${id}:${subId}`);
   };
-  const moveTaskToBlock = (id, block) => mutateTask(id, (t) => ({ ...t, block }));
   // Drag-to-reorder: drop the task into `blockId` right before/after `targetId`
   // (or at the block's end when targetId is null), then renumber 1..n so the
   // manual order is stable. This exact order drives the one-at-a-time Now queue.
@@ -1274,7 +1270,6 @@ export default function Dawam() {
     flash(gone === 1 ? tx('Deleted.', 'حُذفت.') : `${gone} ${tx('deleted.', 'حُذفت.')}`);
   };
   const removePoolItem = (id) => { persistPool(poolRef.current.filter((p) => p.id !== id)); setEditingPool(null); };
-  const togglePoolSub = (id, subId) => mutatePoolItem(id, (p) => ({ ...p, subtasks: p.subtasks.map((s) => (s.id === subId ? { ...s, done: !s.done } : s)) }));
 
   // Move a scheduled task into the backlog (unschedule).
   const taskToPool = (id) => {
@@ -1765,10 +1760,6 @@ export default function Dawam() {
       ? tx('Moved to today.', 'تم النقل لليوم.')
       : tx(`${added.length} tasks moved to today.`, `تم نقل ${added.length} مهام لليوم.`));
   };
-  const jumpToTask = (item) => {
-    const ws = startOfWeek(item.date, settings.weekStartDay);
-    setWeekStart(ws); setSelectedDay(Math.round((item.date - ws) / 86400000)); setView('plan');
-  };
   // Open the editor for an overdue task, loading its week first if needed.
   const editOverdue = (item) => {
     const ws = startOfWeek(item.date, settings.weekStartDay);
@@ -1821,7 +1812,7 @@ export default function Dawam() {
     if (untilEnd) {
       const endMin = tEndMin(task);
       if (endMin != null) {
-        const d = new Date(); const target = new Date(); target.setHours(0, 0, 0, 0);
+        const target = new Date(); target.setHours(0, 0, 0, 0);
         target.setMinutes(endMin); let ms = target.getTime();
         if (ms <= now) ms += 86400000; // end already passed today -> treat as overnight
         endsAt = ms;
